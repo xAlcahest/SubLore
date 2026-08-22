@@ -1724,6 +1724,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "libmpv2"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f3d44c1c29b866d44453249d1d8b2822d891fdabd08359a5b85bb6944445e70"
+dependencies = [
+ "libmpv2-sys",
+]
+
+[[package]]
+name = "libmpv2-sys"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edb32cabe7176b7d270b0dca6ff418b75187ae8d3854423e3d06fbff376841e4"
+
+[[package]]
 name = "libredox"
 version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2910,8 +2925,14 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 name = "sublore"
 version = "0.1.0"
 dependencies = [
+ "gdkx11",
+ "gtk",
+ "libc",
+ "libmpv2",
+ "serde",
  "tauri",
  "tauri-build",
+ "windows",
 ]
 
 [[package]]
