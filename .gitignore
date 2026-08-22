@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+target/
+
+# Tauri generated files
+src-tauri/gen/schemas/
+
+# Agent workspace
+.omc/
+
+# Logs and editor noise
+*.log
+.idea/
+.DS_Store
+*.swp

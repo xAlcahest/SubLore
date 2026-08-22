@@ -1,0 +1,2 @@
+# POSIX hooks stay LF so Windows clones with core.autocrlf=true can run them. See BACKLOG.md M0.1.
+.githooks/** text eol=lf
