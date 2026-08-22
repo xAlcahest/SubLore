@@ -45,6 +45,22 @@ sudo dnf install webkit2gtk4.1-devel \
 sudo dnf group install "c-development"
 ```
 
+### libmpv
+
+Video playback is libmpv, embedded. It must be present at build time and at run time.
+
+- Debian and Ubuntu: `sudo apt install libmpv-dev`
+- Fedora: `sudo dnf install mpv-libs-devel`
+- Windows: there is no package. Download a `mpv-dev-x86_64-*.7z` build from [mpv-winbuild-cmake releases](https://github.com/shinchiro/mpv-winbuild-cmake/releases), generate `mpv.lib` from `libmpv-2.dll` with `dumpbin`/`lib`, and point `LIBMPV_LIB_DIR` at the folder holding it. `.github/workflows/ci.yml` does exactly this and is the reference. `libmpv-2.dll` must also be on `PATH` when the app or the tests run; packaging it next to the executable comes with M0.3.
+
+Sublore runs on X11. On a Wayland desktop it uses XWayland, because libmpv embeds into an X11 window id.
+
+Video tests need `fixtures/video/sample.mkv`, which is generated, not committed:
+
+```sh
+sh fixtures/video/make-sample.sh   # needs ffmpeg
+```
+
 ### Windows
 
 Install the Microsoft C++ Build Tools with the "Desktop development with C++" workload. WebView2 ships with Windows 10 1803 and later; on older systems install the WebView2 Evergreen Runtime.
@@ -69,6 +85,7 @@ pnpm build
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build
+cargo test --workspace
 ```
 
 ## Git hooks

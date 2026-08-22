@@ -16,3 +16,6 @@ src-tauri/gen/schemas/
 .idea/
 .DS_Store
 *.swp
+
+# Video fixtures are generated, never committed (fixtures/video/make-sample.sh)
+fixtures/video/*.mkv
