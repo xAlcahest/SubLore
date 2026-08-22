@@ -1,0 +1,24 @@
+#!/bin/sh
+# Sublore pre-commit: canonical format and lint checks. See BACKLOG.md M0.1.
+set -e
+
+fail() {
+	echo "pre-commit: $1" >&2
+	echo "pre-commit: commit aborted." >&2
+	exit 1
+}
+
+repo_root=$(git rev-parse --show-toplevel) || fail "not inside a git work tree"
+cd "$repo_root" || fail "cannot enter repo root '$repo_root'"
+
+command -v pnpm >/dev/null 2>&1 || fail "pnpm not found in PATH (see README.md)"
+command -v cargo >/dev/null 2>&1 || fail "cargo not found in PATH (see README.md)"
+
+check() {
+	echo "pre-commit: $*"
+	"$@" || fail "'$*' failed"
+}
+
+check pnpm format:check
+check pnpm lint
+check cargo fmt --check

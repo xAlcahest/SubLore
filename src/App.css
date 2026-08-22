@@ -1,0 +1,41 @@
+:root {
+  color-scheme: light dark;
+  --app-bg: #f6f6f6;
+  --app-fg: #1c1c1e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --app-bg: #16161a;
+    --app-fg: #f0f0f2;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  background: var(--app-bg);
+  color: var(--app-fg);
+}
+
+.app {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.app__name {
+  margin: 0;
+  font-size: 2.5rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
