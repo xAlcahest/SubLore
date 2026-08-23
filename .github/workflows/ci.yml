@@ -120,3 +120,69 @@ jobs:
 
       - name: Test Rust
         run: cargo test --workspace
+
+  e2e:
+    name: e2e smoke (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The `check` job's Tauri/libmpv list, plus what driving a real window under Xvfb needs.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            ffmpeg \
+            file \
+            libayatana-appindicator3-dev \
+            libgl1-mesa-dri \
+            libmpv-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            python3-xlib \
+            webkit2gtk-driver \
+            wget \
+            x11-utils \
+            xdotool \
+            xvfb
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --version 2.0.6 --locked
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The harness never builds implicitly; both prerequisites are made here, explicitly.
+      - name: Generate video fixture
+        run: sh fixtures/video/make-sample.sh
+
+      - name: Build the app
+        run: pnpm e2e:build
+
+      # The screen is sized explicitly: a root window smaller than the 1024x700 app window fails the
+      # fixture, and the xvfb-run default differs per distribution.
+      - name: Smoke test (window title, video surface)
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e
+
+      - name: Shutdown test (clean exit, no survivors)
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:shutdown
