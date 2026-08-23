@@ -10,7 +10,10 @@
     "tauri": "tauri",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "e2e": "wdio run e2e/wdio.conf.js",
+    "e2e:build": "tauri build --debug --no-bundle",
+    "e2e:shutdown": "node e2e/scripts/shutdown-check.js"
   },
   "pnpm": {
     "onlyBuiltDependencies": [],
@@ -30,6 +33,11 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "@wdio/cli": "^9.31.2",
+    "@wdio/globals": "^9.31.1",
+    "@wdio/local-runner": "^9.31.2",
+    "@wdio/mocha-framework": "^9.31.2",
+    "@wdio/spec-reporter": "^9.31.2",
     "eslint": "^9.39.0",
     "prettier": "^3.6.2",
     "typescript": "~5.8.3",
