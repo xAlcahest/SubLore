@@ -140,6 +140,7 @@ impl Shared {
     }
 
     fn emit_error(&self, error: &VideoError) {
+        crate::log::error!("player error {:?}: {}", error.code, error.detail);
         if let Some(app) = &self.app {
             let _ = app.emit(EVENT_ERROR, error.clone());
         }

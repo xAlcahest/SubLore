@@ -15,6 +15,13 @@ path = "src/lib.rs"
 name = "sublore"
 path = "src/main.rs"
 
+# libtest runs every #[test] on a thread it spawns, so the main-thread crash path needs a target
+# without a harness: there, `main` really is the process main thread.
+[[test]]
+name = "crash_main_thread"
+path = "tests/crash_main_thread.rs"
+harness = false
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -23,6 +30,8 @@ libc = "0.2"
 libmpv2 = { version = "6.0.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
 
 [dev-dependencies]
 libc = "0.2"

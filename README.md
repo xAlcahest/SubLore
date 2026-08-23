@@ -74,6 +74,24 @@ pnpm install
 pnpm tauri dev
 ```
 
+## Logs and crash reports
+
+Sublore writes a log file, and a crash report if it ever crashes. Both stay on your machine: nothing is sent anywhere.
+
+- Linux: `~/.local/share/com.sublore.app/logs/`
+- Windows: `%LOCALAPPDATA%\com.sublore.app\logs\`
+
+The log is `sublore.log`, capped at 2 MB with two older files kept beside it. A crash appends to `crash.log` in the same folder, so earlier crashes are not lost, and moves it to `crash.log.1` once it passes 256 KB. If Sublore crashes before it has resolved that folder, the report goes to `sublore-crash.log` in the system temp directory instead.
+
+Release builds write to the log file only. Debug builds also print to the console.
+
+Development builds can be made to crash on purpose, to check that path: set `SUBLORE_FORCE_PANIC` to `startup`, `open` or `main-thread` before launching. The variable is read only in debug builds (`cargo build`, `cargo test`, `tauri build --debug`); release binaries contain no trigger.
+
+## Known limitations
+
+- A panic on the main thread (startup, or the window event loop) writes the crash report and exits, but cannot show the crash dialog: the thread that would have to draw it is the one that failed.
+- An external client that destroys the window with `XDestroyWindow` (`xkill`, `xdotool windowclose`) crashes the app inside GTK's teardown. Closing normally, including the window manager's close button, is clean. This is accepted rather than handled: catching it would need a SIGSEGV handler, and Sublore writes no user data at this stage, so nothing is lost. See BACKLOG.md M0.4.
+
 ## Checks
 
 The same commands CI runs:
