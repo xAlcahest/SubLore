@@ -13,6 +13,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 
+use crate::crash::force::{trip, ForcePoint};
 use error::VideoError;
 use player::{Player, PlayerConfig, VideoOpened};
 use surface::{SurfaceRegion, VideoSurface};
@@ -93,10 +94,18 @@ pub async fn video_open(
     state: State<'_, VideoState>,
     path: String,
 ) -> Result<VideoOpened, VideoError> {
+    // Debug builds only: the worker-thread crash path the M0.4 acceptance criteria exercise.
+    trip(ForcePoint::Open);
+
     let player = state.player();
     // mpv builds its own window inside the surface during the load and leaves it unmapped if the
     // surface is hidden, so the surface has to be visible first. See BACKLOG.md M0.2.
-    on_main_thread(&app, || with_surface(|surface| surface.show())).await?;
+    on_main_thread(&app, || {
+        // Debug builds only: the main-thread crash path, where no dialog can appear. See M0.4.
+        trip(ForcePoint::MainThread);
+        with_surface(|surface| surface.show())
+    })
+    .await?;
 
     // `open` blocks until mpv reports a verdict, so it never runs on the async runtime's poll.
     let opened = tauri::async_runtime::spawn_blocking(move || player.open(&path))
