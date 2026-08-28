@@ -4,3 +4,7 @@
 # Subtitle fixtures are byte-exact test data: BOMs and line endings are the thing under test.
 # Without this, a Windows clone with core.autocrlf=true rewrites every one of them. See BACKLOG.md M1.1.
 fixtures/subtitles/** -text
+
+# Golden schema and seed dumps are compared as text: a Windows clone with core.autocrlf=true
+# must not rewrite them. See BACKLOG.md M4.1.
+fixtures/projects/** text eol=lf
