@@ -1,0 +1,20 @@
+{
+  "audio_duration_ms": 8000,
+  "words": [
+    { "text": "The", "start_ms": 100, "end_ms": 400 },
+    { "text": "translator", "start_ms": 500, "end_ms": 800 },
+    { "text": "opens", "start_ms": 900, "end_ms": 1200 },
+    { "text": "a", "start_ms": 1300, "end_ms": 1600 },
+    { "text": "subtitle", "start_ms": 1700, "end_ms": 2000 },
+    { "text": "file", "start_ms": 2100, "end_ms": 2400 },
+    { "text": "and", "start_ms": 2500, "end_ms": 2800 },
+    { "text": "the", "start_ms": 2900, "end_ms": 3200 },
+    { "text": "memory", "start_ms": 3300, "end_ms": 3600 },
+    { "text": "follows", "start_ms": 3700, "end_ms": 4000 },
+    { "text": "across", "start_ms": 4100, "end_ms": 4400 },
+    { "text": "every", "start_ms": 4500, "end_ms": 4800 },
+    { "text": "single", "start_ms": 4900, "end_ms": 5200 },
+    { "text": "episode", "start_ms": 5300, "end_ms": 5600 },
+    { "text": "forever.", "start_ms": 5700, "end_ms": 6000 }
+  ]
+}

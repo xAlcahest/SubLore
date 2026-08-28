@@ -1,0 +1,17 @@
+{
+  "audio_duration_ms": 12000,
+  "words": [
+    { "text": "one", "start_ms": 0, "end_ms": 900 },
+    { "text": "two", "start_ms": 1000, "end_ms": 1900 },
+    { "text": "three", "start_ms": 2000, "end_ms": 2900 },
+    { "text": "four", "start_ms": 3000, "end_ms": 3900 },
+    { "text": "five", "start_ms": 4000, "end_ms": 4900 },
+    { "text": "six", "start_ms": 5000, "end_ms": 5900 },
+    { "text": "seven", "start_ms": 6000, "end_ms": 6900 },
+    { "text": "eight", "start_ms": 7000, "end_ms": 7900 },
+    { "text": "nine", "start_ms": 8000, "end_ms": 8900 },
+    { "text": "ten", "start_ms": 9000, "end_ms": 9900 },
+    { "text": "eleven", "start_ms": 10000, "end_ms": 10900 },
+    { "text": "twelve.", "start_ms": 11000, "end_ms": 11900 }
+  ]
+}

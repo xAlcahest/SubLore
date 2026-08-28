@@ -1,0 +1,7 @@
+{
+  "audio_duration_ms": 5000,
+  "words": [
+    { "text": "Hello", "start_ms": 200, "end_ms": 600 },
+    { "text": "there.", "start_ms": 650, "end_ms": 1100 }
+  ]
+}

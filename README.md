@@ -6,7 +6,7 @@ Early development. Nothing is released yet, and the app does not do much so far.
 
 Sublore works offline. It does not phone home, has no accounts, and collects no telemetry.
 
-Local transcription is planned through whisper.cpp. Transcription accuracy is Whisper's, and we say so; what Sublore adds is consistency across episodes.
+Local transcription runs whisper.cpp as a separate process, on your machine. Transcription accuracy is Whisper's, and we say so; what Sublore adds is consistency across episodes.
 
 ## Prerequisites
 
@@ -86,6 +86,45 @@ The file you open is never written to. "Save as" writes the copy atomically: a t
 Ten backups are kept per file. Nothing else deletes them; removing them is your call.
 
 Sublore reads UTF-8 only. A file it cannot decode, or cannot parse, is refused with the line number and the reason, and is never rewritten.
+
+## Transcription
+
+Sublore transcribes the audio of the video you have open, using whisper.cpp as a separate process.
+Choose a model, press Transcribe, watch the progress, and stop it whenever you like. The cues it
+produces are listed under the bar; editing them is not built yet.
+
+Two things have to be on the machine before it will run:
+
+- **ffmpeg**, at run time. Sublore uses it to read the audio out of your video.
+- **The whisper.cpp sidecar.** It is not committed, and nothing downloads it for you:
+
+  ```sh
+  sh scripts/build-whisper.sh              # both binaries: Vulkan and CPU-only
+  sh scripts/build-whisper.sh --cpu-only   # skip the Vulkan build
+  ```
+
+  Everything lands in `.whisper/`, which is git-ignored. The Vulkan build additionally needs
+  `glslc` and the Vulkan headers (Fedora: `glslc`, `vulkan-headers`, `spirv-headers-devel`;
+  Debian and Ubuntu: `glslang-tools`, `libvulkan-dev`, `spirv-headers`). CUDA is never used.
+
+"Use GPU when available" runs the Vulkan binary. Without one, or when a GPU run fails, Sublore runs
+the CPU binary instead and says on screen that it did. The CPU path always works.
+
+Models are yours to fetch, and nothing is fetched until you press Download: Sublore opens no network
+connection of any other kind. A download is checked against a known size and SHA-256 when it
+finishes, and is only then given its real name, so a file that fails its checksum is never handed to
+whisper; an interrupted one resumes where it stopped. Before each run the model is checked again,
+its size and its SHA-256 both, which is what catches a file damaged after it arrived: whisper loads a
+corrupted model without complaining and transcribes nonsense from it, so Sublore refuses the run and
+says so instead. Downloading that model again replaces the damaged file. Models live beside the rest of Sublore's
+data:
+
+- Linux: `~/.local/share/com.sublore.app/models/`
+- Windows: `%APPDATA%\com.sublore.app\models\`
+
+Your video and audio files are only ever read. The audio Sublore extracts goes into a scratch folder
+inside its own data directory and is deleted when the run ends, whether it finished or you stopped
+it. Cancelling kills the transcription process; closing Sublore mid-run does too.
 
 ## Logs and crash reports
 

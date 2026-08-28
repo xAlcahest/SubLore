@@ -1,0 +1,10 @@
+{
+  "audio_duration_ms": 5000,
+  "words": [
+    {
+      "text": "Pneumonoultramicroscopicsilicovolcanoconiosisandbeyondtheend",
+      "start_ms": 1000,
+      "end_ms": 3000
+    }
+  ]
+}

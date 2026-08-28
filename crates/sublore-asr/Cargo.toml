@@ -1,0 +1,24 @@
+[package]
+name = "sublore-asr"
+version = "0.1.0"
+description = "whisper.cpp sidecar: transcription runs, model management, cue generation"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[features]
+# Tests that need a real whisper binary and a real model. Off by default, so on a machine without
+# them there is no test to skip: there is no test at all. See BACKLOG.md M3.1.
+real-asr = []
+
+[dependencies]
+# whisper writes its transcript as JSON and we have to read it. Already compiled into the app
+# through tauri today, so this costs nothing new.
+serde_json = "1"
+# sha256 for the model catalog. RustCrypto, MIT/Apache-2.0.
+sha2 = "0.10"
+sublore-formats = { path = "../sublore-formats" }
+sublore-io = { path = "../sublore-io" }
+# The only HTTP client, used by exactly one function. MIT/Apache-2.0, blocking, no runtime.
+# Compression is off on purpose: a transparently decompressed body would break byte-offset resume.
+ureq = { version = "3", default-features = false, features = ["rustls"] }

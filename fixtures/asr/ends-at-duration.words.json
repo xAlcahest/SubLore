@@ -1,0 +1,7 @@
+{
+  "audio_duration_ms": 2500,
+  "words": [
+    { "text": "Right", "start_ms": 1800, "end_ms": 2100 },
+    { "text": "here.", "start_ms": 2150, "end_ms": 2500 }
+  ]
+}

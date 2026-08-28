@@ -1,0 +1,20 @@
+{
+  "audio_duration_ms": 7000,
+  "words": [
+    { "text": "字幕", "start_ms": 0, "end_ms": 300 },
+    { "text": "翻译", "start_ms": 400, "end_ms": 700 },
+    { "text": "记忆", "start_ms": 800, "end_ms": 1100 },
+    { "text": "术语", "start_ms": 1200, "end_ms": 1500 },
+    { "text": "一致", "start_ms": 1600, "end_ms": 1900 },
+    { "text": "保持", "start_ms": 2000, "end_ms": 2300 },
+    { "text": "整个", "start_ms": 2400, "end_ms": 2700 },
+    { "text": "剧集", "start_ms": 2800, "end_ms": 3100 },
+    { "text": "之中", "start_ms": 3200, "end_ms": 3500 },
+    { "text": "每个", "start_ms": 3600, "end_ms": 3900 },
+    { "text": "场景", "start_ms": 4000, "end_ms": 4300 },
+    { "text": "时间", "start_ms": 4400, "end_ms": 4700 },
+    { "text": "轴线", "start_ms": 4800, "end_ms": 5100 },
+    { "text": "校对", "start_ms": 5200, "end_ms": 5500 },
+    { "text": "完成", "start_ms": 5600, "end_ms": 5900 }
+  ]
+}
