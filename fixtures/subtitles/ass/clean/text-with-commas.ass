@@ -1,0 +1,8 @@
+[Script Info]
+Title: Packing list
+ScriptType: v4.00+
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:11.00,0:00:14.20,Default,,0,0,0,,Bring the rope, the lamp, and the spare battery,\Nand do not, under any circumstance,\hforget the map.
+Dialogue: 0,0:00:14.30,0:00:16.90,Default,,0,0,0,,Rope, lamp, battery, map.

@@ -29,6 +29,8 @@ tauri-build = { version = "2", features = [] }
 libc = "0.2"
 libmpv2 = { version = "6.0.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
+sublore-formats = { path = "../crates/sublore-formats" }
+sublore-io = { path = "../crates/sublore-io" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"

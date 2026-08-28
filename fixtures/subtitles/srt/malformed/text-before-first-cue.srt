@@ -1,0 +1,5 @@
+Ripped by SomeTool 1.4 - www.example.invalid
+
+1
+00:00:01,000 --> 00:00:03,000
+The real content starts here.

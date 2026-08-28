@@ -1,0 +1,31 @@
+WEBVTT
+
+NOTE
+Timings checked against the broadcast master.
+Do not renumber: the ids match the client's spreadsheet.
+
+STYLE
+::cue {
+  background-color: rgba(0, 0, 0, 0.75);
+  color: #f0f0f0;
+}
+::cue(v[voice="Nadia"]) {
+  color: #ffd400;
+}
+
+REGION
+id:top-bar
+width:80%
+lines:2
+regionanchor:0%,100%
+viewportanchor:10%,10%
+scroll:up
+
+intro
+00:00:01.000 --> 00:00:04.000 region:top-bar
+The tape starts here.
+
+NOTE the second act is missing from this cut
+
+00:00:04.200 --> 00:00:06.000
+And it ends here.

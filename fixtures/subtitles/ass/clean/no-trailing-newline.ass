@@ -1,0 +1,7 @@
+[Script Info]
+Title: Cut off at the end
+ScriptType: v4.00+
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:41.00,0:00:43.20,Default,,0,0,0,,The file ends right here.

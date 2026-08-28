@@ -1,0 +1,7 @@
+WEBVTT
+
+00:00:01.000 --> 00:00:03.000
+This block is fine.
+
+00:00:03.200 -> 00:00:05.000
+This one uses a single dash arrow.

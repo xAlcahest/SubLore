@@ -1,0 +1,13 @@
+WEBVTT
+
+00:00:01.000 --> 00:00:05.000
+This one hangs around for a while.
+
+00:00:03.000 --> 00:00:04.000
+And this one lands right on top of it.
+
+00:00:04.000 --> 00:00:04.000
+Zero length, straight out of the encoder.
+
+00:00:09.000 --> 00:00:07.000
+End before start, because somebody typed it by hand.

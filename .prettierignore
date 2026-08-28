@@ -5,6 +5,9 @@ pnpm-lock.yaml
 src-tauri/gen/
 src-tauri/icons/
 
+# Byte-exact subtitle test data: a formatter rewriting these would rewrite the tests. See BACKLOG.md M1.1.
+fixtures/subtitles/
+
 # Owner-maintained governance docs: tooling must not rewrite them.
 CLAUDE.md
 WORKFLOW.md

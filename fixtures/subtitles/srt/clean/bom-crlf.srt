@@ -1,0 +1,8 @@
+﻿1
+00:01:12,400 --> 00:01:15,000
+You said the paperwork was done.
+
+2
+00:01:15,200 --> 00:01:18,900
+I said it was filed.
+Nobody ever said it was done.

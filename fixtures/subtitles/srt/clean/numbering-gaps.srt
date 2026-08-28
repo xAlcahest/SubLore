@@ -1,0 +1,23 @@
+1
+00:00:01,000 --> 00:00:02,000
+The numbering in this file is a mess.
+
+2
+00:00:02,100 --> 00:00:03,000
+It came off a scanner.
+
+5
+00:00:03,100 --> 00:00:04,000
+Three and four never existed.
+
+5
+00:00:04,100 --> 00:00:05,000
+Five, again.
+
+4
+00:00:05,100 --> 00:00:06,000
+And now backwards.
+
+0000007
+00:00:06,100 --> 00:00:07,000
+With leading zeros, for good measure.

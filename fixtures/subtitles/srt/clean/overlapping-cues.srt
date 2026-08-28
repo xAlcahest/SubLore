@@ -1,0 +1,23 @@
+1
+00:00:10,000 --> 00:00:14,000
+I need you to listen to the whole thing.
+
+2
+00:00:12,500 --> 00:00:16,000
+This one starts before the last one ends.
+
+3
+00:00:20,000 --> 00:00:22,000
+Two cues, same timing.
+
+4
+00:00:20,000 --> 00:00:22,000
+- Two cues, same timing.
+
+5
+00:00:30,000 --> 00:00:30,000
+Zero length, and a player will skip it.
+
+6
+00:00:40,000 --> 00:00:38,000
+This one ends before it starts.

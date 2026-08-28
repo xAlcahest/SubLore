@@ -1,0 +1,7 @@
+[Script Info]
+Title: Fields declared too late
+ScriptType: v4.00+
+
+[Events]
+Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Too early to know what these fields mean.
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

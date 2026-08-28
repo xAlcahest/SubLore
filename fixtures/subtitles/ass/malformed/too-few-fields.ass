@@ -1,0 +1,7 @@
+[Script Info]
+Title: One comma missing
+ScriptType: v4.00+
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,The effect field ate the text.

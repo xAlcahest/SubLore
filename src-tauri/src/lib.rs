@@ -1,5 +1,6 @@
 pub mod crash;
 pub mod strings;
+pub mod subtitle;
 pub mod video;
 
 /// The `log` facade, re-exported by tauri-plugin-log, so the crate needs no direct dependency on it.
@@ -24,6 +25,8 @@ pub fn run() -> tauri::Result<()> {
         .plugin(log_plugin())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            subtitle::subtitle_open,
+            subtitle::subtitle_save_as,
             video::video_open,
             video::video_play,
             video::video_pause,

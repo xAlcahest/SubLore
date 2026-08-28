@@ -74,6 +74,19 @@ pnpm install
 pnpm tauri dev
 ```
 
+## Subtitle files
+
+Sublore opens SRT, VTT and ASS files, shows the format, the cue count and the line endings, and saves a copy elsewhere. There is no editor yet.
+
+The file you open is never written to. "Save as" writes the copy atomically: a temporary file first, then a rename, so the destination is always either the old file or the new one and never something in between. If the destination already existed, its previous contents are kept as a timestamped backup, inside Sublore's own folder rather than next to your file:
+
+- Linux: `~/.local/share/com.sublore.app/backups/`
+- Windows: `%APPDATA%\com.sublore.app\backups\`
+
+Ten backups are kept per file. Nothing else deletes them; removing them is your call.
+
+Sublore reads UTF-8 only. A file it cannot decode, or cannot parse, is refused with the line number and the reason, and is never rewritten.
+
 ## Logs and crash reports
 
 Sublore writes a log file, and a crash report if it ever crashes. Both stay on your machine: nothing is sent anywhere.

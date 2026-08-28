@@ -1,0 +1,10 @@
+WEBVTT
+
+00:00:01.000 --> 00:00:03.000
+Booked the ferry for Tuesday.
+
+00:00:03.200 --> 00:00:06.400
+This line carries a stray carriage return and keeps going.
+
+00:00:06.600 --> 00:00:08.000
+Back to Windows endings for the last one.
