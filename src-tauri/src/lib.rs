@@ -26,6 +26,16 @@ pub fn run() -> tauri::Result<()> {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             subtitle::subtitle_open,
+            subtitle::subtitle_close,
+            subtitle::subtitle_set_text,
+            subtitle::subtitle_set_times,
+            subtitle::subtitle_insert,
+            subtitle::subtitle_delete,
+            subtitle::subtitle_split,
+            subtitle::subtitle_merge,
+            subtitle::subtitle_undo,
+            subtitle::subtitle_redo,
+            subtitle::subtitle_save,
             subtitle::subtitle_save_as,
             video::video_open,
             video::video_play,
@@ -35,6 +45,7 @@ pub fn run() -> tauri::Result<()> {
         ])
         .setup(|app| {
             crash::attach(app);
+            app.manage(subtitle::SubtitleState::default());
             log::info!(
                 "Sublore {} starting on {}",
                 env!("CARGO_PKG_VERSION"),

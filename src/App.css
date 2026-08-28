@@ -80,8 +80,8 @@ body {
 
 .stage {
   position: relative;
-  flex: 1;
-  min-height: 0;
+  flex: 1 1 45%;
+  min-height: 180px;
   background: #000;
 }
 
@@ -158,4 +158,120 @@ body {
 
 .subbar__error {
   color: var(--app-error);
+}
+
+.cuelist__panel {
+  display: flex;
+  flex: 1 1 55%;
+  flex-direction: column;
+  min-height: 180px;
+  border-top: 1px solid var(--app-line);
+}
+
+.cuelist__head,
+.cuelist__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.cuelist__head {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--app-line);
+  font-weight: 600;
+}
+
+.cuelist {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.cuelist:focus-visible {
+  outline: 2px solid var(--app-fg);
+  outline-offset: -2px;
+}
+
+.cuelist__sizer {
+  position: relative;
+}
+
+.cuelist__row {
+  position: absolute;
+  right: 0;
+  left: 0;
+}
+
+.cuelist__row--selected {
+  background: var(--app-line);
+}
+
+.cuelist__row--comment .cuelist__text {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.cuelist__pos,
+.cuelist__headcell--pos {
+  flex: 0 0 3.5rem;
+  color: #8a8a90;
+  text-align: right;
+}
+
+.cuelist__number,
+.cuelist__headcell--num {
+  flex: 0 0 3.5rem;
+  text-align: right;
+}
+
+.cuelist__start,
+.cuelist__end,
+.cuelist__headcell--time {
+  flex: 0 0 7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.cuelist__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cuelist__editor {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0.25rem;
+  border: 1px solid var(--app-fg);
+  background: var(--app-bg);
+  color: inherit;
+  font: inherit;
+  resize: none;
+}
+
+.cuelist__empty {
+  margin: 0;
+  padding: 0.75rem;
+  color: #8a8a90;
+  font-size: 0.875rem;
+}
+
+.subbar__dirty,
+.subbar__truncated {
+  font-weight: 600;
+}
+
+.subbar__savefile,
+.subbar__undo,
+.subbar__redo,
+.subbar__discard {
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-size: 0.875rem;
 }

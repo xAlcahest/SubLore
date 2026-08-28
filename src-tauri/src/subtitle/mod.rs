@@ -1,18 +1,25 @@
-//! Open a subtitle file and save a copy of it. Two commands, no state: nothing is editable yet, so
-//! there is nothing to hold between calls. The IPC names and payloads here are a public interface
-//! (CLAUDE.md section 6). See BACKLOG.md M1.5.
+//! One open subtitle file and the commands that edit it. The session lives here, behind a mutex,
+//! because the document is the authority on its own bytes: the frontend holds a list of rows and a
+//! revision number, never a second model. The IPC names and payloads here are a public interface
+//! (CLAUDE.md section 6). See BACKLOG.md M2.3.
 
 pub mod error;
 
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Instant;
 
 use serde::Serialize;
+use sublore_edit::diff::{CuePatch, CueView};
+use sublore_edit::history::Run;
+use sublore_edit::plan::{self, Edit};
+use sublore_edit::session::EditSession;
 use sublore_formats::{parse, Newline, SubtitleDocument, SubtitleFormat};
 use sublore_io::atomic::save_with_backup;
 use sublore_io::backup::BackupStore;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use error::{SubtitleError, SubtitleErrorCode};
 
@@ -22,6 +29,22 @@ pub const MAX_SUBTITLE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Backups live under Sublore's own data directory, never beside the user's file (CLAUDE.md §3.5).
 const BACKUP_DIR: &str = "backups";
+
+/// The one open file, or none. A plain `Mutex`: every command body runs inside `spawn_blocking`,
+/// so the guard is never held across an await.
+pub type SessionSlot = Mutex<Option<EditSession>>;
+
+#[derive(Default)]
+pub struct SubtitleState {
+    session: Arc<SessionSlot>,
+}
+
+impl SubtitleState {
+    /// A handle the blocking half of a command can own, as `VideoState` hands out its player.
+    fn slot(&self) -> Arc<SessionSlot> {
+        Arc::clone(&self.session)
+    }
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +60,51 @@ pub struct SubtitleSummary {
     pub byte_length: u64,
 }
 
+/// A row of the cue list. Its index is its position in the list, so a patch that moves rows can
+/// never leave a stale index behind on the rows it did not resend.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CueRowDto {
+    pub start_ms: u32,
+    pub end_ms: u32,
+    /// Line breaks are always "\n" here, whatever the file uses.
+    pub text: String,
+    /// An ASS `Comment:` event: listed and editable, but not a line a player draws.
+    pub comment: bool,
+    /// The cue's own number, when the file wrote one. Never renumbered.
+    pub number: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubtitleOpened {
+    pub summary: SubtitleSummary,
+    pub revision: u64,
+    /// Every cue, in `cues()` order: ASS comments included, unlike `summary.cue_count`.
+    pub cues: Vec<CueRowDto>,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    pub dirty: bool,
+    pub truncated: bool,
+}
+
+/// One contiguous run of rows replaced by another, plus the state that changed with it. Every
+/// mutation, undo and redo answers with one of these, so the UI has a single reply shape.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CuePatchDto {
+    pub revision: u64,
+    pub from: usize,
+    pub removed: usize,
+    pub cues: Vec<CueRowDto>,
+    /// For the status line: ASS `Comment:` events excluded, as at open.
+    pub cue_count: usize,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    pub dirty: bool,
+    pub truncated: bool,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubtitleSaved {
@@ -46,67 +114,284 @@ pub struct SubtitleSaved {
     pub backup_path: Option<String>,
 }
 
+// -------------------------------------------------------------------------------------------
+// Commands
+// -------------------------------------------------------------------------------------------
+
 #[tauri::command]
-pub async fn subtitle_open(path: String) -> Result<SubtitleSummary, SubtitleError> {
-    // Reading and parsing block, so they never run on the async runtime's poll thread (CLAUDE §7).
-    tauri::async_runtime::spawn_blocking(move || open_summary(&path))
-        .await
-        .map_err(|error| {
-            SubtitleError::new(
-                SubtitleErrorCode::CommandFailed,
-                format!("open task failed: {error}"),
-            )
-        })?
+pub async fn subtitle_open(
+    state: State<'_, SubtitleState>,
+    path: String,
+) -> Result<SubtitleOpened, SubtitleError> {
+    let slot = state.slot();
+    blocking(move || open_session(&slot, &path)).await
+}
+
+#[tauri::command]
+pub async fn subtitle_close(
+    state: State<'_, SubtitleState>,
+    discard: bool,
+) -> Result<(), SubtitleError> {
+    let slot = state.slot();
+    blocking(move || close_session(&slot, discard)).await
+}
+
+#[tauri::command]
+pub async fn subtitle_set_text(
+    state: State<'_, SubtitleState>,
+    revision: u64,
+    cue: usize,
+    text: String,
+) -> Result<CuePatchDto, SubtitleError> {
+    let slot = state.slot();
+    blocking(move || apply_edit(&slot, revision, Edit::SetText { cue, text })).await
+}
+
+#[tauri::command]
+pub async fn subtitle_set_times(
+    state: State<'_, SubtitleState>,
+    revision: u64,
+    cue: usize,
+    start_ms: u32,
+    end_ms: u32,
+) -> Result<CuePatchDto, SubtitleError> {
+    let slot = state.slot();
+    blocking(move || {
+        apply_edit(
+            &slot,
+            revision,
+            Edit::SetTimes {
+                cue,
+                start_ms,
+                end_ms,
+            },
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn subtitle_insert(
+    state: State<'_, SubtitleState>,
+    revision: u64,
+    before: usize,
+    start_ms: u32,
+    end_ms: u32,
+    text: String,
+) -> Result<CuePatchDto, SubtitleError> {
+    let slot = state.slot();
+    blocking(move || {
+        apply_edit(
+            &slot,
+            revision,
+            Edit::Insert {
+                before,
+                start_ms,
+                end_ms,
+                text,
+            },
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn subtitle_delete(
+    state: State<'_, SubtitleState>,
+    revision: u64,
+    cue: usize,
+) -> Result<CuePatchDto, SubtitleError> {
+    let slot = state.slot();
+    blocking(move || apply_edit(&slot, revision, Edit::Delete { cue })).await
+}
+
+#[tauri::command]
+pub async fn subtitle_split(
+    state: State<'_, SubtitleState>,
+    revision: u64,
+    cue: usize,
+    text_offset: usize,
+    at_ms: u32,
+) -> Result<CuePatchDto, SubtitleError> {
+    let slot = state.slot();
+    blocking(move || {
+        apply_edit(
+            &slot,
+            revision,
+            Edit::Split {
+                cue,
+                text_offset,
+                at_ms,
+            },
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn subtitle_merge(
+    state: State<'_, SubtitleState>,
+    revision: u64,
+    cue: usize,
+) -> Result<CuePatchDto, SubtitleError> {
+    let slot = state.slot();
+    blocking(move || apply_edit(&slot, revision, Edit::Merge { cue })).await
+}
+
+#[tauri::command]
+pub async fn subtitle_undo(
+    state: State<'_, SubtitleState>,
+    revision: u64,
+) -> Result<CuePatchDto, SubtitleError> {
+    let slot = state.slot();
+    blocking(move || undo(&slot, revision)).await
+}
+
+#[tauri::command]
+pub async fn subtitle_redo(
+    state: State<'_, SubtitleState>,
+    revision: u64,
+) -> Result<CuePatchDto, SubtitleError> {
+    let slot = state.slot();
+    blocking(move || redo(&slot, revision)).await
+}
+
+#[tauri::command]
+pub async fn subtitle_save(
+    app: AppHandle,
+    state: State<'_, SubtitleState>,
+    revision: u64,
+) -> Result<SubtitleSaved, SubtitleError> {
+    let slot = state.slot();
+    let backups = backup_root(&app)?;
+    blocking(move || save(&slot, revision, backups)).await
 }
 
 #[tauri::command]
 pub async fn subtitle_save_as(
     app: AppHandle,
-    source: String,
+    state: State<'_, SubtitleState>,
+    revision: u64,
     destination: String,
 ) -> Result<SubtitleSaved, SubtitleError> {
-    let backup_root = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| {
-            SubtitleError::new(
-                SubtitleErrorCode::BackupFailed,
-                format!("no app data directory: {error}"),
-            )
-        })?
-        .join(BACKUP_DIR);
-
-    tauri::async_runtime::spawn_blocking(move || save_copy(&source, &destination, backup_root))
-        .await
-        .map_err(|error| {
-            SubtitleError::new(
-                SubtitleErrorCode::CommandFailed,
-                format!("save task failed: {error}"),
-            )
-        })?
+    let slot = state.slot();
+    let backups = backup_root(&app)?;
+    blocking(move || save_as(&slot, revision, &destination, backups)).await
 }
 
-/// Read `path`, parse it, and describe what came back. The whole behavior of `subtitle_open`.
-pub fn open_summary(path: &str) -> Result<SubtitleSummary, SubtitleError> {
+// -------------------------------------------------------------------------------------------
+// The bodies, free of Tauri so the suite can drive them
+// -------------------------------------------------------------------------------------------
+
+/// Read `path`, parse it, and make it the open file. Refused while the open file has unsaved
+/// edits: dropping the user's work is a decision only the user makes (CLAUDE.md §3).
+pub fn open_session(slot: &SessionSlot, path: &str) -> Result<SubtitleOpened, SubtitleError> {
+    let mut guard = lock(slot)?;
+    if guard.as_ref().is_some_and(EditSession::dirty) {
+        return Err(SubtitleError::new(
+            SubtitleErrorCode::UnsavedChanges,
+            "the open file has edits that are not on disk",
+        ));
+    }
+
+    // A file that did not open is not the file on screen either, and the one being replaced was
+    // just proven saved, so closing it first loses nothing.
+    *guard = None;
     let document = read_document(Path::new(path))?;
-    let source = document.source();
-    Ok(SubtitleSummary {
-        path: path.to_owned(),
-        format: document.format().as_str().to_owned(),
-        cue_count: document.displayed_cue_count(),
-        has_bom: source.has_bom(),
-        newline: newline_str(source.newline()).to_owned(),
-        byte_length: source.byte_len() as u64,
-    })
+    let summary = summarize(path, &document);
+    let session = EditSession::open(PathBuf::from(path), document);
+    let opened = SubtitleOpened {
+        summary,
+        revision: session.revision(),
+        cues: rows(session.views()),
+        can_undo: session.can_undo(),
+        can_redo: session.can_redo(),
+        dirty: session.dirty(),
+        truncated: session.truncated(),
+    };
+    *guard = Some(session);
+    Ok(opened)
 }
 
-/// Re-read `source`, serialize it, and replace `destination` atomically with a backup kept under
-/// `backup_root`. The whole behavior of `subtitle_save_as`.
-///
-/// The bytes come out of the serializer and never from `fs::copy`: copying would make the
-/// round-trip guarantee untested at the level the user actually sees. See BACKLOG.md M1.5.
-pub fn save_copy(
-    source: &str,
+/// Close the open file. `discard` is the user having chosen to lose the edits; without it an
+/// unsaved file stays open.
+pub fn close_session(slot: &SessionSlot, discard: bool) -> Result<(), SubtitleError> {
+    let mut guard = lock(slot)?;
+    if !discard && guard.as_ref().is_some_and(EditSession::dirty) {
+        return Err(SubtitleError::new(
+            SubtitleErrorCode::UnsavedChanges,
+            "the open file has edits that are not on disk",
+        ));
+    }
+    *guard = None;
+    Ok(())
+}
+
+/// Apply one mutation. Nothing is written to disk here: a save is its own command.
+pub fn apply_edit(
+    slot: &SessionSlot,
+    revision: u64,
+    edit: Edit,
+) -> Result<CuePatchDto, SubtitleError> {
+    let mut guard = lock(slot)?;
+    let session = current(&mut guard)?;
+    check_revision(session, revision)?;
+    guard_size(session, &edit)?;
+
+    // Every command carries one finished edit: the editor sends a field when it is committed,
+    // never a keystroke, so two of them are two undo steps. See BACKLOG.md M2.2.
+    let patch = session
+        .apply(&edit, Run::New, Instant::now())
+        .map_err(SubtitleError::from_edit)?;
+    Ok(describe(session, patch))
+}
+
+pub fn undo(slot: &SessionSlot, revision: u64) -> Result<CuePatchDto, SubtitleError> {
+    let mut guard = lock(slot)?;
+    let session = current(&mut guard)?;
+    check_revision(session, revision)?;
+
+    let patch = session
+        .undo()
+        .map_err(SubtitleError::from_edit)?
+        .unwrap_or_else(nothing_changed);
+    Ok(describe(session, patch))
+}
+
+pub fn redo(slot: &SessionSlot, revision: u64) -> Result<CuePatchDto, SubtitleError> {
+    let mut guard = lock(slot)?;
+    let session = current(&mut guard)?;
+    check_revision(session, revision)?;
+
+    let patch = session
+        .redo()
+        .map_err(SubtitleError::from_edit)?
+        .unwrap_or_else(nothing_changed);
+    Ok(describe(session, patch))
+}
+
+/// Write the document back where it came from, and call it saved.
+pub fn save(
+    slot: &SessionSlot,
+    revision: u64,
+    backup_root: PathBuf,
+) -> Result<SubtitleSaved, SubtitleError> {
+    let mut guard = lock(slot)?;
+    let session = current(&mut guard)?;
+    check_revision(session, revision)?;
+
+    let bytes = session.to_bytes();
+    let outcome = save_with_backup(session.path(), &bytes, &BackupStore::new(backup_root))
+        .map_err(SubtitleError::from_io)?;
+    session.mark_saved();
+    Ok(saved(outcome))
+}
+
+/// Write the document somewhere else. The file being edited keeps its unsaved edits, and the
+/// session keeps pointing at it: saying otherwise would be a lie the user pays for.
+pub fn save_as(
+    slot: &SessionSlot,
+    revision: u64,
     destination: &str,
     backup_root: PathBuf,
 ) -> Result<SubtitleSaved, SubtitleError> {
@@ -117,21 +402,163 @@ pub fn save_copy(
         ));
     }
 
-    let bytes = read_document(Path::new(source))?.to_bytes();
+    let mut guard = lock(slot)?;
+    let session = current(&mut guard)?;
+    check_revision(session, revision)?;
+
+    let bytes = session.to_bytes();
     let outcome = save_with_backup(
         Path::new(destination),
         &bytes,
         &BackupStore::new(backup_root),
     )
     .map_err(SubtitleError::from_io)?;
+    Ok(saved(outcome))
+}
 
-    Ok(SubtitleSaved {
+/// What the file is, in the order a translator reads it.
+pub fn summarize(path: &str, document: &SubtitleDocument) -> SubtitleSummary {
+    let source = document.source();
+    SubtitleSummary {
+        path: path.to_owned(),
+        format: document.format().as_str().to_owned(),
+        cue_count: document.displayed_cue_count(),
+        has_bom: source.has_bom(),
+        newline: newline_str(source.newline()).to_owned(),
+        byte_length: source.byte_len() as u64,
+    }
+}
+
+// -------------------------------------------------------------------------------------------
+// Plumbing
+// -------------------------------------------------------------------------------------------
+
+/// Reading, parsing and saving all block, so no command body runs on the async runtime's poll
+/// thread (CLAUDE.md §7).
+async fn blocking<T, F>(work: F) -> Result<T, SubtitleError>
+where
+    F: FnOnce() -> Result<T, SubtitleError> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| {
+            SubtitleError::new(
+                SubtitleErrorCode::CommandFailed,
+                format!("the subtitle task failed: {error}"),
+            )
+        })?
+}
+
+fn backup_root(app: &AppHandle) -> Result<PathBuf, SubtitleError> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| {
+            SubtitleError::new(
+                SubtitleErrorCode::BackupFailed,
+                format!("no app data directory: {error}"),
+            )
+        })?
+        .join(BACKUP_DIR))
+}
+
+/// A poisoned lock means a command panicked holding it; the session cannot be trusted after that.
+fn lock(slot: &SessionSlot) -> Result<MutexGuard<'_, Option<EditSession>>, SubtitleError> {
+    slot.lock().map_err(|_| {
+        SubtitleError::new(
+            SubtitleErrorCode::CommandFailed,
+            "the subtitle session lock is poisoned",
+        )
+    })
+}
+
+fn current<'a>(
+    guard: &'a mut MutexGuard<'_, Option<EditSession>>,
+) -> Result<&'a mut EditSession, SubtitleError> {
+    guard.as_mut().ok_or_else(|| {
+        SubtitleError::new(SubtitleErrorCode::NoDocument, "no subtitle file is open")
+    })
+}
+
+/// The caller's cue indices describe the list at its revision. If the session has moved on, the
+/// safe answer is a refusal and a refetch, never an edit at a guessed index.
+fn check_revision(session: &EditSession, revision: u64) -> Result<(), SubtitleError> {
+    if session.revision() == revision {
+        return Ok(());
+    }
+    Err(SubtitleError::new(
+        SubtitleErrorCode::StaleRevision,
+        format!(
+            "the caller is at revision {revision}, the session at {}",
+            session.revision()
+        ),
+    ))
+}
+
+/// An edit that would grow the file past what Sublore re-opens is refused before it is applied:
+/// a document that cannot be opened again must not be creatable.
+fn guard_size(session: &EditSession, edit: &Edit) -> Result<(), SubtitleError> {
+    let planned = plan::plan(session.document(), edit).map_err(SubtitleError::from_edit)?;
+    let grown = session
+        .document()
+        .source()
+        .byte_len()
+        .saturating_sub(planned.splice.removed.len())
+        .saturating_add(planned.splice.inserted.len());
+    if u64::try_from(grown).unwrap_or(u64::MAX) > MAX_SUBTITLE_BYTES {
+        return Err(SubtitleError::new(
+            SubtitleErrorCode::TooLarge,
+            format!("the edit would make the file {grown} bytes, limit {MAX_SUBTITLE_BYTES}"),
+        ));
+    }
+    Ok(())
+}
+
+/// A call that replayed nothing: the bottom of the undo stack, or the top of the redo tail.
+fn nothing_changed() -> CuePatch {
+    CuePatch {
+        from: 0,
+        removed: 0,
+        cues: Vec::new(),
+    }
+}
+
+fn describe(session: &EditSession, patch: CuePatch) -> CuePatchDto {
+    CuePatchDto {
+        revision: session.revision(),
+        from: patch.from,
+        removed: patch.removed,
+        cues: rows(&patch.cues),
+        cue_count: session.document().displayed_cue_count(),
+        can_undo: session.can_undo(),
+        can_redo: session.can_redo(),
+        dirty: session.dirty(),
+        truncated: session.truncated(),
+    }
+}
+
+fn rows(views: &[CueView]) -> Vec<CueRowDto> {
+    views
+        .iter()
+        .map(|view| CueRowDto {
+            start_ms: view.start_ms,
+            end_ms: view.end_ms,
+            text: view.text.clone(),
+            comment: view.comment,
+            number: view.number,
+        })
+        .collect()
+}
+
+fn saved(outcome: sublore_io::atomic::SaveOutcome) -> SubtitleSaved {
+    SubtitleSaved {
         path: outcome.destination.to_string_lossy().into_owned(),
         bytes_written: outcome.bytes_written,
         backup_path: outcome
             .backup
             .map(|path| path.to_string_lossy().into_owned()),
-    })
+    }
 }
 
 fn read_document(path: &Path) -> Result<SubtitleDocument, SubtitleError> {
