@@ -74,14 +74,16 @@ Goal: the free product's core: cue list, text editing, timing adjust against wav
 
 Goal: whisper.cpp sidecar producing editable, word-timestamped cues.
 
-- [ ] **M3.1 Sidecar process wrapper.** Run whisper.cpp as a child process (never in-process, never on the main thread): spawn, stream progress, cancel, reap. Build/vendor strategy for the binary decided and documented; CUDA never a hard dependency.
+- [x] **M3.1 Sidecar process wrapper.** Run whisper.cpp as a child process (never in-process, never on the main thread): spawn, stream progress, cancel, reap. Build/vendor strategy for the binary decided and documented; CUDA never a hard dependency.
   - AC: a behavioral test runs a real transcription of a short audio fixture end to end and gets output; cancelling mid-run kills the child and leaves no orphan process (verified with a process check); the app stays responsive throughout; a missing or unrunnable binary produces a readable error, never a crash.
-- [ ] **M3.2 Model management.** Explicit, user-initiated model download with resume and integrity check; models live in the app data dir; nothing downloads on its own.
+- [x] **M3.2 Model management.** Explicit, user-initiated model download with resume and integrity check; models live in the app data dir; nothing downloads on its own.
   - AC: no network request happens unless the user asks for a download (CLAUDE §1); an interrupted download resumes instead of restarting; a corrupt or truncated file is detected by checksum and refused, never handed to whisper; models are never committed to the repo.
-- [ ] **M3.3 Word timestamps to cues.** Convert whisper output (word-level timestamps) into subtitle cues in the M1 document model, with a documented, deterministic segmentation rule.
+- [x] **M3.3 Word timestamps to cues.** Convert whisper output (word-level timestamps) into subtitle cues in the M1 document model, with a documented, deterministic segmentation rule.
   - AC: transcribing the fixture produces cues whose times are inside the media duration and strictly ordered; the same input always produces the same cues; the result is a valid document that passes the M1 coverage guard and can be saved as SRT and reopened byte-identically.
-- [ ] **M3.4 Transcription UI.** Choose model, start, see progress, cancel. Runs off the main thread with visible, cancellable progress (CLAUDE §7).
+- [x] **M3.4 Transcription UI.** Choose model, start, see progress, cancel. Runs off the main thread with visible, cancellable progress (CLAUDE §7).
   - AC: E2E: start a transcription on the fixture, progress advances, cancel stops it and the UI returns to a usable state with no orphan process; on completion the cues appear in the app; GPU/CPU selection is visible and CPU fallback works with no GPU present.
+
+**Status 2026-08-28:** M3.1-M3.4 on `main` (developed in a parallel worktree, merged onto the editor and projects). New crate `sublore-asr`: whisper.cpp sidecar built by `scripts/build-whisper.sh` from the commit pinned in `whisper.pin` (never committed), model store with explicit resumable downloads, deterministic word-to-cue segmentation. 489 Rust tests, 27 E2E checks and the real-whisper suite (7 tests against the actual binary and model, transcription, cancellation, progress, determinism) all green. Review caught a model integrity hole: a corrupted model passed the length-only check and made whisper emit silently wrong text with exit 0; `resolve()` now verifies the sha256 and the UI offers a re-download. The pre-commit hook now blocks binaries, models and generated audio from ever entering the repo. Windows and CI unverified.
 
 **Owner checklist M3:** download a model from inside the app → transcribe a short clip → watch progress → cancel one run and confirm nothing is left running → let one finish and see the cues appear, editable.
 
