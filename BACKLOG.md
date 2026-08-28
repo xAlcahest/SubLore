@@ -49,10 +49,24 @@ Goal: open and save SRT, ASS, VTT without destroying anything, including files f
 
 **Owner checklist M1:** open a real .srt from your disk → cue count appears; save-as → the copy is byte-identical (fc/cmp); open a deliberately broken file → clear error, app keeps working.
 
-## M2 — Editor with video and waveform
+## M2 — Editor with video and waveform (tasks detailed 2026-08-28)
 
 Goal: the free product's core: cue list, text editing, timing adjust against waveform, side-by-side source/target view.
-Draft criteria: edit 2,000-line file with no visible lag; every edit undoable; timing changes audible/visible against waveform; owner can subtitle a 1-minute clip start to finish without touching another tool.
+
+- [ ] **M2.1 Editable document model.** Mutation API over `sublore-formats` (edit cue text, edit times, insert, delete, split, merge) that keeps the lossless guarantee: everything the parser preserved stays preserved for untouched cues, and every mutation re-runs the tiling/coverage guard M1 added.
+  - AC: mutating one cue in a fixture and saving leaves every other byte of the file identical; a mutation that would break segment coverage is refused with a structured error, never written; property test over random edit sequences never produces a document that fails the guard.
+- [ ] **M2.2 Undo/redo.** Single undo stack for every document mutation, with coalescing of consecutive typing into one entry.
+  - AC: any sequence of edits can be undone back to the exact original bytes and redone forward to the exact edited bytes; undo depth is bounded and documented; typing a word is one undo step, not one per character.
+- [ ] **M2.3 Cue list UI with editing.** Virtualized cue list (index, start, end, text), inline text editing, keyboard navigation, dirty state, save/save-as.
+  - AC: E2E: open the 2000-cue fixture, edit a cue's text, save, reopen, the edit is there and the rest is byte-identical; undo restores it; scrolling and typing show no visible lag (measured, budget CLAUDE §7: open under 1 s).
+- [ ] **M2.4 Waveform.** Audio peaks extracted from the media (via the existing libmpv/ffmpeg path, off the main thread, cancellable) and rendered as a zoomable waveform with the playhead.
+  - AC: peaks for a 60 s fixture appear within budget and match the audio (silence reads flat, the 440 Hz tone reads full); playhead tracks playback; zoom and scroll stay responsive; no main-thread blocking.
+- [ ] **M2.5 Timing against the waveform.** Drag cue boundaries on the waveform, nudge with keyboard, snap to playhead; changes flow through the M2.1 mutation API and undo stack.
+  - AC: E2E: drag a cue boundary, the model times change accordingly and save round-trips; nudge shortcuts move by the documented step; every timing change is undoable.
+- [ ] **M2.6 Source/target side by side.** Two documents open at once (source and target), aligned by index, editing only the target.
+  - AC: open two fixtures as source and target; rows align; editing the target never mutates the source file on disk; saving writes only the target.
+
+**Owner checklist M2:** open a real subtitle file with its video → edit some lines → adjust a cue against the waveform → undo a few times → save → reopen and confirm your edits are there and nothing else changed. Subtitle a 1-minute clip start to finish without another tool.
 
 ## M3 — Local transcription
 
