@@ -79,14 +79,16 @@ Draft criteria: model download is explicit and resumable; transcription runs off
 
 Goal: SQLite project (series → episodes → files) so memory has somewhere to live.
 
-- [ ] **M4.1 Schema and migrations.** One SQLite database file per project; schema for series, episodes, and the files attached to each episode (media path, subtitle paths, role); a versioned migration runner.
+- [x] **M4.1 Schema and migrations.** One SQLite database file per project; schema for series, episodes, and the files attached to each episode (media path, subtitle paths, role); a versioned migration runner.
   - AC: creating a project produces a database at the chosen path with the current schema version; an automated test takes a database written at version N, migrates it, and verifies both the schema and every row survives (old db → migrate → verify, CLAUDE §2); a database from a newer version than the app is refused with a readable error, never silently altered.
-- [ ] **M4.2 Project lifecycle.** Create, open, close a project; add episodes; attach existing media and subtitle files to an episode by path.
+- [x] **M4.2 Project lifecycle.** Create, open, close a project; add episodes; attach existing media and subtitle files to an episode by path.
   - AC: create a project, add two episodes with files, close and reopen: everything is still there with the same paths and order; attaching a file records only its path and metadata, never copies or moves the user's file; opening a database that is corrupt or not a Sublore project fails with a readable error and leaves it untouched.
-- [ ] **M4.3 Deletion safety.** Deleting a project or an episode removes only Sublore's own records and its own project folder contents.
+- [x] **M4.3 Deletion safety.** Deleting a project or an episode removes only Sublore's own records and its own project folder contents.
   - AC: a behavioral test with real files on disk deletes a project whose episodes reference media and subtitles outside the project folder, then asserts every one of those user files still exists byte-identical (CLAUDE §3); no code path deletes outside the project folder.
-- [ ] **M4.4 Project UI, minimal.** Create/open a project, see its episodes and their attached files, add an episode, attach a file. No editing beyond that.
+- [x] **M4.4 Project UI, minimal.** Create/open a project, see its episodes and their attached files, add an episode, attach a file. No editing beyond that.
   - AC: E2E: create a project in a temp location, add an episode, attach a subtitle fixture, restart the app, reopen the project, the episode and its file are listed; errors surface as readable messages.
+
+**Status 2026-08-28:** M4.1-M4.4 on `main` (developed in a parallel worktree, merged onto M2 part A). New crate `sublore-project` (SQLite store, versioned migrations, project lifecycle, deletion safety). 359 Rust tests and 22 E2E checks green after integration. Review caught two critical races in `Database::create`, both reproduced before the fix: a symlink could redirect the project database outside the folder the user chose, and two concurrent creates could delete the winner's finished project; both closed with an atomic claim plus `SQLITE_OPEN_NOFOLLOW`. Merge integration moved the project panel into a left sidebar so the cue list keeps its height. Windows and CI unverified.
 
 **Owner checklist M4:** create a project → add an episode → attach a subtitle file and a video → close the app → reopen the project and find everything where you left it → delete the project and confirm your own video and subtitle files are still on disk.
 
