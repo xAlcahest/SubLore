@@ -1,13 +1,15 @@
-//! What the two subtitle commands do, driven through their bodies rather than through IPC: the
+//! What opening and saving do, driven through the command bodies rather than through IPC: the
 //! async wrappers add a `spawn_blocking` and nothing else. The E2E spec covers the app; this covers
 //! the outcomes a GUI test cannot see cheaply, including the ones that need a file to be broken.
-//! See BACKLOG.md M1.5.
+//! See BACKLOG.md M1.5, and M2.3 for the session the commands now go through.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use sublore_lib::subtitle::error::{SubtitleErrorCode, SubtitleReason};
-use sublore_lib::subtitle::{open_summary, save_copy, MAX_SUBTITLE_BYTES};
+use sublore_lib::subtitle::{
+    open_session, save_as, SessionSlot, SubtitleSummary, MAX_SUBTITLE_BYTES,
+};
 
 /// Every clean SRT fixture, so a copy is proven byte-identical for the whole tree, not one file.
 const CLEAN_SRT: &str = "fixtures/subtitles/srt/clean";
@@ -24,6 +26,24 @@ fn fixture(relative: &str) -> String {
     let path = repo_root().join(relative);
     assert!(path.is_file(), "missing fixture {}", path.display());
     path.to_string_lossy().into_owned()
+}
+
+/// Open a file into a fresh session and report what the status line would say.
+fn open_summary(
+    path: &str,
+) -> Result<SubtitleSummary, sublore_lib::subtitle::error::SubtitleError> {
+    open_session(&SessionSlot::default(), path).map(|opened| opened.summary)
+}
+
+/// Open `source` and write it out at `destination`, which is what save-as does.
+fn save_copy(
+    source: &str,
+    destination: &str,
+    backup_root: PathBuf,
+) -> Result<sublore_lib::subtitle::SubtitleSaved, sublore_lib::subtitle::error::SubtitleError> {
+    let slot = SessionSlot::default();
+    open_session(&slot, source)?;
+    save_as(&slot, 0, destination, backup_root)
 }
 
 /// A scratch directory that removes itself, so a failed assertion never leaves litter behind.
@@ -97,7 +117,7 @@ fn crlf_bom_and_mixed_endings_are_reported_as_they_are() {
     assert_eq!(mixed.newline, "mixed");
 }
 
-fn summary_shape(summary: &sublore_lib::subtitle::SubtitleSummary) -> (&str, usize, bool, &str) {
+fn summary_shape(summary: &SubtitleSummary) -> (&str, usize, bool, &str) {
     (
         summary.format.as_str(),
         summary.cue_count,
@@ -315,4 +335,18 @@ fn a_malformed_source_is_never_written_anywhere() {
         !destination.exists(),
         "nothing is created when the source does not parse"
     );
+
+    // The session stayed empty, so there is nothing a later save could reach for either.
+    assert_eq!(
+        save_as(
+            &SessionSlot::default(),
+            0,
+            &destination.to_string_lossy(),
+            scratch.backups()
+        )
+        .expect_err("no document")
+        .code,
+        SubtitleErrorCode::NoDocument
+    );
+    assert!(!destination.exists());
 }

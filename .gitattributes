@@ -8,3 +8,7 @@ fixtures/subtitles/** -text
 # Generated-cue fixtures are byte-exact too: the expected SRT is compared to what M3.3 renders.
 # See BACKLOG.md M3.3.
 fixtures/asr/** -text
+
+# Golden schema and seed dumps are compared as text: a Windows clone with core.autocrlf=true
+# must not rewrite them. See BACKLOG.md M4.1.
+fixtures/projects/** text eol=lf

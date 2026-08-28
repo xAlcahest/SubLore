@@ -20,6 +20,59 @@ export const en = {
       playbackStopped: "Playback stopped before the end of the file.",
     },
   },
+  project: {
+    pathLabel: "Project folder",
+    pathPlaceholder: "Full path to a folder",
+    choose: "Choose",
+    create: "Create",
+    open: "Open",
+    delete: "Delete project",
+    noProject: "No project open.",
+    /** Title and folder, so the status line says which project and where it lives. */
+    status: "{title} · {folder}",
+    noEpisodes: "No episodes yet.",
+    episodeLabel: "New episode",
+    episodePlaceholder: "Episode name",
+    addEpisode: "Add episode",
+    episode: "{ordinal}. {title}",
+    fileLabel: "File",
+    filePlaceholder: "Full path to a video or subtitle file",
+    attach: "Attach",
+    noFiles: "No files attached.",
+    file: "{role} · {path}",
+    roles: {
+      media: "Video",
+      source: "Source",
+      target: "Target",
+    },
+    deleted: "Deleted the project in {folder}. Your own video and subtitle files were not touched.",
+    errors: {
+      invalidPath: "Type the full path to a folder.",
+      folderNotFound: "There is no folder at that path.",
+      notADirectory: "That path is not a folder.",
+      alreadyAProject: "There is already a Sublore project in that folder. Open it instead.",
+      noProjectHere: "There is no Sublore project in that folder.",
+      notASubloreProject: "That folder holds a project.sublore file Sublore did not write.",
+      databaseCorrupt: "That project file is damaged. Sublore left it exactly as it is.",
+      schemaTooNew:
+        "That project was made by a newer Sublore, which writes version {found}; this one reads version {supported}. Update Sublore to open it.",
+      migrationFailed:
+        "Sublore could not bring that project file up to date, so it left it at the version it was.",
+      pathNotAbsolute: "Type the full path, starting from the top of the drive.",
+      pathNotUtf8: "Sublore cannot store that path. Move the file somewhere with a plainer name.",
+      fileNotFound: "There is no file at that path.",
+      notAFile: "That path is not a file.",
+      duplicateFile: "That file is already attached to this episode.",
+      episodeNotFound: "That episode is not in the project any more.",
+      noProjectOpen: "Open a project first.",
+      writeFailed: "Sublore could not write to the project file. Check that the disk has room.",
+      deleteFailed:
+        "Sublore could not remove the project file. Check that the folder is not read-only.",
+      permissionDenied: "Sublore is not allowed to use that folder.",
+      queryFailed: "Sublore could not read that project file.",
+      commandFailed: "Sublore could not finish that action. Restart Sublore if it happens again.",
+    },
+  },
   subtitle: {
     pathLabel: "Subtitle file",
     pathPlaceholder: "Full path to an SRT, VTT or ASS file",
@@ -27,6 +80,14 @@ export const en = {
     destinationLabel: "Save copy to",
     destinationPlaceholder: "Full path for the copy",
     save: "Save as",
+    saveFile: "Save",
+    undo: "Undo",
+    redo: "Redo",
+    discard: "Discard changes",
+    /** Appended to the status line while the document differs from the file on disk. */
+    dirty: "Unsaved changes",
+    /** Shown once the undo bound has dropped its oldest entries. */
+    truncated: "Undo history is full, so the oldest edits can no longer be undone.",
     noFile: "No subtitle file open.",
     /** Shown only when the file starts with a UTF-8 byte-order mark. */
     bom: "BOM",
@@ -42,6 +103,8 @@ export const en = {
     },
     saved: "Saved a copy to {path}.",
     savedWithBackup: "Saved a copy to {path}. The file that was there is kept at {backup}.",
+    savedFile: "Saved {path}.",
+    savedFileWithBackup: "Saved {path}. The file that was there is kept at {backup}.",
     lineDetail: "Line {line} — {reason}",
     errors: {
       invalidPath: "Type the full path to a subtitle file.",
@@ -57,7 +120,26 @@ export const en = {
       backupFailed:
         "Sublore could not keep a backup of the existing file, so it did not overwrite it.",
       permissionDenied: "Sublore is not allowed to use that file.",
+      noDocument: "Open a subtitle file first.",
+      staleRevision:
+        "Sublore and this list no longer agree about the file. Open it again before editing.",
+      invalidCue: "That line is not in this file any more.",
+      unwritableText:
+        "This format cannot hold that text. Remove the blank line or the line break and try again.",
+      editRefused: "Sublore did not make that change, so the file is exactly as it was.",
+      unsavedChanges: "This file has changes that are not saved. Save them, or discard them.",
       commandFailed: "Sublore could not finish that action. Restart Sublore if it happens again.",
+    },
+    cueList: {
+      label: "Cues",
+      empty: "This file has no cues.",
+      position: "#",
+      number: "No.",
+      start: "Start",
+      end: "End",
+      text: "Text",
+      /** Marks an ASS Comment: event, which a player does not draw. */
+      comment: "Comment",
     },
     reasons: {
       expectedTiming: "a timing line was expected here",
