@@ -1,4 +1,4 @@
-# E2E harness (M0.5, extended by M1.5 and M4.4)
+# E2E harness (M0.5, extended by M1.5, M2.3 and M4.4)
 
 Behavioral tests that launch the real Sublore binary on a real X server and assert what a person
 would see. Nothing here reads Rust or TypeScript source: the harness only drives the app and looks
@@ -6,21 +6,31 @@ at the window.
 
 ## What each spec proves
 
-| File                        | Test                                                              | Acceptance criterion it binds                                                                                              |
-| --------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `specs/title.spec.js`       | `native window title is Sublore`                                  | The X11 toplevel is named `Sublore`. This is the AC test.                                                                  |
-| `specs/title.spec.js`       | `document title is Sublore`                                       | The webview loaded the app document, not a blank page. Different thing from the X11 name; both are asserted.               |
-| `specs/video.spec.js`       | `opens the sample fixture`                                        | Typing `fixtures/video/sample.mkv` into the open bar and clicking Open reaches the ready state with no error banner.       |
-| `specs/video.spec.js`       | `sizes the native video surface over the stage`                   | The native video child window is mapped and covers the `.stage__surface` rectangle within 2 px.                            |
-| `specs/subtitle.spec.js`    | `opens an SRT fixture and shows its format and cue count`         | Opening `fixtures/subtitles/srt/clean/basic-lf.srt` puts `SRT · 3 cues · LF` on the status line with no error.             |
-| `specs/subtitle.spec.js`    | `saves a byte-identical copy`                                     | Save-as of `basic-crlf.srt` writes a file the spec then compares byte for byte with `Buffer.compare`.                      |
-| `specs/subtitle.spec.js`    | `reports a malformed file readably and stays usable`              | `srt/malformed/missing-arrow.srt` shows an error naming line 6, and the clean fixture opens straight after.                |
-| `specs/project.spec.js`     | `creates a project in an empty folder`                            | Typing a fresh temp folder and clicking Create puts that folder on the status line and writes `project.sublore`.           |
-| `specs/project.spec.js`     | `adds an episode and attaches a subtitle file to it`              | The episode is listed, the attached path is listed under it, and the user's file is byte-identical afterwards.             |
-| `specs/project.spec.js`     | `still lists the episode and its file after the app is restarted` | The AC's restart: the session is deleted and a new one launches the binary again, and reopening the folder lists both.     |
-| `specs/project.spec.js`     | `reports a folder that holds no project and stays usable`         | Opening an empty folder shows the `noProjectHere` sentence, writes nothing there, and the real project reopens after it.   |
-| `specs/project.spec.js`     | `deletes the project without touching the files it points at`     | `project.sublore` is gone, the attached subtitle outside the folder is byte-identical, and the folder itself still exists. |
-| `scripts/shutdown-check.js` | 4 checks                                                          | Closing the window exits 0, unsignalled, with nothing left alive in the app's process group.                               |
+| File                        | Test                                                                          | Acceptance criterion it binds                                                                                              |
+| --------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `specs/title.spec.js`       | `native window title is Sublore`                                              | The X11 toplevel is named `Sublore`. This is the AC test.                                                                  |
+| `specs/title.spec.js`       | `document title is Sublore`                                                   | The webview loaded the app document, not a blank page. Different thing from the X11 name; both are asserted.               |
+| `specs/video.spec.js`       | `opens the sample fixture`                                                    | Typing `fixtures/video/sample.mkv` into the open bar and clicking Open reaches the ready state with no error banner.       |
+| `specs/video.spec.js`       | `sizes the native video surface over the stage`                               | The native video child window is mapped and covers the `.stage__surface` rectangle within 2 px.                            |
+| `specs/subtitle.spec.js`    | `opens an SRT fixture and shows its format and cue count`                     | Opening `fixtures/subtitles/srt/clean/basic-lf.srt` puts `SRT · 3 cues · LF` on the status line with no error.             |
+| `specs/subtitle.spec.js`    | `saves a byte-identical copy`                                                 | Save-as of `basic-crlf.srt` writes a file the spec then compares byte for byte with `Buffer.compare`.                      |
+| `specs/subtitle.spec.js`    | `reports a malformed file readably and stays usable`                          | `srt/malformed/missing-arrow.srt` shows an error naming line 6, and the clean fixture opens straight after.                |
+| `specs/editor.spec.js`      | `opens the 2000-cue fixture inside the open budget`                           | A copy of `srt/clean/large-2000.srt` opens and the first row appears in under 1 s (CLAUDE §7).                             |
+| `specs/editor.spec.js`      | `renders only the rows in view, over a sizer as tall as the whole file`       | At three scroll positions at most 60 rows exist in the DOM, over a spacer of `2000 × row height`.                          |
+| `specs/editor.spec.js`      | `scrolls a viewport at a time without falling behind`                         | Twenty scroll steps, each timed until the list shows different rows: mean under 32 ms, max under 150 ms.                   |
+| `specs/editor.spec.js`      | `types into a cue without the list re-rendering behind every keystroke`       | Twenty keystrokes into the inline editor: p95 keydown to input under 50 ms, max under 150 ms.                              |
+| `specs/editor.spec.js`      | `commits the edit on Enter and marks the file unsaved`                        | Enter puts the typed text on the row in under 200 ms, the dirty marker appears, and nothing is written yet.                |
+| `specs/editor.spec.js`      | `undoes the edit back to the original text and redoes it`                     | Ctrl+Z restores the original text in under 200 ms and clears the dirty marker; the Redo button brings it back.             |
+| `specs/editor.spec.js`      | `saves the edit, and every other byte of the file is the byte that was there` | Node compares the saved file block by block against the copy that was opened.                                              |
+| `specs/editor.spec.js`      | `reopens the saved file with the edit in it`                                  | Opening the saved file again shows the edited row and an unedited neighbour.                                               |
+| `specs/editor.spec.js`      | `saves the text still sitting in an open editor`                              | Clicking Save with the inline editor still open writes what was typed: the blur's commit and the save both land.           |
+| `scripts/shutdown-check.js` | 4 checks                                                                      | Closing the window exits 0, unsignalled, with nothing left alive in the app's process group.                               |
+| `specs/project.spec.js`     | `creates a project in an empty folder`                                        | Typing a fresh temp folder and clicking Create puts that folder on the status line and writes `project.sublore`.           |
+| `specs/project.spec.js`     | `adds an episode and attaches a subtitle file to it`                          | The episode is listed, the attached path is listed under it, and the user's file is byte-identical afterwards.             |
+| `specs/project.spec.js`     | `still lists the episode and its file after the app is restarted`             | The AC's restart: the session is deleted and a new one launches the binary again, and reopening the folder lists both.     |
+| `specs/project.spec.js`     | `reports a folder that holds no project and stays usable`                     | Opening an empty folder shows the `noProjectHere` sentence, writes nothing there, and the real project reopens after it.   |
+| `specs/project.spec.js`     | `deletes the project without touching the files it points at`                 | `project.sublore` is gone, the attached subtitle outside the folder is byte-identical, and the folder itself still exists. |
+| `scripts/shutdown-check.js` | 4 checks                                                                      | Closing the window exits 0, unsignalled, with nothing left alive in the app's process group.                               |
 
 The window title AC is covered by the **native** assertion. The document title is a second, weaker
 signal kept because a blank webview is otherwise invisible to X11 assertions.
@@ -66,7 +76,7 @@ A harness that runs nothing must not report success. WebdriverIO does not reliab
 specs, so `wdio.conf.js` asserts the count itself:
 
 ```js
-const EXPECTED_TESTS = 12;
+const EXPECTED_TESTS = 22;
 ```
 
 `onComplete` throws if fewer than that many tests passed, which covers a deleted spec file, an
@@ -111,6 +121,11 @@ are the contract. Renaming one breaks the harness.
 `.project__new-episode`, `.project__add-episode`, `.project__file-path`, `.project__choose-file`,
 `.project__role-media`, `.project__role-source`, `.project__role-target`, `.project__attach`
 
+Added by M2.3: `.subbar__savefile`, `.subbar__undo`, `.subbar__redo`, `.subbar__discard`, `.subbar__dirty`,
+`.subbar__truncated`, `.cuelist`, `.cuelist__sizer`, `.cuelist__row`, `.cuelist__row--selected`,
+`.cuelist__row--comment`, `.cuelist__pos`, `.cuelist__number`, `.cuelist__start`, `.cuelist__end`,
+`.cuelist__text`, `.cuelist__editor`, `.cuelist__empty`
+
 Readiness has no dedicated signal: a video is loaded when `.stage__empty` is gone **and**
 `.controls__button` is enabled. A subtitle file is open when `.subbar__status` stops saying
 "No subtitle file open."; `.subbar__error` is absent from the DOM when there is nothing wrong.
@@ -133,12 +148,29 @@ a **copy** of `fixtures/subtitles/srt/clean/basic-lf.srt` placed in a separate u
 is deliberate: the deletion test asserts on a real user file, and no committed fixture is ever within
 reach of a delete path.
 
-`subtitle.spec.js` types four different paths through one field, so it clears the field with a
-ctrl+a of its own before typing. `lib/input.js` is deliberately not extended for that: it is shared
-with the specs above, and this is the only place that needs it so far.
+`subtitle.spec.js` and `editor.spec.js` type several different paths through one field, so each
+clears the field with a ctrl+a of its own before typing. `lib/input.js` is deliberately not extended
+for that: it is shared with every spec, and each spec that needs it keeps its own three lines.
+
+A row is found by the 1-based list position in its `.cuelist__pos` cell, never by DOM order or a
+test-only attribute. `editor.spec.js` reads the row height from a rendered row rather than repeating
+the `ROW_HEIGHT` constant, so the virtualization assertions cannot drift from the component.
 
 Subtitle fixtures are committed, so nothing generates them. The save-as test writes into
-`$SUBLORE_E2E_DATA_HOME/save-as`, never into the repo and never beside a fixture.
+`$SUBLORE_E2E_DATA_HOME/save-as`, and `editor.spec.js` copies `large-2000.srt` into
+`$SUBLORE_E2E_DATA_HOME/editor` and edits the copy: never into the repo, never beside a fixture.
+
+## The M2.3 performance numbers
+
+`editor.spec.js` measures inside the page with `performance.now()`, from probes it installs through
+`browser.execute` before it acts, so no production code exists to serve the test and the 250 ms poll
+interval of `waitFor` is not the measurement resolution. The four budgets are open under 1 s,
+scroll step mean under 32 ms, keystroke to input p95 under 50 ms, and an IPC round trip under 200 ms.
+Each test logs the number it measured.
+
+Read them honestly: this is a **debug** build under Xvfb with software rendering, so a number under
+budget here is a necessary condition for the release budget, not a measurement of it. The owner's
+checklist measures the release build (WORKFLOW §6).
 
 ## Why `pnpm e2e:build`, never `cargo build`
 
@@ -149,5 +181,4 @@ connection error on a blank page. That is why `lib/paths.js` names `pnpm e2e:bui
 message, and why running `cargo build` or `cargo test` after it invalidates the binary: both rewrite
 `target/debug/sublore` without the feature.
 
-All sixteen checks were run against a `pnpm e2e:build` binary with nothing listening on port 1420,
-and all sixteen pass.
+All checks were run against a `pnpm e2e:build` binary with nothing listening on port 1420.
