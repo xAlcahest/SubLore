@@ -1,5 +1,6 @@
 pub mod asr;
 pub mod crash;
+pub mod project;
 pub mod strings;
 pub mod subtitle;
 pub mod video;
@@ -25,13 +26,30 @@ pub fn run() -> tauri::Result<()> {
         // First in the chain, so anything logged during setup already lands in the file.
         .plugin(log_plugin())
         .plugin(tauri_plugin_dialog::init())
+        .manage(project::ProjectState::default())
         .invoke_handler(tauri::generate_handler![
             asr::asr_models,
             asr::asr_model_download,
             asr::asr_model_download_cancel,
             asr::asr_transcribe_start,
             asr::asr_transcribe_cancel,
+            project::project_add_episode,
+            project::project_attach_file,
+            project::project_choose_path,
+            project::project_create,
+            project::project_delete,
+            project::project_open,
             subtitle::subtitle_open,
+            subtitle::subtitle_close,
+            subtitle::subtitle_set_text,
+            subtitle::subtitle_set_times,
+            subtitle::subtitle_insert,
+            subtitle::subtitle_delete,
+            subtitle::subtitle_split,
+            subtitle::subtitle_merge,
+            subtitle::subtitle_undo,
+            subtitle::subtitle_redo,
+            subtitle::subtitle_save,
             subtitle::subtitle_save_as,
             video::video_open,
             video::video_play,
@@ -41,6 +59,7 @@ pub fn run() -> tauri::Result<()> {
         ])
         .setup(|app| {
             crash::attach(app);
+            app.manage(subtitle::SubtitleState::default());
             log::info!(
                 "Sublore {} starting on {}",
                 env!("CARGO_PKG_VERSION"),
@@ -73,6 +92,7 @@ pub fn run() -> tauri::Result<()> {
             // A transcription outlives the window that started it unless it is stopped here.
             asr::shutdown(app_handle);
             shutdown_video(app_handle);
+            shutdown_project(app_handle);
         }
         _ => {}
     });
@@ -104,6 +124,14 @@ fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 /// Idempotent: every one of the events above may fire, and only the first does the work.
 fn shutdown_video(app_handle: &AppHandle) {
     if let Some(state) = app_handle.try_state::<video::VideoState>() {
+        state.shutdown();
+    }
+}
+
+/// Close the project database on the way out, so a normal quit checkpoints its WAL. Idempotent
+/// for the same reason as above.
+fn shutdown_project(app_handle: &AppHandle) {
+    if let Some(state) = app_handle.try_state::<project::ProjectState>() {
         state.shutdown();
     }
 }

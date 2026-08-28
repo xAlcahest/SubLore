@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
   "crates/sublore-asr",
+  "crates/sublore-edit",
   "crates/sublore-formats",
   "crates/sublore-io",
+  "crates/sublore-project",
   "src-tauri",
 ]
