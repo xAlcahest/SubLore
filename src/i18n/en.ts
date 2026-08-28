@@ -27,6 +27,14 @@ export const en = {
     destinationLabel: "Save copy to",
     destinationPlaceholder: "Full path for the copy",
     save: "Save as",
+    saveFile: "Save",
+    undo: "Undo",
+    redo: "Redo",
+    discard: "Discard changes",
+    /** Appended to the status line while the document differs from the file on disk. */
+    dirty: "Unsaved changes",
+    /** Shown once the undo bound has dropped its oldest entries. */
+    truncated: "Undo history is full, so the oldest edits can no longer be undone.",
     noFile: "No subtitle file open.",
     /** Shown only when the file starts with a UTF-8 byte-order mark. */
     bom: "BOM",
@@ -42,6 +50,8 @@ export const en = {
     },
     saved: "Saved a copy to {path}.",
     savedWithBackup: "Saved a copy to {path}. The file that was there is kept at {backup}.",
+    savedFile: "Saved {path}.",
+    savedFileWithBackup: "Saved {path}. The file that was there is kept at {backup}.",
     lineDetail: "Line {line} — {reason}",
     errors: {
       invalidPath: "Type the full path to a subtitle file.",
@@ -57,7 +67,26 @@ export const en = {
       backupFailed:
         "Sublore could not keep a backup of the existing file, so it did not overwrite it.",
       permissionDenied: "Sublore is not allowed to use that file.",
+      noDocument: "Open a subtitle file first.",
+      staleRevision:
+        "Sublore and this list no longer agree about the file. Open it again before editing.",
+      invalidCue: "That line is not in this file any more.",
+      unwritableText:
+        "This format cannot hold that text. Remove the blank line or the line break and try again.",
+      editRefused: "Sublore did not make that change, so the file is exactly as it was.",
+      unsavedChanges: "This file has changes that are not saved. Save them, or discard them.",
       commandFailed: "Sublore could not finish that action. Restart Sublore if it happens again.",
+    },
+    cueList: {
+      label: "Cues",
+      empty: "This file has no cues.",
+      position: "#",
+      number: "No.",
+      start: "Start",
+      end: "End",
+      text: "Text",
+      /** Marks an ASS Comment: event, which a player does not draw. */
+      comment: "Comment",
     },
     reasons: {
       expectedTiming: "a timing line was expected here",
