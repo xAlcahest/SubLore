@@ -6,16 +6,21 @@ at the window.
 
 ## What each spec proves
 
-| File                        | Test                                                      | Acceptance criterion it binds                                                                                        |
-| --------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `specs/title.spec.js`       | `native window title is Sublore`                          | The X11 toplevel is named `Sublore`. This is the AC test.                                                            |
-| `specs/title.spec.js`       | `document title is Sublore`                               | The webview loaded the app document, not a blank page. Different thing from the X11 name; both are asserted.         |
-| `specs/video.spec.js`       | `opens the sample fixture`                                | Typing `fixtures/video/sample.mkv` into the open bar and clicking Open reaches the ready state with no error banner. |
-| `specs/video.spec.js`       | `sizes the native video surface over the stage`           | The native video child window is mapped and covers the `.stage__surface` rectangle within 2 px.                      |
-| `specs/subtitle.spec.js`    | `opens an SRT fixture and shows its format and cue count` | Opening `fixtures/subtitles/srt/clean/basic-lf.srt` puts `SRT · 3 cues · LF` on the status line with no error.       |
-| `specs/subtitle.spec.js`    | `saves a byte-identical copy`                             | Save-as of `basic-crlf.srt` writes a file the spec then compares byte for byte with `Buffer.compare`.                |
-| `specs/subtitle.spec.js`    | `reports a malformed file readably and stays usable`      | `srt/malformed/missing-arrow.srt` shows an error naming line 6, and the clean fixture opens straight after.          |
-| `scripts/shutdown-check.js` | 4 checks                                                  | Closing the window exits 0, unsignalled, with nothing left alive in the app's process group.                         |
+| File                        | Test                                                                      | Acceptance criterion it binds                                                                                                                                                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `specs/title.spec.js`       | `native window title is Sublore`                                          | The X11 toplevel is named `Sublore`. This is the AC test.                                                                                                                                                                                                           |
+| `specs/title.spec.js`       | `document title is Sublore`                                               | The webview loaded the app document, not a blank page. Different thing from the X11 name; both are asserted.                                                                                                                                                        |
+| `specs/video.spec.js`       | `opens the sample fixture`                                                | Typing `fixtures/video/sample.mkv` into the open bar and clicking Open reaches the ready state with no error banner.                                                                                                                                                |
+| `specs/video.spec.js`       | `sizes the native video surface over the stage`                           | The native video child window is mapped and covers the `.stage__surface` rectangle within 2 px.                                                                                                                                                                     |
+| `specs/subtitle.spec.js`    | `opens an SRT fixture and shows its format and cue count`                 | Opening `fixtures/subtitles/srt/clean/basic-lf.srt` puts `SRT · 3 cues · LF` on the status line with no error.                                                                                                                                                      |
+| `specs/subtitle.spec.js`    | `saves a byte-identical copy`                                             | Save-as of `basic-crlf.srt` writes a file the spec then compares byte for byte with `Buffer.compare`.                                                                                                                                                               |
+| `specs/subtitle.spec.js`    | `reports a malformed file readably and stays usable`                      | `srt/malformed/missing-arrow.srt` shows an error naming line 6, and the clean fixture opens straight after.                                                                                                                                                         |
+| `specs/asr.spec.js`         | `offers the models it knows and a compute choice`                         | The model list holds the whole catalog, the one on disk is preselected and reads `ready`, the GPU box is there, and Transcribe is off until a video is open.                                                                                                        |
+| `specs/asr.spec.js`         | `transcribes the open video and shows the cues`                           | A run over `sample.mkv` lists cues carrying words from a real whisper transcript, the sidecar was handed audio from the app's scratch directory and never the media, the scratch directory is gone afterwards, and the fixture's own bytes and mtime are untouched. |
+| `specs/asr.spec.js`         | `shows progress, stays usable, and leaves nothing running when cancelled` | The bar advances past zero, the playback button still answers mid-run, and after Cancel the sidecar's pid is gone from `ps` (a killed-but-unreaped child would still be there as a zombie), no scratch directory is left, and Transcribe is available again.        |
+| `specs/asr.spec.js`         | `runs on the CPU when the GPU box is unticked`                            | The status names the CPU and the sidecar's real command line carries `-ng`.                                                                                                                                                                                         |
+| `specs/asr.spec.js`         | `refuses a damaged model and never hands it to the sidecar`               | One bit is flipped in the model file, which keeps its catalogued length. The run is refused on its checksum, the sidecar is never spawned, no scratch directory is left behind, and the row offers Download instead of Transcribe.                                  |
+| `scripts/shutdown-check.js` | 4 checks                                                                  | Closing the window exits 0, unsignalled, with nothing left alive in the app's process group.                                                                                                                                                                        |
 
 The window title AC is covered by the **native** assertion. The document title is a second, weaker
 signal kept because a blank webview is otherwise invisible to X11 assertions.
@@ -29,6 +34,7 @@ is ready, so the `IsViewable` check is what makes this test meaningful.
 
 ```sh
 sh fixtures/video/make-sample.sh     # the fixture is generated, never committed
+sh scripts/fetch-model.sh            # ggml-tiny.en.bin, fetched once, never committed
 pnpm e2e:build                       # tauri build --debug --no-bundle
 xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e           # the three WebDriver specs
 xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:shutdown  # the clean-close check
@@ -51,6 +57,13 @@ Environment knobs:
 - `CARGO_TARGET_DIR` is honoured, the same way cargo honours it.
 - `TAURI_DRIVER_PATH`, `WEBKIT_WEBDRIVER_PATH` override the two binaries.
 - `XDG_DATA_HOME` is pointed at a fresh temp dir by the harness, so a run never touches the real one.
+- `SUBLORE_WHISPER_BIN` and `SUBLORE_E2E_ASR_DIR` are **set** by `wdio.conf.js`, not read from the
+  environment: the transcription spec always runs against the stand-in sidecar below.
+- `SUBLORE_TEST_MODEL_DIR` points at a directory holding your own `ggml-tiny.en.bin`; the gated Rust
+  suite reads the same variable. Without it the harness reads the cache `scripts/fetch-model.sh`
+  writes to. The app checks the model's sha256 before every run, so this file has to be the real one;
+  the harness copies it into the run's own data directory and names the command to run when it is
+  missing.
 
 Neither entry point builds anything. A missing binary or fixture fails immediately with the command
 to run, because a silent four-minute rebuild inside a test hook is worse than a red line.
@@ -61,7 +74,7 @@ A harness that runs nothing must not report success. WebdriverIO does not reliab
 specs, so `wdio.conf.js` asserts the count itself:
 
 ```js
-const EXPECTED_TESTS = 7;
+const EXPECTED_TESTS = 12;
 ```
 
 `onComplete` throws if fewer than that many tests passed, which covers a deleted spec file, an
@@ -79,6 +92,12 @@ exists here. WebDriver is still what reads the DOM, which is what the surface te
 
 Element coordinates come from `getBoundingClientRect` plus the toplevel's absolute origin. There is
 no window manager under Xvfb, so the toplevel origin is also the viewport origin.
+
+`clickAt` asks where the pointer is before moving it. `xdotool mousemove --sync` waits for the
+pointer to leave the position it was at, so a move to the position it already holds never returns
+while a window sits under it: verified here, it blocks until it is killed. Clicking the same element
+twice in a row — which `asr.spec.js` does with Transcribe — is exactly that case, so the move is
+skipped when the pointer is already there.
 
 ## Closing the window
 
@@ -99,7 +118,12 @@ There are no `data-testid` attributes; these class names from `src/App.tsx` and 
 are the contract. Renaming one breaks the harness.
 
 `.bar__input`, `.bar__button`, `.app__error`, `.stage__surface`, `.stage__empty`, `.controls__button`,
-`.subbar__input`, `.subbar__open`, `.subbar__dest`, `.subbar__save`, `.subbar__status`, `.subbar__error`
+`.subbar__input`, `.subbar__open`, `.subbar__dest`, `.subbar__save`, `.subbar__status`, `.subbar__error`,
+`.asrbar__model`, `.asrbar__download`, `.asrbar__gpu`, `.asrbar__start`, `.asrbar__cancel`,
+`.asrbar__progress`, `.asrbar__status`, `.asrbar__backend`, `.asrbar__error`, `.asrbar__cue`
+
+`.asrbar__cue` carries `data-start` and `data-end` in milliseconds, which is how the spec checks cue
+times without parsing the timecodes it renders.
 
 Readiness has no dedicated signal: a video is loaded when `.stage__empty` is gone **and**
 `.controls__button` is enabled. A subtitle file is open when `.subbar__status` stops saying
@@ -112,6 +136,36 @@ with the specs above, and this is the only place that needs it so far.
 Subtitle fixtures are committed, so nothing generates them. The save-as test writes into
 `$SUBLORE_E2E_DATA_HOME/save-as`, never into the repo and never beside a fixture.
 
+## The stand-in sidecar, and why the transcription spec does not run whisper
+
+`asr.spec.js` drives the whole app: the real ffmpeg extracts real audio from `sample.mkv`, and the
+real JSON parser, segmentation rule and IPC layer all run. What it does not run is whisper itself,
+because that would need a 77 MB model download in every CI job and a run too short to cancel
+deterministically.
+
+In its place, `wdio.conf.js` points `SUBLORE_WHISPER_BIN` at `tools/whisper-stub.mjs`, copied into
+the run's temp directory so the repository is never written to. The stub:
+
+- prints the exact progress literal whisper prints, at a pace a control file chooses (`fast`
+  finishes at once, `slow` keeps going until it is killed, which is what makes the cancel test
+  deterministic instead of a race);
+- writes `fixtures/asr/whisper-tiny-en.json`, a byte-exact capture of a real whisper run, where
+  whisper would have written its own, so everything downstream parses genuine whisper output;
+- records its pid and its command line, which is what the cancellation and CPU checks read;
+- spawns nothing of its own, exactly like `whisper-cli`, so the orphan check asks about the same
+  shape of process tree.
+
+The model beside it is a real copy of `ggml-tiny.en.bin`: the app hashes a model against its
+catalogue row before every run, so a stand-in of the right length would be refused, which is what the
+damaged-model test asserts. The stub sidecar never opens the file.
+`src-tauri/tests/asr_commands.rs` asserts against the same capture in Rust, so the two layers cannot
+drift apart silently.
+
+What this spec therefore does **not** prove: that whisper transcribes correctly, that a real Vulkan
+build falls back to the CPU binary, and that a model download works. Those live in
+`crates/sublore-asr/tests/real_sidecar.rs` behind `--features sublore-asr/real-asr`, which is not
+compiled by default and fails loudly rather than skipping when its prerequisites are missing.
+
 ## Why `pnpm e2e:build`, never `cargo build`
 
 `tauri build` runs `cargo build --bins --features tauri/custom-protocol`, and that feature is what
@@ -121,5 +175,5 @@ connection error on a blank page. That is why `lib/paths.js` names `pnpm e2e:bui
 message, and why running `cargo build` or `cargo test` after it invalidates the binary: both rewrite
 `target/debug/sublore` without the feature.
 
-All eight checks were run against a `pnpm e2e:build` binary with nothing listening on port 1420, and
-all eight pass.
+All twelve checks were run against a `pnpm e2e:build` binary with nothing listening on port 1420, and
+all twelve pass.

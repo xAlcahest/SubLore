@@ -14,8 +14,26 @@ export function focusWindow(id) {
   xdotool(["windowfocus", "--sync", id]);
 }
 
+/** Where the pointer is, in root coordinates. */
+function pointerLocation() {
+  const shell = xdotool(["getmouselocation", "--shell"]);
+  const x = /^X=(-?\d+)$/m.exec(shell);
+  const y = /^Y=(-?\d+)$/m.exec(shell);
+  if (x === null || y === null) {
+    throw new Error(`xdotool getmouselocation printed no X and Y lines:\n${shell}`);
+  }
+  return { x: Number(x[1]), y: Number(y[1]) };
+}
+
 export function clickAt(x, y) {
-  xdotool(["mousemove", "--sync", String(Math.round(x)), String(Math.round(y))]);
+  const target = { x: Math.round(x), y: Math.round(y) };
+  // `mousemove --sync` waits for the pointer to leave where it was, so asking it for the position
+  // the pointer already holds never returns while a window sits under it. Clicking the same
+  // element twice in a row is exactly that case. See e2e/README.md.
+  const now = pointerLocation();
+  if (now.x !== target.x || now.y !== target.y) {
+    xdotool(["mousemove", "--sync", String(target.x), String(target.y)]);
+  }
   xdotool(["click", "1"]);
 }
 
