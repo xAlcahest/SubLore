@@ -1,0 +1,12 @@
+[package]
+name = "sublore-edit"
+version = "0.1.0"
+description = "Editing a lossless subtitle document: byte splices, re-parsed and verified"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+# No third-party dependency, as in sublore-formats and sublore-io. The one entry is a first-party
+# path dependency on the parsers this crate edits through. See BACKLOG.md M2.1.
+[dependencies]
+sublore-formats = { path = "../sublore-formats" }
