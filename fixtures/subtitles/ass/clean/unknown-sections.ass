@@ -1,0 +1,28 @@
+[Script Info]
+Title: Salvage crew
+ScriptType: v4.00+
+
+[Aegisub Project Garbage]
+Last Style Storage: Default
+Audio File: ../audio/ep07.wav
+Video File: ../video/ep07.mkv
+Video AR Value: 1.777778
+Active Line: 4
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,40,1
+
+[Fonts]
+fontname: Trebuchet_MS_B0.ttf
+!!W`4!!!!!W`4!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+04!!!!W`4!!!!!!!!!!!!!!04!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+[Whatever]
+Nothing in any spec produces this section
+key=value
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:12.00,0:00:14.50,Default,,0,0,0,,The crane is rated for nine tonnes.
+Dialogue: 0,0:00:14.60,0:00:17.20,Default,,0,0,0,,The container weighs eleven.

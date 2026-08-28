@@ -1,0 +1,18 @@
+WEBVTT
+
+REGION
+id:fred
+width:40%
+lines:3
+regionanchor:0%,100%
+viewportanchor:10%,90%
+scroll:up
+
+00:00:00.500 --> 00:00:02.000 align:start position:10%,line-left size:35% vertical:rl region:fred
+Up here, apparently.
+
+00:00:02.200 --> 00:00:04.000 line:90% align:center
+And back down where the eyes are.
+
+00:00:04.200 --> 00:00:06.000
+No settings on this one at all.

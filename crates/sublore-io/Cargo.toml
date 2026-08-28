@@ -1,0 +1,10 @@
+[package]
+name = "sublore-io"
+version = "0.1.0"
+description = "Durable file writes for Sublore: atomic replace and rolling backups"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Deliberately empty, as in sublore-formats. See BACKLOG.md M1.4.
+[dependencies]

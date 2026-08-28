@@ -1,0 +1,11 @@
+1
+00:00:01.5 --> 00:00:03.75
+Dots instead of commas, and a short fraction.
+
+2
+0:00:04.250  -->  0:00:06.000
+One digit for the hour, and room around the arrow.
+
+3
+1:02:03.4 --> 1:02:05.75
+An hour in, still using dots.

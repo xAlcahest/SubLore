@@ -1,0 +1,10 @@
+WEBVTT
+
+   
+00:00:01.000 --> 00:00:02.000
+Two blank lines up there, one of them full of spaces.
+
+	
+
+00:00:02.500 --> 00:00:03.500
+And no newline at the end of this file.

@@ -1,0 +1,6 @@
+[Script Info]
+Title: Timing fields dropped
+
+[Events]
+Format: Layer, Style, Name, Effect, Text
+Dialogue: 0,Default,,,When does this line appear?

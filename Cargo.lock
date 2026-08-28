@@ -3000,12 +3000,22 @@ dependencies = [
  "libc",
  "libmpv2",
  "serde",
+ "sublore-formats",
+ "sublore-io",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "windows",
 ]
+
+[[package]]
+name = "sublore-formats"
+version = "0.1.0"
+
+[[package]]
+name = "sublore-io"
+version = "0.1.0"
 
 [[package]]
 name = "swift-rs"

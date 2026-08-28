@@ -1,0 +1,16 @@
+[Script Info]
+Title: Four speakers
+ScriptType: v4.00+
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,40,1
+Style: Sign Top ,Arial,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,8,20,20,20,1  
+Style: Narrator Italic,Georgia,48,&H00E0E0E0,&H000000FF,&H00000000,&H00000000,0,-1,0,0,100,100,0,0,1,2,1,2,60,60,40,1
+Style: Flashback,Georgia,48,&H00C8C8FF,&H000000FF,&H00000000,&H00000000,0,-1,0,0,100,100,0,0,1,2,1,2,60,60,40,1	
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:02:10.00,0:02:12.40,Narrator Italic,,0,0,0,,Two winters earlier, on the same pier.
+Dialogue: 0,0:02:12.50,0:02:15.00,Flashback,Ingrid,0,0,0,,You said the same thing about the last boat.
+Dialogue: 1,0:02:12.50,0:02:15.00,Sign Top ,,0,0,0,,HARBOUR OFFICE 

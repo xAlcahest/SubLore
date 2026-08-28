@@ -1,0 +1,7 @@
+1
+00:00:01,000 --> 00:00:03,000  X1:040 X2:600 Y1:400 Y2:496
+Ripped off a DVD, coordinates and all.
+
+2
+00:00:03,100 --> 00:00:05,000  X1:040 X2:600 Y1:400 Y2:496
+The player ignores them. So do we.

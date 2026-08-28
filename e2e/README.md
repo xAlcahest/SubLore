@@ -1,4 +1,4 @@
-# E2E smoke harness (M0.5)
+# E2E harness (M0.5, extended by M1.5)
 
 Behavioral tests that launch the real Sublore binary on a real X server and assert what a person
 would see. Nothing here reads Rust or TypeScript source: the harness only drives the app and looks
@@ -6,13 +6,16 @@ at the window.
 
 ## What each spec proves
 
-| File                        | Test                                            | Acceptance criterion it binds                                                                                        |
-| --------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `specs/title.spec.js`       | `native window title is Sublore`                | The X11 toplevel is named `Sublore`. This is the AC test.                                                            |
-| `specs/title.spec.js`       | `document title is Sublore`                     | The webview loaded the app document, not a blank page. Different thing from the X11 name; both are asserted.         |
-| `specs/video.spec.js`       | `opens the sample fixture`                      | Typing `fixtures/video/sample.mkv` into the open bar and clicking Open reaches the ready state with no error banner. |
-| `specs/video.spec.js`       | `sizes the native video surface over the stage` | The native video child window is mapped and covers the `.stage__surface` rectangle within 2 px.                      |
-| `scripts/shutdown-check.js` | 4 checks                                        | Closing the window exits 0, unsignalled, with nothing left alive in the app's process group.                         |
+| File                        | Test                                                      | Acceptance criterion it binds                                                                                        |
+| --------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `specs/title.spec.js`       | `native window title is Sublore`                          | The X11 toplevel is named `Sublore`. This is the AC test.                                                            |
+| `specs/title.spec.js`       | `document title is Sublore`                               | The webview loaded the app document, not a blank page. Different thing from the X11 name; both are asserted.         |
+| `specs/video.spec.js`       | `opens the sample fixture`                                | Typing `fixtures/video/sample.mkv` into the open bar and clicking Open reaches the ready state with no error banner. |
+| `specs/video.spec.js`       | `sizes the native video surface over the stage`           | The native video child window is mapped and covers the `.stage__surface` rectangle within 2 px.                      |
+| `specs/subtitle.spec.js`    | `opens an SRT fixture and shows its format and cue count` | Opening `fixtures/subtitles/srt/clean/basic-lf.srt` puts `SRT · 3 cues · LF` on the status line with no error.       |
+| `specs/subtitle.spec.js`    | `saves a byte-identical copy`                             | Save-as of `basic-crlf.srt` writes a file the spec then compares byte for byte with `Buffer.compare`.                |
+| `specs/subtitle.spec.js`    | `reports a malformed file readably and stays usable`      | `srt/malformed/missing-arrow.srt` shows an error naming line 6, and the clean fixture opens straight after.          |
+| `scripts/shutdown-check.js` | 4 checks                                                  | Closing the window exits 0, unsignalled, with nothing left alive in the app's process group.                         |
 
 The window title AC is covered by the **native** assertion. The document title is a second, weaker
 signal kept because a blank webview is otherwise invisible to X11 assertions.
@@ -27,7 +30,7 @@ is ready, so the `IsViewable` check is what makes this test meaningful.
 ```sh
 sh fixtures/video/make-sample.sh     # the fixture is generated, never committed
 pnpm e2e:build                       # tauri build --debug --no-bundle
-xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e           # the two WebDriver specs
+xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e           # the three WebDriver specs
 xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:shutdown  # the clean-close check
 ```
 
@@ -58,7 +61,7 @@ A harness that runs nothing must not report success. WebdriverIO does not reliab
 specs, so `wdio.conf.js` asserts the count itself:
 
 ```js
-const EXPECTED_TESTS = 4;
+const EXPECTED_TESTS = 7;
 ```
 
 `onComplete` throws if fewer than that many tests passed, which covers a deleted spec file, an
@@ -95,10 +98,19 @@ answers to the same name and is listed first. `lib/x11.js` selects on the 1024x7
 There are no `data-testid` attributes; these class names from `src/App.tsx` and `src/components/`
 are the contract. Renaming one breaks the harness.
 
-`.bar__input`, `.bar__button`, `.app__error`, `.stage__surface`, `.stage__empty`, `.controls__button`
+`.bar__input`, `.bar__button`, `.app__error`, `.stage__surface`, `.stage__empty`, `.controls__button`,
+`.subbar__input`, `.subbar__open`, `.subbar__dest`, `.subbar__save`, `.subbar__status`, `.subbar__error`
 
 Readiness has no dedicated signal: a video is loaded when `.stage__empty` is gone **and**
-`.controls__button` is enabled.
+`.controls__button` is enabled. A subtitle file is open when `.subbar__status` stops saying
+"No subtitle file open."; `.subbar__error` is absent from the DOM when there is nothing wrong.
+
+`subtitle.spec.js` types four different paths through one field, so it clears the field with a
+ctrl+a of its own before typing. `lib/input.js` is deliberately not extended for that: it is shared
+with the specs above, and this is the only place that needs it so far.
+
+Subtitle fixtures are committed, so nothing generates them. The save-as test writes into
+`$SUBLORE_E2E_DATA_HOME/save-as`, never into the repo and never beside a fixture.
 
 ## Why `pnpm e2e:build`, never `cargo build`
 
@@ -109,5 +121,5 @@ connection error on a blank page. That is why `lib/paths.js` names `pnpm e2e:bui
 message, and why running `cargo build` or `cargo test` after it invalidates the binary: both rewrite
 `target/debug/sublore` without the feature.
 
-All five checks were run against a `pnpm e2e:build` binary with nothing listening on port 1420, and
-all five pass.
+All eight checks were run against a `pnpm e2e:build` binary with nothing listening on port 1420, and
+all eight pass.

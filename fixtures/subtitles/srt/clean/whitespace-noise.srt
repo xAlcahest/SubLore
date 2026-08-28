@@ -1,0 +1,8 @@
+1   
+00:00:01,000 --> 00:00:03,000	
+Trailing spaces live at the end of this line.  
+	And this one starts with a tab.
+
+2	
+00:00:04,000 --> 00:00:05,500   
+This one ends on a tab.	

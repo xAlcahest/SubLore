@@ -1,0 +1,15 @@
+1
+00:00:01,000 --> 00:00:03,000
+<i>Half of this is markup</i> and half is not.
+
+2
+00:00:03,100 --> 00:00:05,000
+<b>Careful</b> with <font color="#ff0000">the red wire</font>.
+
+3
+00:00:05,100 --> 00:00:07,000
+{\an8}Up at the top, where the sign is.
+
+4
+00:00:07,100 --> 00:00:09,000
+Salt &amp; pepper, and 5 < 6 is not a tag.

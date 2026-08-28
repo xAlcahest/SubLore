@@ -118,3 +118,44 @@ body {
   font-variant-numeric: tabular-nums;
   font-size: 0.875rem;
 }
+
+.subbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--app-line);
+}
+
+.subbar__input,
+.subbar__dest {
+  flex: 1;
+  min-width: 10rem;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.subbar__open,
+.subbar__save {
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.subbar__status,
+.subbar__error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--app-line);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.subbar__error {
+  color: var(--app-error);
+}

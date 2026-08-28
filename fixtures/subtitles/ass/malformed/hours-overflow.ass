@@ -1,0 +1,6 @@
+[Script Info]
+Title: Past the end of time
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,1000:00:00.00,1000:00:05.00,Default,,0,0,0,,Long after the heat death.

@@ -1,0 +1,12 @@
+1
+00:00:02,120 --> 00:00:04,880
+The harbour was empty when we got there.
+
+2
+00:00:05,000 --> 00:00:08,340
+Nobody had told the crew we were coming,
+so we sat on the dock until it got light.
+
+3
+00:00:09,100 --> 00:00:11,760
+By then the fog had eaten the boats.

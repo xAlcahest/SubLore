@@ -1,0 +1,5 @@
+1
+00:00:01,000 --> 00:00:03,000
+A complete cue, and then the file stops.
+
+2
