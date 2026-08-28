@@ -1,3 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/sublore-formats", "crates/sublore-io", "src-tauri"]
+members = [
+  "crates/sublore-asr",
+  "crates/sublore-formats",
+  "crates/sublore-io",
+  "src-tauri",
+]

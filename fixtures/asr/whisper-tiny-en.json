@@ -1,0 +1,422 @@
+{
+	"systeminfo": "WHISPER : VITISAI = 0 | COREML = 0 | OPENVINO = 0 | CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | OPENMP = 1 | REPACK = 1 | ",
+	"model": {
+		"type": "tiny",
+		"multilingual": false,
+		"vocab": 51864,
+		"audio": {
+			"ctx": 1500,
+			"state": 384,
+			"head": 6,
+			"layer": 4
+		},
+		"text": {
+			"ctx": 448,
+			"state": 384,
+			"head": 6,
+			"layer": 4
+		},
+		"mels": 80,
+		"ftype": 1
+	},
+	"params": {
+		"model": "models/ggml-tiny.en.bin",
+		"language": "en",
+		"translate": false
+	},
+	"result": {
+		"language": "en"
+	},
+	"transcription": [
+		{
+			"timestamps": {
+				"from": "00:00:00,000",
+				"to": "00:00:04,320"
+			},
+			"offsets": {
+				"from": 0,
+				"to": 4320
+			},
+			"text": " Subloor keep your terminology consistent across every episode.",
+			"tokens": [
+				{
+					"text": "[_BEG_]",
+					"timestamps": {
+						"from": "00:00:00,000",
+						"to": "00:00:00,000"
+					},
+					"offsets": {
+						"from": 0,
+						"to": 0
+					},
+					"id": 50363,
+					"p": 0.985549,
+					"t_dtw": -1
+				},
+				{
+					"text": " Sub",
+					"timestamps": {
+						"from": "00:00:00,020",
+						"to": "00:00:00,200"
+					},
+					"offsets": {
+						"from": 20,
+						"to": 200
+					},
+					"id": 3834,
+					"p": 0.62199,
+					"t_dtw": -1
+				},
+				{
+					"text": "l",
+					"timestamps": {
+						"from": "00:00:00,210",
+						"to": "00:00:00,240"
+					},
+					"offsets": {
+						"from": 210,
+						"to": 240
+					},
+					"id": 75,
+					"p": 0.293867,
+					"t_dtw": -1
+				},
+				{
+					"text": "oor",
+					"timestamps": {
+						"from": "00:00:00,280",
+						"to": "00:00:00,450"
+					},
+					"offsets": {
+						"from": 280,
+						"to": 450
+					},
+					"id": 2675,
+					"p": 0.131219,
+					"t_dtw": -1
+				},
+				{
+					"text": " keep",
+					"timestamps": {
+						"from": "00:00:00,520",
+						"to": "00:00:00,710"
+					},
+					"offsets": {
+						"from": 520,
+						"to": 710
+					},
+					"id": 1394,
+					"p": 0.463354,
+					"t_dtw": -1
+				},
+				{
+					"text": " your",
+					"timestamps": {
+						"from": "00:00:00,850",
+						"to": "00:00:01,070"
+					},
+					"offsets": {
+						"from": 850,
+						"to": 1070
+					},
+					"id": 534,
+					"p": 0.586413,
+					"t_dtw": -1
+				},
+				{
+					"text": " terminology",
+					"timestamps": {
+						"from": "00:00:01,070",
+						"to": "00:00:01,870"
+					},
+					"offsets": {
+						"from": 1070,
+						"to": 1870
+					},
+					"id": 29191,
+					"p": 0.71097,
+					"t_dtw": -1
+				},
+				{
+					"text": " consistent",
+					"timestamps": {
+						"from": "00:00:01,870",
+						"to": "00:00:02,620"
+					},
+					"offsets": {
+						"from": 1870,
+						"to": 2620
+					},
+					"id": 6414,
+					"p": 0.971361,
+					"t_dtw": -1
+				},
+				{
+					"text": " across",
+					"timestamps": {
+						"from": "00:00:02,620",
+						"to": "00:00:03,170"
+					},
+					"offsets": {
+						"from": 2620,
+						"to": 3170
+					},
+					"id": 1973,
+					"p": 0.919916,
+					"t_dtw": -1
+				},
+				{
+					"text": " every",
+					"timestamps": {
+						"from": "00:00:03,180",
+						"to": "00:00:03,640"
+					},
+					"offsets": {
+						"from": 3180,
+						"to": 3640
+					},
+					"id": 790,
+					"p": 0.994514,
+					"t_dtw": -1
+				},
+				{
+					"text": " episode",
+					"timestamps": {
+						"from": "00:00:03,640",
+						"to": "00:00:04,030"
+					},
+					"offsets": {
+						"from": 3640,
+						"to": 4030
+					},
+					"id": 4471,
+					"p": 0.991701,
+					"t_dtw": -1
+				},
+				{
+					"text": ".",
+					"timestamps": {
+						"from": "00:00:04,320",
+						"to": "00:00:04,320"
+					},
+					"offsets": {
+						"from": 4320,
+						"to": 4320
+					},
+					"id": 13,
+					"p": 0.387564,
+					"t_dtw": -1
+				},
+				{
+					"text": "[_TT_216]",
+					"timestamps": {
+						"from": "00:00:04,320",
+						"to": "00:00:04,320"
+					},
+					"offsets": {
+						"from": 4320,
+						"to": 4320
+					},
+					"id": 50579,
+					"p": 0.0457511,
+					"t_dtw": -1
+				}
+			]
+		},
+		{
+			"timestamps": {
+				"from": "00:00:04,320",
+				"to": "00:00:08,560"
+			},
+			"offsets": {
+				"from": 4320,
+				"to": 8560
+			},
+			"text": " But translate or open the subtitle file and the memory files.",
+			"tokens": [
+				{
+					"text": " But",
+					"timestamps": {
+						"from": "00:00:04,350",
+						"to": "00:00:04,560"
+					},
+					"offsets": {
+						"from": 4350,
+						"to": 4560
+					},
+					"id": 887,
+					"p": 0.44542,
+					"t_dtw": -1
+				},
+				{
+					"text": " translate",
+					"timestamps": {
+						"from": "00:00:04,570",
+						"to": "00:00:05,330"
+					},
+					"offsets": {
+						"from": 4570,
+						"to": 5330
+					},
+					"id": 15772,
+					"p": 0.884092,
+					"t_dtw": -1
+				},
+				{
+					"text": " or",
+					"timestamps": {
+						"from": "00:00:05,330",
+						"to": "00:00:05,490"
+					},
+					"offsets": {
+						"from": 5330,
+						"to": 5490
+					},
+					"id": 393,
+					"p": 0.601743,
+					"t_dtw": -1
+				},
+				{
+					"text": " open",
+					"timestamps": {
+						"from": "00:00:05,500",
+						"to": "00:00:05,830"
+					},
+					"offsets": {
+						"from": 5500,
+						"to": 5830
+					},
+					"id": 1280,
+					"p": 0.987582,
+					"t_dtw": -1
+				},
+				{
+					"text": " the",
+					"timestamps": {
+						"from": "00:00:05,830",
+						"to": "00:00:06,080"
+					},
+					"offsets": {
+						"from": 5830,
+						"to": 6080
+					},
+					"id": 262,
+					"p": 0.447423,
+					"t_dtw": -1
+				},
+				{
+					"text": " subtitle",
+					"timestamps": {
+						"from": "00:00:06,080",
+						"to": "00:00:06,750"
+					},
+					"offsets": {
+						"from": 6080,
+						"to": 6750
+					},
+					"id": 37960,
+					"p": 0.761146,
+					"t_dtw": -1
+				},
+				{
+					"text": " file",
+					"timestamps": {
+						"from": "00:00:06,750",
+						"to": "00:00:07,120"
+					},
+					"offsets": {
+						"from": 6750,
+						"to": 7120
+					},
+					"id": 2393,
+					"p": 0.958826,
+					"t_dtw": -1
+				},
+				{
+					"text": " and",
+					"timestamps": {
+						"from": "00:00:07,120",
+						"to": "00:00:07,330"
+					},
+					"offsets": {
+						"from": 7120,
+						"to": 7330
+					},
+					"id": 290,
+					"p": 0.697669,
+					"t_dtw": -1
+				},
+				{
+					"text": " the",
+					"timestamps": {
+						"from": "00:00:07,330",
+						"to": "00:00:07,540"
+					},
+					"offsets": {
+						"from": 7330,
+						"to": 7540
+					},
+					"id": 262,
+					"p": 0.920328,
+					"t_dtw": -1
+				},
+				{
+					"text": " memory",
+					"timestamps": {
+						"from": "00:00:07,540",
+						"to": "00:00:07,960"
+					},
+					"offsets": {
+						"from": 7540,
+						"to": 7960
+					},
+					"id": 4088,
+					"p": 0.974915,
+					"t_dtw": -1
+				},
+				{
+					"text": " files",
+					"timestamps": {
+						"from": "00:00:07,970",
+						"to": "00:00:08,320"
+					},
+					"offsets": {
+						"from": 7970,
+						"to": 8320
+					},
+					"id": 3696,
+					"p": 0.240718,
+					"t_dtw": -1
+				},
+				{
+					"text": ".",
+					"timestamps": {
+						"from": "00:00:08,320",
+						"to": "00:00:08,360"
+					},
+					"offsets": {
+						"from": 8320,
+						"to": 8360
+					},
+					"id": 13,
+					"p": 0.903261,
+					"t_dtw": -1
+				},
+				{
+					"text": "[_TT_428]",
+					"timestamps": {
+						"from": "00:00:08,560",
+						"to": "00:00:08,560"
+					},
+					"offsets": {
+						"from": 8560,
+						"to": 8560
+					},
+					"id": 50791,
+					"p": 0.0455236,
+					"t_dtw": -1
+				}
+			]
+		}
+	]
+}

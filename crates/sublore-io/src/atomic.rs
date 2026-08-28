@@ -259,9 +259,10 @@ fn rename(temp: &Path, destination: &Path) -> Result<(), IoError> {
         .map_err(|error| IoError::from_io(&error, destination, IoErrorKind::RenameFailed))
 }
 
-/// Persist the rename itself, so it survives a power cut.
+/// Persist the rename itself, so it survives a power cut. Public because the model download
+/// finishes with the same rename and owes the user the same durability. See BACKLOG.md M3.2.
 #[cfg(unix)]
-fn sync_dir(dir: &Path) -> Result<(), IoError> {
+pub fn sync_dir(dir: &Path) -> Result<(), IoError> {
     let handle =
         File::open(dir).map_err(|error| IoError::from_io(&error, dir, IoErrorKind::SyncFailed))?;
     handle
@@ -271,7 +272,7 @@ fn sync_dir(dir: &Path) -> Result<(), IoError> {
 
 /// Windows cannot open a directory as a file; the rename is durable there by other means.
 #[cfg(not(unix))]
-fn sync_dir(_dir: &Path) -> Result<(), IoError> {
+pub fn sync_dir(_dir: &Path) -> Result<(), IoError> {
     Ok(())
 }
 

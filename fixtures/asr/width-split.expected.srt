@@ -1,0 +1,9 @@
+1
+00:00:00,100 --> 00:00:05,200
+The translator opens a subtitle file and
+the memory follows across every single
+
+2
+00:00:05,300 --> 00:00:06,300
+episode forever.
+

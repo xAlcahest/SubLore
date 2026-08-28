@@ -1,0 +1,9 @@
+{
+  "audio_duration_ms": 4000,
+  "words": [
+    { "text": "Wait", "start_ms": 500, "end_ms": 900 },
+    { "text": "for", "start_ms": 950, "end_ms": 1150 },
+    { "text": "it", "start_ms": 1200, "end_ms": 1400 },
+    { "text": "now.", "start_ms": 2300, "end_ms": 2700 }
+  ]
+}

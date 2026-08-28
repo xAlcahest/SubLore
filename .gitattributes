@@ -4,3 +4,7 @@
 # Subtitle fixtures are byte-exact test data: BOMs and line endings are the thing under test.
 # Without this, a Windows clone with core.autocrlf=true rewrites every one of them. See BACKLOG.md M1.1.
 fixtures/subtitles/** -text
+
+# Generated-cue fixtures are byte-exact too: the expected SRT is compared to what M3.3 renders.
+# See BACKLOG.md M3.3.
+fixtures/asr/** -text

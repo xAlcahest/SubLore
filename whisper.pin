@@ -1,0 +1,5 @@
+# The whisper.cpp source Sublore's sidecar is built from. scripts/build-whisper.sh reads this file.
+# A commit SHA is itself a cryptographic checksum, so the source needs no separate hash.
+# Bumping the pin is its own PR: it re-runs the real-binary suite. See BACKLOG.md M3.1.
+repo=https://github.com/ggml-org/whisper.cpp.git
+commit=978113305b2ead22249b881deafa131dc8884911

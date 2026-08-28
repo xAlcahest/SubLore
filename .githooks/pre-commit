@@ -19,6 +19,26 @@ check() {
 	"$@" || fail "'$*' failed"
 }
 
+# Whisper binaries, models and generated speech never enter the repo (CLAUDE.md §8).
+# Checked before the slow tools run, so a mistake is caught in a second rather than a minute.
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+for path in $staged; do
+	case "$path" in
+	.whisper/*) fail "'$path' is a build artifact; .whisper/ is never committed" ;;
+	*.bin) fail "'$path' looks like a model; models are downloaded, never committed" ;;
+	fixtures/audio/*.wav) fail "'$path' is generated speech; commit fixtures/audio/make-speech.sh instead" ;;
+	esac
+	# A file this large that HEAD does not already have is a binary that slipped through the
+	# patterns above. `git ls-files` would see the staged copy, so HEAD is what gets asked.
+	if ! git rev-parse --verify -q "HEAD:$path" >/dev/null 2>&1; then
+		blob=$(git rev-parse --verify -q ":$path") || continue
+		size=$(git cat-file -s "$blob" 2>/dev/null || echo 0)
+		if [ "$size" -gt 5242880 ]; then
+			fail "'$path' is $size bytes; nothing that large belongs in this repo"
+		fi
+	fi
+done
+
 check pnpm format:check
 check pnpm lint
 check cargo fmt --check

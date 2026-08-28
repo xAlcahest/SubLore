@@ -1,0 +1,11 @@
+{
+  "audio_duration_ms": 3000,
+  "words": [
+    { "text": "He", "start_ms": 0, "end_ms": 300 },
+    { "text": "said", "start_ms": 350, "end_ms": 700 },
+    { "text": "stop!\"", "start_ms": 750, "end_ms": 1100 },
+    { "text": "Then", "start_ms": 1200, "end_ms": 1500 },
+    { "text": "she", "start_ms": 1560, "end_ms": 1700 },
+    { "text": "left.", "start_ms": 1760, "end_ms": 2100 }
+  ]
+}

@@ -12,3 +12,9 @@ fixtures/subtitles/
 CLAUDE.md
 WORKFLOW.md
 BACKLOG.md
+
+# The whisper.cpp checkout and its build trees: not ours to format. See BACKLOG.md M3.1.
+.whisper/
+
+# A byte-exact capture of a real whisper run, and hand-written word lists. See BACKLOG.md M3.3.
+fixtures/asr/

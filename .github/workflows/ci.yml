@@ -172,9 +172,14 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # The harness never builds implicitly; both prerequisites are made here, explicitly.
+      # The harness never builds implicitly; every prerequisite is made here, explicitly.
       - name: Generate video fixture
         run: sh fixtures/video/make-sample.sh
+
+      # The app hashes the model before every run, so the transcription spec needs the real file.
+      # The stand-in sidecar never reads it. Downloaded here because CI asked, never by the app.
+      - name: Fetch the transcription model
+        run: sh scripts/fetch-model.sh
 
       - name: Build the app
         run: pnpm e2e:build

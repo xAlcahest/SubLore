@@ -19,3 +19,14 @@ src-tauri/gen/schemas/
 
 # Video fixtures are generated, never committed (fixtures/video/make-sample.sh)
 fixtures/video/*.mkv
+
+# The whisper.cpp source, both build trees and the two sidecar binaries. Built by
+# scripts/build-whisper.sh, never committed (CLAUDE.md §8).
+.whisper/
+
+# Speech fixtures are generated, never committed: no voice audio in the repo
+# (fixtures/audio/make-speech.sh).
+fixtures/audio/*.wav
+
+# Whisper models are downloaded by the user, never committed.
+*.bin
