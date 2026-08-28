@@ -3036,6 +3036,7 @@ dependencies = [
  "libc",
  "libmpv2",
  "serde",
+ "sublore-edit",
  "sublore-formats",
  "sublore-io",
  "sublore-project",
@@ -3044,6 +3045,13 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "windows",
+]
+
+[[package]]
+name = "sublore-edit"
+version = "0.1.0"
+dependencies = [
+ "sublore-formats",
 ]
 
 [[package]]

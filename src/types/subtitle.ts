@@ -14,6 +14,43 @@ export type SubtitleSummary = {
   byteLength: number;
 };
 
+/** One row of the cue list. Its index is its position in the array, never a field of its own. */
+export type CueRow = {
+  startMs: number;
+  endMs: number;
+  /** Line breaks are always "\n" here, whatever the file uses. */
+  text: string;
+  /** An ASS `Comment:` event: listed and editable, but not a line a player draws. */
+  comment: boolean;
+  /** The cue's own number, when the file wrote one. Never renumbered. */
+  number: number | null;
+};
+
+export type SubtitleOpened = {
+  summary: SubtitleSummary;
+  revision: number;
+  /** Every cue, ASS comments included, unlike `summary.cueCount`. */
+  cues: CueRow[];
+  canUndo: boolean;
+  canRedo: boolean;
+  dirty: boolean;
+  truncated: boolean;
+};
+
+/** One contiguous run of rows replaced by another, and the state that changed with it. */
+export type CuePatch = {
+  revision: number;
+  from: number;
+  removed: number;
+  cues: CueRow[];
+  /** For the status line: ASS `Comment:` events excluded. */
+  cueCount: number;
+  canUndo: boolean;
+  canRedo: boolean;
+  dirty: boolean;
+  truncated: boolean;
+};
+
 export type SubtitleSaved = {
   path: string;
   bytesWritten: number;
@@ -32,6 +69,12 @@ export type SubtitleErrorCode =
   | "writeFailed"
   | "backupFailed"
   | "permissionDenied"
+  | "noDocument"
+  | "staleRevision"
+  | "invalidCue"
+  | "unwritableText"
+  | "editRefused"
+  | "unsavedChanges"
   | "commandFailed";
 
 /** Why a parse stopped. Sent only with `parseFailed`, always together with a line number. */
@@ -66,6 +109,12 @@ const ERROR_CODES: ReadonlySet<string> = new Set<SubtitleErrorCode>([
   "writeFailed",
   "backupFailed",
   "permissionDenied",
+  "noDocument",
+  "staleRevision",
+  "invalidCue",
+  "unwritableText",
+  "editRefused",
+  "unsavedChanges",
   "commandFailed",
 ]);
 

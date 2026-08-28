@@ -6,6 +6,7 @@ use std::io;
 use std::path::Path;
 
 use serde::Serialize;
+use sublore_edit::error::{EditError, EditErrorKind};
 use sublore_formats::{ParseError, ParseErrorKind};
 use sublore_io::error::{IoError, IoErrorKind};
 
@@ -29,6 +30,21 @@ pub enum SubtitleErrorCode {
     WriteFailed,
     BackupFailed,
     PermissionDenied,
+    /// A mutation, undo, redo or save arrived with no file open.
+    NoDocument,
+    /// The caller's revision is not the session's, so its cue indices describe a list that has
+    /// moved. The UI refetches rather than editing the wrong cue.
+    StaleRevision,
+    /// No cue with that index in the open document.
+    InvalidCue,
+    /// The text cannot be written in this format without changing the file's structure.
+    UnwritableText,
+    /// Sublore's own guard refused the edit and nothing was changed. Six internal kinds collapse
+    /// here because the user's next move is the same for all of them; `detail` keeps the
+    /// difference for the log.
+    EditRefused,
+    /// Opening or closing would drop edits the user has not saved.
+    UnsavedChanges,
     /// The command machinery itself failed. Never a situation the user created.
     CommandFailed,
 }
@@ -144,6 +160,25 @@ impl SubtitleError {
         Self::new(code, error.to_string())
     }
 
+    /// Map a refused edit onto the IPC contract. Exhaustive on purpose: a new [`EditErrorKind`]
+    /// must break this build rather than fall into a wildcard.
+    ///
+    /// No `reason` travels with these: [`SubtitleReason`] describes grammar failures in a file
+    /// being read, which is a different thing from an edit Sublore declined to make.
+    pub fn from_edit(error: EditError) -> Self {
+        let code = match error.kind {
+            EditErrorKind::NoSuchCue => SubtitleErrorCode::InvalidCue,
+            EditErrorKind::UnwritableText => SubtitleErrorCode::UnwritableText,
+            EditErrorKind::BadRange
+            | EditErrorKind::StaleSplice
+            | EditErrorKind::UnwritableTimecode
+            | EditErrorKind::NotApplicable
+            | EditErrorKind::Reparse
+            | EditErrorKind::Unverified => SubtitleErrorCode::EditRefused,
+        };
+        Self::new(code, error.to_string())
+    }
+
     /// Map an operating-system failure from opening or reading the source file.
     pub(crate) fn from_read(error: &io::Error, path: &Path) -> Self {
         let code = match error.kind() {
@@ -168,6 +203,7 @@ mod tests {
     use super::{SubtitleError, SubtitleErrorCode, SubtitleReason};
     use std::io;
     use std::path::Path;
+    use sublore_edit::error::{EditError, EditErrorKind};
     use sublore_formats::{ParseError, ParseErrorKind};
     use sublore_io::error::{IoError, IoErrorKind};
 
@@ -288,6 +324,33 @@ mod tests {
             assert_eq!(error.code, code, "{kind:?}");
             assert_eq!(error.line, None, "{kind:?}");
             assert!(error.detail.contains("ep01.srt"), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn every_refused_edit_maps_to_a_code_and_none_of_them_blames_a_line() {
+        for (kind, code) in [
+            (EditErrorKind::NoSuchCue, SubtitleErrorCode::InvalidCue),
+            (EditErrorKind::BadRange, SubtitleErrorCode::EditRefused),
+            (EditErrorKind::StaleSplice, SubtitleErrorCode::EditRefused),
+            (
+                EditErrorKind::UnwritableText,
+                SubtitleErrorCode::UnwritableText,
+            ),
+            (
+                EditErrorKind::UnwritableTimecode,
+                SubtitleErrorCode::EditRefused,
+            ),
+            (EditErrorKind::NotApplicable, SubtitleErrorCode::EditRefused),
+            (EditErrorKind::Reparse, SubtitleErrorCode::EditRefused),
+            (EditErrorKind::Unverified, SubtitleErrorCode::EditRefused),
+        ] {
+            let error = SubtitleError::from_edit(EditError::new(kind, "cue 4 of 3"));
+            assert_eq!(error.code, code, "{kind:?}");
+            // A refused edit is not a grammar failure in a file being read, so it names no line.
+            assert_eq!(error.line, None, "{kind:?}");
+            assert_eq!(error.reason, None, "{kind:?}");
+            assert!(error.detail.contains("cue 4 of 3"), "{kind:?}");
         }
     }
 

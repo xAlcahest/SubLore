@@ -53,11 +53,11 @@ Goal: open and save SRT, ASS, VTT without destroying anything, including files f
 
 Goal: the free product's core: cue list, text editing, timing adjust against waveform, side-by-side source/target view.
 
-- [ ] **M2.1 Editable document model.** Mutation API over `sublore-formats` (edit cue text, edit times, insert, delete, split, merge) that keeps the lossless guarantee: everything the parser preserved stays preserved for untouched cues, and every mutation re-runs the tiling/coverage guard M1 added.
+- [x] **M2.1 Editable document model.** Mutation API over `sublore-formats` (edit cue text, edit times, insert, delete, split, merge) that keeps the lossless guarantee: everything the parser preserved stays preserved for untouched cues, and every mutation re-runs the tiling/coverage guard M1 added.
   - AC: mutating one cue in a fixture and saving leaves every other byte of the file identical; a mutation that would break segment coverage is refused with a structured error, never written; property test over random edit sequences never produces a document that fails the guard.
-- [ ] **M2.2 Undo/redo.** Single undo stack for every document mutation, with coalescing of consecutive typing into one entry.
+- [x] **M2.2 Undo/redo.** Single undo stack for every document mutation, with coalescing of consecutive typing into one entry.
   - AC: any sequence of edits can be undone back to the exact original bytes and redone forward to the exact edited bytes; undo depth is bounded and documented; typing a word is one undo step, not one per character.
-- [ ] **M2.3 Cue list UI with editing.** Virtualized cue list (index, start, end, text), inline text editing, keyboard navigation, dirty state, save/save-as.
+- [x] **M2.3 Cue list UI with editing.** Virtualized cue list (index, start, end, text), inline text editing, keyboard navigation, dirty state, save/save-as.
   - AC: E2E: open the 2000-cue fixture, edit a cue's text, save, reopen, the edit is there and the rest is byte-identical; undo restores it; scrolling and typing show no visible lag (measured, budget CLAUDE §7: open under 1 s).
 - [ ] **M2.4 Waveform.** Audio peaks extracted from the media (via the existing libmpv/ffmpeg path, off the main thread, cancellable) and rendered as a zoomable waveform with the playhead.
   - AC: peaks for a 60 s fixture appear within budget and match the audio (silence reads flat, the 440 Hz tone reads full); playhead tracks playback; zoom and scroll stay responsive; no main-thread blocking.
@@ -65,6 +65,8 @@ Goal: the free product's core: cue list, text editing, timing adjust against wav
   - AC: E2E: drag a cue boundary, the model times change accordingly and save round-trips; nudge shortcuts move by the documented step; every timing change is undoable.
 - [ ] **M2.6 Source/target side by side.** Two documents open at once (source and target), aligned by index, editing only the target.
   - AC: open two fixtures as source and target; rows align; editing the target never mutates the source file on disk; saving writes only the target.
+
+**Status M2 part A, 2026-08-28:** M2.1-M2.3 on `main`. New crate `sublore-edit` (splice-based mutation planning, verification, undo/redo with explicit run boundaries, edit sessions). 289 Rust tests and 17 E2E checks green; the 2000-cue fixture opens in 68 ms against a 1000 ms budget with 26 rows in the DOM. Review caught and fixed three real defects: ASS cue deletion refused between blank runs, undo coalescing two deliberate edits into one step, and a global Ctrl+Z stealing native undo from text inputs. M2.4-M2.6 not started.
 
 **Owner checklist M2:** open a real subtitle file with its video → edit some lines → adjust a cue against the waveform → undo a few times → save → reopen and confirm your edits are there and nothing else changed. Subtitle a 1-minute clip start to finish without another tool.
 
