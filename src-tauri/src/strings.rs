@@ -13,3 +13,7 @@ pub fn crash_body(report_path: &str) -> String {
          Reopen Sublore to continue. If this keeps happening, attach that file to a bug report."
     )
 }
+
+/// Titles for the two native file dialogs the project panel opens.
+pub const CHOOSE_PROJECT_FOLDER: &str = "Choose a project folder";
+pub const CHOOSE_PROJECT_FILE: &str = "Choose a video or subtitle file";
