@@ -1,3 +1,4 @@
+pub mod asr;
 pub mod crash;
 pub mod strings;
 pub mod subtitle;
@@ -25,6 +26,11 @@ pub fn run() -> tauri::Result<()> {
         .plugin(log_plugin())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            asr::asr_models,
+            asr::asr_model_download,
+            asr::asr_model_download_cancel,
+            asr::asr_transcribe_start,
+            asr::asr_transcribe_cancel,
             subtitle::subtitle_open,
             subtitle::subtitle_save_as,
             video::video_open,
@@ -41,6 +47,10 @@ pub fn run() -> tauri::Result<()> {
                 std::env::consts::OS
             );
             crash::force::trip(ForcePoint::Startup);
+            app.manage(asr::AsrState::default());
+            // A killed process cannot run its own cleanup, so abandoned run directories are swept
+            // here, off the main thread. See BACKLOG.md M3.1.
+            asr::sweep_scratch(app.handle());
             if let Err(error) = video::setup(app) {
                 log::error!("video setup failed: {error}");
                 return Err(error.into());
@@ -55,8 +65,15 @@ pub fn run() -> tauri::Result<()> {
         RunEvent::WindowEvent {
             event: WindowEvent::CloseRequested { .. },
             ..
-        } => shutdown_video(app_handle),
-        RunEvent::ExitRequested { .. } | RunEvent::Exit => shutdown_video(app_handle),
+        } => {
+            asr::shutdown(app_handle);
+            shutdown_video(app_handle);
+        }
+        RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+            // A transcription outlives the window that started it unless it is stopped here.
+            asr::shutdown(app_handle);
+            shutdown_video(app_handle);
+        }
         _ => {}
     });
 

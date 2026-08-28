@@ -1,14 +1,17 @@
 import SubtitleBar from "./components/SubtitleBar";
+import TranscribeBar from "./components/TranscribeBar";
 import VideoControls from "./components/VideoControls";
 import VideoOpenBar from "./components/VideoOpenBar";
 import VideoStage from "./components/VideoStage";
 import { useSubtitleFile } from "./hooks/useSubtitleFile";
+import { useTranscription } from "./hooks/useTranscription";
 import { useVideoPlayer, videoErrorMessage } from "./hooks/useVideoPlayer";
 import "./App.css";
 
 export default function App() {
   const { state, position, errorCode, open, togglePlayback, seek, setRegion } = useVideoPlayer();
   const subtitle = useSubtitleFile();
+  const transcription = useTranscription();
   const ready = state.status === "ready";
 
   return (
@@ -27,6 +30,7 @@ export default function App() {
         onOpen={(path) => void subtitle.open(path)}
         onSave={(destination) => void subtitle.saveAs(destination)}
       />
+      <TranscribeBar mediaPath={state.path} transcription={transcription} />
       <VideoStage hasVideo={ready} onRegionChange={setRegion} />
       <VideoControls
         enabled={ready}

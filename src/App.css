@@ -159,3 +159,81 @@ body {
 .subbar__error {
   color: var(--app-error);
 }
+
+.asrbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--app-line);
+}
+
+.asrbar__model {
+  min-width: 12rem;
+  padding: 0.3rem 0.4rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.asrbar__gpu-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.asrbar__download,
+.asrbar__download-cancel,
+.asrbar__start,
+.asrbar__cancel {
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.asrbar__status,
+.asrbar__error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--app-line);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.asrbar__error {
+  color: var(--app-error);
+}
+
+.asrbar__progress,
+.asrbar__download-progress {
+  display: block;
+  width: 100%;
+  height: 0.4rem;
+}
+
+/* Bounded on purpose: a long transcript must not push the video off the window. */
+.asrbar__cues {
+  max-height: 8rem;
+  margin: 0;
+  padding: 0.25rem 0.75rem;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--app-line);
+  list-style: none;
+  font-size: 0.8125rem;
+}
+
+.asrbar__cue {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.1rem 0;
+}
+
+.asrbar__cue-time {
+  color: #8a8a90;
+  font-variant-numeric: tabular-nums;
+}
