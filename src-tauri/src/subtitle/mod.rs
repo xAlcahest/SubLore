@@ -41,7 +41,9 @@ pub struct SubtitleState {
 
 impl SubtitleState {
     /// A handle the blocking half of a command can own, as `VideoState` hands out its player.
-    fn slot(&self) -> Arc<SessionSlot> {
+    // TODO(M2.6): narrow back to private. Public only so the close gate in `lib.rs` can read the
+    // session; M2.6 reshapes this signature for two documents anyway (owner ruling 2026-08-29).
+    pub fn slot(&self) -> Arc<SessionSlot> {
         Arc::clone(&self.session)
     }
 }
@@ -379,12 +381,75 @@ pub fn save(
     let mut guard = lock(slot)?;
     let session = current(&mut guard)?;
     check_revision(session, revision)?;
+    save_locked(session, backup_root)
+}
 
+/// The write itself, under a lock the caller already holds. Shared so the close gate cannot drift
+/// from the command, and so neither of them takes the lock twice.
+fn save_locked(
+    session: &mut EditSession,
+    backup_root: PathBuf,
+) -> Result<SubtitleSaved, SubtitleError> {
     let bytes = session.to_bytes();
     let outcome = save_with_backup(session.path(), &bytes, &BackupStore::new(backup_root))
         .map_err(SubtitleError::from_io)?;
     session.mark_saved();
     Ok(saved(outcome))
+}
+
+/// What the close gate needs before it decides whether to ask (BACKLOG N1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionState {
+    Clean,
+    Dirty,
+    /// The lock could not be taken: a command holds it, or one panicked holding it. Both mean the
+    /// gate must ask, because a needless question costs a click and a skipped one costs the work.
+    Unknown,
+}
+
+/// Never blocks. The gate runs on the main loop, and this mutex is held for the whole of
+/// `read_document` and of `save_with_backup`, so waiting here would freeze the window mid-save
+/// (CLAUDE.md §7).
+pub fn session_state(slot: &SessionSlot) -> SessionState {
+    match slot.try_lock() {
+        Ok(guard) => match guard.as_ref() {
+            Some(session) if session.dirty() => SessionState::Dirty,
+            _ => SessionState::Clean,
+        },
+        Err(_) => SessionState::Unknown,
+    }
+}
+
+/// Save at whatever revision the session holds, recovering a poisoned lock. `Ok(None)` means there
+/// was nothing to write.
+///
+/// The interactive commands refuse a poisoned session and that is right for them: a refused edit
+/// costs a retry. The close gate is the user's last chance to keep the work, so it recovers
+/// instead. Sound here because a mutation never edits the document in place: `plan::edit` builds a
+/// whole new document, `EditSession::commit` assigns it in one move, and `history` is only touched
+/// after the new document exists, so a panic leaves the session holding one whole document or the
+/// other and never half of one. The poison flag is cleared once the guard is in hand, or every
+/// later command would keep refusing a session this call just proved usable.
+///
+/// A clean session writes nothing. The gate can open on a session that is merely busy, and an
+/// unasked-for write would change the mtime of a file the user only opened, and would overwrite
+/// whatever another program put there in the meantime (CLAUDE.md §3.1).
+pub fn save_current(
+    slot: &SessionSlot,
+    backup_root: PathBuf,
+) -> Result<Option<SubtitleSaved>, SubtitleError> {
+    let mut guard = match slot.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            slot.clear_poison();
+            poisoned.into_inner()
+        }
+    };
+    let session = current(&mut guard)?;
+    if !session.dirty() {
+        return Ok(None);
+    }
+    save_locked(session, backup_root).map(Some)
 }
 
 /// Write the document somewhere else. The file being edited keeps its unsaved edits, and the
@@ -450,7 +515,8 @@ where
         })?
 }
 
-fn backup_root(app: &AppHandle) -> Result<PathBuf, SubtitleError> {
+// TODO(M2.6): narrow back to private, together with `SubtitleState::slot`.
+pub fn backup_root(app: &AppHandle) -> Result<PathBuf, SubtitleError> {
     Ok(app
         .path()
         .app_data_dir()
@@ -463,7 +529,8 @@ fn backup_root(app: &AppHandle) -> Result<PathBuf, SubtitleError> {
         .join(BACKUP_DIR))
 }
 
-/// A poisoned lock means a command panicked holding it; the session cannot be trusted after that.
+/// A poisoned lock means a command panicked holding it, so the commands refuse rather than build on
+/// it. [`save_current`] deliberately does not: see the reasoning there.
 fn lock(slot: &SessionSlot) -> Result<MutexGuard<'_, Option<EditSession>>, SubtitleError> {
     slot.lock().map_err(|_| {
         SubtitleError::new(

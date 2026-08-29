@@ -191,3 +191,6 @@ jobs:
 
       - name: Shutdown test (clean exit, no survivors)
         run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:shutdown
+
+      - name: Close gate test (unsaved edits are never dropped silently)
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate

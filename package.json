@@ -13,7 +13,8 @@
     "format:check": "prettier --check .",
     "e2e": "wdio run e2e/wdio.conf.js",
     "e2e:build": "tauri build --debug --no-bundle",
-    "e2e:shutdown": "node e2e/scripts/shutdown-check.js"
+    "e2e:shutdown": "node e2e/scripts/shutdown-check.js",
+    "e2e:close-gate": "node e2e/scripts/close-gate-check.js"
   },
   "pnpm": {
     "onlyBuiltDependencies": [],

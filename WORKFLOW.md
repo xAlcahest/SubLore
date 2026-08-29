@@ -12,11 +12,11 @@ This file defines how agent sessions run. CLAUDE.md defines what may be built; B
 
 1. Read CLAUDE.md and the task's entry in BACKLOG.md. If the task has no acceptance criteria, STOP — the task is not ready; report it instead of guessing.
 2. Write the behavioral tests from the acceptance criteria first. They must fail before implementation.
-3. Implement the minimum that makes them pass. One task = one branch = one PR.
+3. Implement the minimum that makes them pass. One task = one branch = one delivery.
 4. Run the full test suite, not just the new tests.
 5. Run `/review`; fix findings or state explicitly why a finding is acknowledged and unfixed.
 6. Self-check against CLAUDE.md §6 checklist and §3 data-safety rules.
-7. PR description: what changed, why, and human verification steps written for a non-coder ("open file X, click Y, expect Z").
+7. Delivery description: what changed, why, and human verification steps written for a non-coder ("open file X, click Y, expect Z").
 8. Mark the task done in BACKLOG.md with its verification status: `verified-by-tests` or `needs-human-e2e`.
 
 ## 3. Autonomy contract
@@ -33,10 +33,22 @@ A BLOCKED report states: the task, what was attempted, why it stopped, and 1–3
 
 ## 4. Drift control
 
-- Max task size: one PR reviewable in one sitting. If a task grows past that, split it in BACKLOG.md before continuing.
+- Max task size: one delivery reviewable in one sitting. If a task grows past that, split it in BACKLOG.md before continuing.
 - Never "improve" things outside the task while passing by. File a new BACKLOG entry instead.
-- The orchestrator re-reads acceptance criteria before accepting any PR: tests passing is necessary, criteria met is the standard.
-- Any test weakened, skipped, or deleted must be named in the PR description with the reason. Silent test changes are grounds for rejection.
+- The orchestrator re-reads acceptance criteria before accepting any delivery: tests passing is necessary, criteria met is the standard.
+- Any test weakened, skipped, or deleted must be named in the delivery description with the reason. Silent test changes are grounds for rejection.
+
+## 4b. Delegates (owner ruling 2026-08-29)
+
+The repo is local and private. There is no collaboration platform and no pull requests: a task produces a **delivery** — a branch plus a description saying what changed, why, and how to verify it by using the app in steps a non-coder can follow — and integration is a **local merge** into main, allowed only once the delegated review has passed and the full battery is green.
+
+**Every delegated agent writes its report to a file, and the caller reads that file.** The brief must name a path under `docs/reports/` and require the report to be written there before the agent finishes. The caller never treats the closing message as the report. An agent whose report file is missing or empty has failed, whatever its closing message says.
+
+This rule is paid for. Two delegations in one session returned "Concluso." as their entire result: two research agents lost their findings outright, and a review carrying three blockers was nearly recorded as "the agent produced nothing" while its report sat alive in a transcript nobody had opened.
+
+**A review's own fixes get reviewed.** Corrections written under review pressure are new code, and the next pass hunts explicitly for what they broke. The second N1 review found a blocker created by a fix from the first one.
+
+**Reviews are always delegated, and start from `docs/reviews/review-prompt.md`.** The implementer reading their own diff never satisfies the review requirement, however carefully they read it. The template is there because the review it came from found, in code its author had just declared clean, a save path that could never succeed, a behavioural test whose assertion counter guarded three assertions that asserted nothing, and an acceptance criterion no automation ran.
 
 ## 5. Parallelism
 
