@@ -37,6 +37,21 @@ export function clickAt(x, y) {
   xdotool(["click", "1"]);
 }
 
+/** Two clicks inside the double-click interval, which is what opens the cue list's inline editor. */
+export function doubleClickAt(x, y) {
+  const target = { x: Math.round(x), y: Math.round(y) };
+  const now = pointerLocation();
+  if (now.x !== target.x || now.y !== target.y) {
+    xdotool(["mousemove", "--sync", String(target.x), String(target.y)]);
+  }
+  xdotool(["click", "--repeat", "2", "--delay", "40", "1"]);
+}
+
 export function typeText(text) {
   xdotool(["type", "--delay", "5", text]);
+}
+
+/** A named key, e.g. Return or Escape. */
+export function pressKey(key) {
+  xdotool(["key", key]);
 }

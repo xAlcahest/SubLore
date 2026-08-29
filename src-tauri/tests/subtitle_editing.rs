@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use sublore_edit::plan::Edit;
 use sublore_lib::subtitle::error::SubtitleErrorCode;
 use sublore_lib::subtitle::{
-    apply_edit, close_session, open_session, redo, save, save_as, undo, SessionSlot,
-    MAX_SUBTITLE_BYTES,
+    apply_edit, close_session, open_session, redo, save, save_as, save_current, session_state,
+    undo, SessionSlot, SessionState, MAX_SUBTITLE_BYTES,
 };
 
 fn repo_root() -> PathBuf {
@@ -546,4 +546,145 @@ fn every_mutation_the_ipc_offers_reaches_the_model() {
         fs::read(&copy).expect("copy read"),
         fs::read(fixture("fixtures/subtitles/srt/clean/basic-lf.srt")).expect("fixture read")
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The close gate's two entry points (BACKLOG N1). The gate is the last thing standing between a
+// panic and the user's work, so its reads and its write are proved here, not assumed.
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn session_state_reports_clean_dirty_and_no_document() {
+    let scratch = Scratch::new("gate-state");
+    let slot = SessionSlot::default();
+    assert_eq!(
+        session_state(&slot),
+        SessionState::Clean,
+        "no document open is nothing to lose"
+    );
+
+    let copy = scratch.copy_of("fixtures/subtitles/srt/clean/basic-lf.srt");
+    open(&slot, &copy);
+    assert_eq!(session_state(&slot), SessionState::Clean);
+
+    apply_edit(&slot, 0, text(0, "Edited.")).expect("accepted");
+    assert_eq!(session_state(&slot), SessionState::Dirty);
+
+    save(&slot, 1, scratch.backups()).expect("a save");
+    assert_eq!(session_state(&slot), SessionState::Clean);
+}
+
+#[test]
+fn session_state_answers_unknown_rather_than_waiting_for_a_held_lock() {
+    let slot = SessionSlot::default();
+    let held = slot.lock().expect("fresh lock");
+    // The gate runs on the main loop and this mutex is held across file I/O: waiting here would
+    // freeze the window, and an unknown answer sends the user to the dialog instead.
+    assert_eq!(session_state(&slot), SessionState::Unknown);
+    drop(held);
+}
+
+#[test]
+fn save_current_writes_without_a_caller_revision() {
+    let scratch = Scratch::new("gate-save");
+    let slot = SessionSlot::default();
+    let copy = scratch.copy_of("fixtures/subtitles/srt/clean/basic-lf.srt");
+    let original = fs::read(&copy).expect("copy read");
+    open(&slot, &copy);
+    apply_edit(&slot, 0, text(0, "Saved by the gate.")).expect("accepted");
+
+    save_current(&slot, scratch.backups())
+        .expect("the gate saves")
+        .expect("a dirty session writes");
+
+    let written = fs::read(&copy).expect("copy read");
+    assert_ne!(written, original, "the edit reached the file");
+    assert!(
+        String::from_utf8(written)
+            .expect("utf-8")
+            .contains("Saved by the gate."),
+        "the edit that reached the file is the one that was made"
+    );
+    assert_eq!(session_state(&slot), SessionState::Clean);
+}
+
+#[test]
+fn save_current_still_saves_through_a_poisoned_lock() {
+    let scratch = Scratch::new("gate-poison");
+    let slot = std::sync::Arc::new(SessionSlot::default());
+    let copy = scratch.copy_of("fixtures/subtitles/srt/clean/basic-lf.srt");
+    open(&slot, &copy);
+    apply_edit(&slot, 0, text(0, "Work worth keeping.")).expect("accepted");
+
+    // Poison it the way a panicking command would.
+    let poisoner = std::sync::Arc::clone(&slot);
+    let _ = std::thread::spawn(move || {
+        let _guard = poisoner.lock().expect("held");
+        panic!("a command died holding the session lock");
+    })
+    .join();
+    assert!(slot.is_poisoned(), "the lock is poisoned");
+
+    // The gate exists for exactly this moment: a save that refuses here loses the work the dialog
+    // just promised to keep.
+    save_current(&slot, scratch.backups())
+        .expect("the gate saves through the poison")
+        .expect("a dirty session writes");
+
+    let written = String::from_utf8(fs::read(&copy).expect("copy read")).expect("utf-8");
+    assert!(
+        written.contains("Work worth keeping."),
+        "the edit survived the poisoned lock"
+    );
+}
+
+#[test]
+fn save_current_writes_nothing_when_the_session_is_clean() {
+    let scratch = Scratch::new("gate-clean");
+    let slot = SessionSlot::default();
+    let copy = scratch.copy_of("fixtures/subtitles/srt/clean/basic-lf.srt");
+    let before = fs::metadata(&copy)
+        .expect("copy")
+        .modified()
+        .expect("mtime");
+    open(&slot, &copy);
+
+    // The gate can open on a session that is merely busy. Writing then would change the mtime of a
+    // file the user only opened, and would overwrite whatever another program put there since.
+    let outcome = save_current(&slot, scratch.backups()).expect("no error");
+    assert!(outcome.is_none(), "a clean session writes nothing");
+    assert_eq!(
+        fs::metadata(&copy)
+            .expect("copy")
+            .modified()
+            .expect("mtime"),
+        before,
+        "the file the user only opened was not touched"
+    );
+}
+
+#[test]
+fn save_current_clears_the_poison_so_the_app_stays_usable() {
+    let scratch = Scratch::new("gate-unpoison");
+    let slot = std::sync::Arc::new(SessionSlot::default());
+    let copy = scratch.copy_of("fixtures/subtitles/srt/clean/basic-lf.srt");
+    open(&slot, &copy);
+    apply_edit(&slot, 0, text(0, "Kept.")).expect("accepted");
+
+    let poisoner = std::sync::Arc::clone(&slot);
+    let _ = std::thread::spawn(move || {
+        let _guard = poisoner.lock().expect("held");
+        panic!("a command died holding the session lock");
+    })
+    .join();
+
+    save_current(&slot, scratch.backups())
+        .expect("the gate saves")
+        .expect("a dirty session writes");
+
+    // Without this the window survives a Cancel as a brick: every later command refuses on a
+    // poison flag that the successful save just proved harmless.
+    assert!(!slot.is_poisoned(), "the poison was cleared");
+    // Saving does not advance the revision: the document did not change, only the disk did.
+    apply_edit(&slot, 1, text(0, "Still editable.")).expect("the session still takes edits");
 }

@@ -11,6 +11,7 @@ import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { clearInterval, setInterval } from "node:timers";
 
 import {
   closeWindowTool,
@@ -21,10 +22,13 @@ import {
   windowWidth,
 } from "../lib/paths.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
-import { findToplevel, rootTree } from "../lib/x11.js";
+import { allWindows, findToplevel, rootTree } from "../lib/x11.js";
+
+/** Frozen contract with src-tauri/src/strings.rs, mirrored in close-gate-check.js. */
+const UNSAVED_DIALOG_TITLE = "Unsaved changes";
 
 /** Gutting an assertion has to be as red as failing one, so the checks count themselves. */
-const EXPECTED_CHECKS = 4;
+const EXPECTED_CHECKS = 5;
 let checksRun = 0;
 
 function check(label, ok, detail = "") {
@@ -52,6 +56,9 @@ async function main() {
 
   let exit = null;
   let spawnError = null;
+  let dialogSeen = false;
+  // Declared out here so the teardown below can stop it whatever went wrong inside.
+  let dialogWatch = null;
   app.on("error", (error) => {
     spawnError = error;
   });
@@ -74,12 +81,28 @@ async function main() {
     );
     check("the app window appeared", toplevel !== null);
 
+    // Sampled while the app closes, because a dialog that appeared and went would leave no trace
+    // to look for afterwards.
+    dialogWatch = setInterval(() => {
+      if (allWindows().some((window) => window.name === UNSAVED_DIALOG_TITLE)) {
+        dialogSeen = true;
+      }
+    }, 100);
+
     execFileSync("python3", [closeWindowTool, toplevel.id], { stdio: "inherit", timeout: 15000 });
 
     await waitFor(() => exit !== null, {
       timeout: 15000,
       message: "the app to exit after WM_DELETE_WINDOW",
     });
+
+    // Nothing was edited, so the close gate must stay out of the way. Without this, a regression
+    // that raised the gate on a clean document would still pass every check below (BACKLOG N1).
+    check(
+      "no unsaved-changes dialog appeared on a clean close",
+      !dialogSeen,
+      "the gate asked about a document that had never been edited",
+    );
 
     check("the app exited with status 0", exit.code === 0, `exit code was ${exit.code}`);
     check("the app exited without a signal", exit.signal === null, `terminated by ${exit.signal}`);
@@ -98,6 +121,9 @@ async function main() {
       survivors.length === 0 ? "" : `survivors: ${survivors.join(", ")}\n${rootTree()}`,
     );
   } finally {
+    if (dialogWatch !== null) {
+      clearInterval(dialogWatch);
+    }
     // Never leak processes on a failure path, but never signal a pgid the kernel may already have
     // recycled: a group that still has members cannot have had its id reused.
     try {

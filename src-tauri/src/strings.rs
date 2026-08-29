@@ -17,3 +17,31 @@ pub fn crash_body(report_path: &str) -> String {
 /// Titles for the two native file dialogs the project panel opens.
 pub const CHOOSE_PROJECT_FOLDER: &str = "Choose a project folder";
 pub const CHOOSE_PROJECT_FILE: &str = "Choose a video or subtitle file";
+
+/// The close gate. Native, not webview: the answer decides whether the window survives, and the
+/// video surface sits above the webview until decision 1 lands (BACKLOG N1).
+pub const CLOSE_UNSAVED_TITLE: &str = "Unsaved changes";
+pub const CLOSE_UNSAVED_BODY: &str =
+    "The subtitle file has edits that are not on disk.\n\nSave them before closing?";
+pub const CLOSE_SAVE: &str = "Save";
+pub const CLOSE_DISCARD: &str = "Discard";
+pub const CLOSE_CANCEL: &str = "Cancel";
+
+/// A save that fails on the way out leaves the window open. Saying so is the difference between
+/// a refusal the user understands and one that looks like a stuck button (CLAUDE.md §6).
+pub const CLOSE_FAILED_TITLE: &str = "Could not close";
+pub fn close_failed(reason: &str) -> String {
+    format!(
+        "Sublore could not finish closing, so the window is still open and may no longer be showing \
+         what is in memory.\n\n{reason}\n\nSave a copy from the toolbar before trying again."
+    )
+}
+
+pub const CLOSE_SAVE_FAILED_TITLE: &str = "Could not save";
+pub fn close_save_failed(reason: &str) -> String {
+    format!(
+        "The file was not saved, so Sublore stayed open and your edits are still here.\n\n\
+         {reason}\n\nUse Save copy to write them somewhere else. If Save keeps refusing, copy your \
+         work out before closing: this window is the only place it exists."
+    )
+}
