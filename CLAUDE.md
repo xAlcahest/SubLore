@@ -1,7 +1,14 @@
 # CLAUDE.md — Sublore
 
 **Sublore — translation memory for subtitles.**
-Local-first desktop app for translating subtitles across whole series with terminology consistency. **Platform policy: v1 targets Windows and Linux. macOS is deferred until further notice by owner decision** — do not build, test, or debug macOS-specific paths, but never introduce a dependency or design that would block a later macOS port; every component in §2 is mac-compatible and must stay that way. Whisper transcription is a commodity we wrap; the product is the memory: a persistent termbase and translation memory that follows the translator through every episode, plus QA that flags every line where an approved term was not used.
+Local-first desktop app for translating subtitles across whole series with terminology consistency. Whisper transcription is a commodity we wrap; the product is the memory: a persistent termbase and translation memory that follows the translator through every episode, plus QA that flags every line where an approved term was not used.
+
+**Platform policy (owner decision 2026-08-29, supersedes the previous one):**
+
+- **Linux is the primary platform for development and verification.** Behavioural work is built and proved here first.
+- **Windows compiles in CI on every push** and must never be allowed to break. Compiling is not verifying: no Windows behaviour is claimed until it has been run.
+- **Full Windows activation is its own mandatory milestone**, covering the E2E backend with native input and window inspection, platform hardening, and the owner checklist run on Windows. **It is required before any sale or public release.** No release goes out on Linux alone.
+- **macOS stays deferred** until further notice — do not build, test, or debug macOS-specific paths, but never introduce a dependency or design that would block a later macOS port; every component in §2 is mac-compatible and must stay that way.
 
 The owner directs this project through coding agents and verifies behavior end-to-end. He does not hand-review code. Every rule in this file exists to make the codebase safe to build under that model. Read this whole file before writing anything.
 
@@ -63,7 +70,7 @@ The owner verifies behavior, not code. Therefore:
 2. **Automated E2E/behavioral tests are the primary test layer.** Unit tests support them; they never replace them. A green unit suite with no behavioral coverage is not done.
 3. **Test fixtures are real-shaped:** actual SRT/ASS files with CRLF/LF variants, BOM, overlapping cues, non-Latin text, malformed lines. A fixture folder is part of the repo and grows with every bug fixed (regression fixture per bug).
 4. **Never fake a pass.** No weakening assertions, no skipping tests, no adjusting expected values to match broken output. If a test is wrong, say so explicitly and fix it as its own change.
-5. Cross-platform CI matrix (Windows, Linux) must be green before any release tag; macOS joins the matrix when the owner re-activates it. "Works on my platform" does not exist here.
+5. **Behavioural verification happens on Linux; Windows compiles.** The E2E suite drives the app through X11 and runs on Linux only, so today it proves Linux behaviour and nothing else. The Windows `check` job must stay green on every push, and a green compile is never reported as a working feature. The full matrix — behavioural suite green on Windows too — is the exit condition of the Windows activation milestone, and that milestone gates any sale or public release. macOS joins when the owner re-activates it. "Works on my platform" does not exist here; neither does "it compiled".
 6. Review pipeline: significant changes go through Claude Code's built-in code review (`/review`) before being presented as complete; findings are fixed or explicitly acknowledged in the PR description.
 
 ## 6. Code quality
@@ -99,3 +106,4 @@ A PR that regresses a budget states it explicitly and waits for owner approval.
 - The app's UI copy is plain and short. English source strings; i18n-ready from the start (no hardcoded user-facing strings).
 - Marketing and docs never overclaim: transcription accuracy is Whisper's, and we say so. The claim we own is consistency: "your terminology, enforced across the whole series."
 - When reporting status to the owner: state what was verified by running the app, what is only assumed, and what remains untested. Unverified work is presented as unverified. This is the single most important rule in this file.
+- **Every behavioural verdict carries its platform.** Write "verified on Linux", never a bare "verified", until the Windows activation milestone lands. A verdict with no platform on it reads as a claim about both, and that claim is false today.

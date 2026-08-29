@@ -4,6 +4,26 @@ Ordered milestones for v1.0 (scope: CLAUDE.md §1). Rules: work top to bottom; a
 
 Status legend: `[ ]` open · `[~]` in progress · `[x]` verified-by-tests · `[✓]` owner-passed · `[!]` blocked
 
+Behavioural verdicts in this file are **verified on Linux** unless they say otherwise. Windows compiles in CI; it is not verified until MW closes (CLAUDE.md platform policy, 2026-08-29).
+
+**Decisions in force** (owner ruling 2026-08-29, full text in `docs/design/decisions.md`):
+
+| # | Decision | Lands in |
+|---|---|---|
+| 1 | Video occlusion: native surface hides for HTML layers | M2.0 |
+| 2 | Show and re-show with a loaded video, built now | N2 |
+| 3 | Windows E2E backend | MW.1 |
+| 4 | Composite history entry, one undo per operation | M2.5 (shape), M7 (use) |
+| 5 | Active line and selection separated | M2.0 |
+| 6 | Text matcher in the open core | M5 |
+| 7 | Video shows the translation, source on toggle, shadow copy | M2.6 |
+| 8 | Autosave in its own store, backups untouchable by timers | M11 (post-v1) |
+| 9 | Close gate — active defect | N1 |
+| 10 | Non-cue segments: written analysis now | N3 |
+| 11 | Milliseconds, final. No frame vocabulary | M2.5 note, plan-wide |
+| 12 | M2.4 reuses the ASR pattern, not its code | M2.4 |
+| 13 | New translation from source | M2.6 |
+
 ---
 
 ## M0 — Skeleton that proves the stack (fully specified, start here)
@@ -49,10 +69,32 @@ Goal: open and save SRT, ASS, VTT without destroying anything, including files f
 
 **Owner checklist M1:** open a real .srt from your disk → cue count appears; save-as → the copy is byte-identical (fc/cmp); open a deliberately broken file → clear error, app keeps working.
 
+## NOW — ahead of every functional milestone (owner ruling 2026-08-29)
+
+Two items jump the queue by owner decision. Full reasoning in `docs/design/decisions.md`; the ruling settles all thirteen questions raised in `docs/design/post-v1-plan.md`. Order is fixed: N1, then N2, then M2.0.
+
+- [ ] **N1 Close gate (decision 9).** Intercept `CloseRequested`; if anything is unsaved, ask save / discard / cancel per dirty document and honour the answer. **This is an active data-loss defect, not a missing feature:** there is no `prevent_close` in the repo, dirty state is tracked on both sides and nobody consults it on close, so closing the window throws unsaved edits away silently, against CLAUDE.md §3. The dialog plugin is already a dependency. M2.6 doubles the exposure by opening a second document.
+  - AC: open a subtitle fixture, edit a cue, close the window: a dialog appears offering save, discard and cancel. Cancel leaves the app open with the edit still there and the file on disk untouched. Discard closes and leaves the file untouched. Save writes the edit and then closes.
+  - AC: with nothing modified, closing the window exits straight away with status 0 and no dialog, and the existing shutdown checks still pass unchanged.
+- [ ] **N2 Video surface show and re-show (decision 2).** Build the re-show path for the native surface with a video already loaded. Prerequisite of M2.0's occlusion handling (decision 1).
+  - AC: open a video, hide the surface, show it again: the frame is visible and playback continues. The assertion is on the visible frame, not on an internal flag, because mpv creates its own window inside ours and leaves it unmapped if ours is (`video/surface/mod.rs:82-84`) — a state-only assertion would pass while the user sees black.
+  - AC: hide and re-show ten times in a row leaves no orphan process and no leaked surface.
+- [ ] **N3 Non-cue segments: written analysis (decision 10).** Half a day, output is a document, not a feature. Answer whether `Edit` and `Expectation` in `sublore-edit` can grow a `Meta` variant covering `Style:` lines, script properties and attachments, which today travel as uninterpreted metadata (`sublore-formats/src/document.rs:81-92`) while `Edit` covers cues only (`plan.rs:28-58`). Adjust the shape now if the answer says so; the feature itself stays at M14. Not blocked by N1 or N2 and can run alongside, but **must land before M5**, because once the closed modules depend on the crate a second write path gets bolted alongside the first instead of replacing it.
+  - AC: a document in `docs/design/` states whether the shape changes, and if it does not, why not. "No change needed" is a valid and useful answer, in writing.
+
 ## M2 — Editor with video and waveform (tasks detailed 2026-08-28)
 
 Goal: the free product's core: cue list, text editing, timing adjust against waveform, side-by-side source/target view.
 
+- [ ] **M2.0 Shell redesign — blocks M2.4-M2.6.** Filed 2026-08-29 after the owner ran the app and rejected the interface. M0-M4 each bolted a horizontal band with a path field and a button onto one column, because that is the cheapest way to give an E2E spec a stable selector; the result is the union of five test harnesses. Rebuild the shell on Aegisub's structure with a modern finish, per `docs/design/shell-layout.md` and `docs/design/shell-mockup.html`. The engine is not touched: this is the frontend shell plus the file-dialog commands.
+  - AC: opening a video or a subtitle goes through the system file dialog, reachable from the File menu and from the toolbar; no field for typing a path is left anywhere in the interface.
+  - AC: video and waveform panels sit side by side in the top band, the current-line band under them, the cue grid across the bottom.
+  - AC: transcription controls are not on screen until opened from the menu.
+  - AC: with a video and a subtitle open, at 1024x700 and at 1920x1080, no element is clipped at a window edge and the page never scrolls horizontally (the clipped `Save copy to` label at 1024x700 is the regression fixture for this).
+  - AC: the panel holding the video never scrolls, per the M0.2 constraint that the native X11 surface is placed from DOM coordinates and recomputed only on resize.
+  - AC: the 27 existing E2E checks pass with selectors re-pointed and assertions unchanged; no assertion is weakened, skipped, or retargeted (CLAUDE.md §5.4).
+  - AC (decision 1, occlusion): opening a menu or a dialog over a playing video hides the native surface, and closing it brings the frame back. E2E: with a video playing, open the File menu over the video rectangle — the menu is visible and the video is not covering it; close it and the frame returns. No native system menus and no separate popup windows: the CSS chrome is what keeps Windows and Linux looking the same. Depends on N2.
+  - AC (decision 5, selection): the shell separates the active line (single cursor) from the selection (a set: single, shift for a range, ctrl for scattered), both drivable from the keyboard. Bulk operations act on the selection. Landing it here, before M2.5 leans on it, is the point.
 - [x] **M2.1 Editable document model.** Mutation API over `sublore-formats` (edit cue text, edit times, insert, delete, split, merge) that keeps the lossless guarantee: everything the parser preserved stays preserved for untouched cues, and every mutation re-runs the tiling/coverage guard M1 added.
   - AC: mutating one cue in a fixture and saving leaves every other byte of the file identical; a mutation that would break segment coverage is refused with a structured error, never written; property test over random edit sequences never produces a document that fails the guard.
 - [x] **M2.2 Undo/redo.** Single undo stack for every document mutation, with coalescing of consecutive typing into one entry.
@@ -61,10 +103,16 @@ Goal: the free product's core: cue list, text editing, timing adjust against wav
   - AC: E2E: open the 2000-cue fixture, edit a cue's text, save, reopen, the edit is there and the rest is byte-identical; undo restores it; scrolling and typing show no visible lag (measured, budget CLAUDE §7: open under 1 s).
 - [ ] **M2.4 Waveform.** Audio peaks extracted from the media (via the existing libmpv/ffmpeg path, off the main thread, cancellable) and rendered as a zoomable waveform with the playhead.
   - AC: peaks for a 60 s fixture appear within budget and match the audio (silence reads flat, the 440 Hz tone reads full); playhead tracks playback; zoom and scroll stay responsive; no main-thread blocking.
+  - AC (decision 12, audio provider): reuse the ASR *pattern* — ffmpeg discovery, background execution, progress, cancellation — and not its code. Extraction runs at full quality behind a public API with a per-episode cache, and its lifetime is tied to the episode, not to a transcription run. The ASR extractor is private, produces mono 16 kHz because whisper wants that (`sublore-asr/src/sidecar.rs:285,302-304`), and writes into a scratch folder that deletes itself when the run ends (`scratch.rs:88-91`): fine for peaks, wrong for playing a selection, and it would vanish mid-session.
 - [ ] **M2.5 Timing against the waveform.** Drag cue boundaries on the waveform, nudge with keyboard, snap to playhead; changes flow through the M2.1 mutation API and undo stack.
   - AC: E2E: drag a cue boundary, the model times change accordingly and save round-trips; nudge shortcuts move by the documented step; every timing change is undoable.
+  - AC (filed 2026-08-29 from Aegisub's audio toolbar, `default_toolbar.json`): the keyboard command set is what makes timing fast, and dragging alone does not cover it. Previous/next line, play selection, play line, play before/after/begin/end of selection, play to end, lead in, lead out, and commit each have a shortcut and each is exercised by a behavioural test.
+  - AC (decision 4, one undo per operation): `sublore-edit` grows a composite history entry — a transaction of N child edits under a single label. Today an entry carries one `Splice` (`history.rs:37-39`), `Edit` names a single cue (`plan.rs:28-58`), and coalescing needs matching label and offset (`history.rs:192-195`), so edits on different cues never merge. Test: edit scattered rows, one undo returns the document byte-identical. Range variants were rejected because sparse selections, not contiguous ranges, are the real case.
+  - Note (decision 11): the product reasons in **milliseconds**, final. No frame, framerate or keyframe vocabulary, and no timing item carries a "pending a frame engine" reservation. If a frame seam is ever needed it lives in the player and nowhere else.
 - [ ] **M2.6 Source/target side by side.** Two documents open at once (source and target), aligned by index, editing only the target.
   - AC: open two fixtures as source and target; rows align; editing the target never mutates the source file on disk; saving writes only the target.
+  - AC (decision 13, how a translation is born): a **New translation from source** command creates a document inheriting the source's cues and timings with empty text; the source is read-only while translating; the first save asks for name and location with a sensible proposal (episode plus language). The source is never modified or overwritten. E2E: open only a source fixture, run the command, every cue and timing is carried over with empty text, translate two lines, save: a new file appears at the chosen path and the source fixture is byte-identical to before.
+  - AC (decision 7, subtitles on video): the video shows the **translation**, with a toggle to show the source instead. The preview is fed from a shadow copy in the working folder; the user's file is **never** saved to produce a preview. E2E: with both documents open, pause on a time where a cue is active — the translation text is on the frame; toggle, and the source text is; neither file on disk changes, and no backup is created by toggling or typing.
 
 **Status M2 part A, 2026-08-28:** M2.1-M2.3 on `main`. New crate `sublore-edit` (splice-based mutation planning, verification, undo/redo with explicit run boundaries, edit sessions). 289 Rust tests and 17 E2E checks green; the 2000-cue fixture opens in 68 ms against a 1000 ms budget with 26 rows in the DOM. Review caught and fixed three real defects: ASS cue deletion refused between blank runs, undo coalescing two deliberate edits into one step, and a global Ctrl+Z stealing native undo from text inputs. M2.4-M2.6 not started.
 
@@ -109,10 +157,31 @@ Goal: SQLite project (series → episodes → files) so memory has somewhere to 
 Goal: the product. Per-project glossary with approved renderings; QA pass flags every target line where a source term appears without its approved rendering.
 Draft criteria: on the standard fixture episode, QA flags exactly the planted violations and nothing else; term added mid-series retro-flags earlier episodes on demand; module absent → core runs untouched, module present + licensed → features appear.
 
+**Constraint (decision 6, 2026-08-29):** the text matcher and the ASS override-tag scanner live in an **open-core crate**, and M5 consumes it. The closed module keeps only persistence (TM and termbase storage) and QA policy. Search and QA share fixtures. The comparison both need is identical — find a source term in a line while ignoring override tags — and CLAUDE.md §4 requires the open core to be fully useful alone. Two engines would leave the free product unable to search, and the two would disagree about what counts as a match.
+
+**Prerequisite:** N3 must be answered before this milestone starts.
+
+## MW — Windows activation (mandatory before any sale or public release)
+
+Goal: make Windows a verified platform instead of a compiled one. Filed 2026-08-29 with the platform policy change in CLAUDE.md; decision 3 puts the scattered Windows work here rather than inside feature milestones, where half-finished platform work would spread across all of them.
+
+Today the `check` job builds on ubuntu and windows (`.github/workflows/ci.yml:18`), but the behavioural suite runs on ubuntu only (`:125-126`) and drives the app with `xdotool` over XTEST while inspecting windows with `xwininfo` (`e2e/lib/input.js:6-9`) — neither exists on Windows. So every behavioural verdict in this file covers Linux and nothing else.
+
+- [ ] **MW.1 E2E backend for Windows.** Native input and window inspection behind the same harness interface, so specs stay platform-agnostic and assertions do not change.
+  - AC: the full behavioural suite runs on Windows in CI and is green, with the same spec files and the same assertions as on Linux. A failure on either platform turns CI red.
+- [ ] **MW.2 Platform hardening.** Work through what only Windows can show: the native video surface z-order (`video/surface/windows.rs` reasserts `HWND_TOP`), path and encoding handling, the crash dialog, the installer.
+  - AC: the M0.2, M0.4, N1, N2 and M2.0 criteria are re-run on Windows and pass there, including the occlusion behaviour of decision 1.
+- [ ] **MW.3 Owner checklist on Windows.** Every owner checklist in this file, run by the owner on a Windows machine from an installed build.
+  - AC: the owner signs off. Until then no build ships to anyone.
+
+**This milestone gates release.** v1.0 is not tagged and nothing is sold while it is open, however complete the rest of the plan is.
+
 ## M6 — Translation memory + licensing + release
 
 Goal: exact and fuzzy TM across the whole project; offline license check; pay-once purchase flow via merchant of record; v1.0 tag.
 Draft criteria: repeated lines in later episodes surface their earlier translation; fuzzy matches ranked and insertable; license file validates offline, invalid license degrades gently to free core; both installers pass the full owner checklist end to end.
+
+**Prerequisite:** MW is closed. The v1.0 tag cannot precede Windows activation.
 
 ---
 
