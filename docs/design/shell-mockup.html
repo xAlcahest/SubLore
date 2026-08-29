@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <title>Sublore — shell layout</title>
+    <style>
+      :root {
+        --bg: #131317;
+        --panel: #202026;
+        --panel-2: #17171b;
+        --media: #0c0c0e;
+        --line: #2a2a31;
+        --line-2: #34343c;
+        --ink: #e6e6ea;
+        --ink-2: #b6b6c0;
+        --ink-3: #9a9aa6;
+        --ink-4: #71717f;
+        --accent: #4fb3d9;
+        --accent-bg: #2d4a5c;
+        --wave: #3fbf7f;
+        --marker: #e0623c;
+        --selband: #18304a;
+        --flag: #d9a441;
+        --flag-bg: #2a2419;
+        --flag-ink: #e8c882;
+        --new-bg: #1d2a33;
+        --mono: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+      }
+      body {
+        margin: 0;
+        padding: 28px;
+        background: #0a0a0c;
+        color: var(--ink);
+        font:
+          400 13px/1.6 "Inter",
+          "Segoe UI",
+          "DejaVu Sans",
+          system-ui,
+          sans-serif;
+      }
+      h1 {
+        font-size: 17px;
+        font-weight: 500;
+        margin: 0 0 4px;
+      }
+      h2 {
+        font-size: 13px;
+        font-weight: 500;
+        margin: 34px 0 8px;
+        color: var(--ink-2);
+      }
+      p.note {
+        margin: 0 0 10px;
+        color: var(--ink-4);
+        font-size: 12px;
+        max-width: 64em;
+      }
+      .win {
+        font-size: 11.5px;
+        background: var(--bg);
+        border: 1px solid var(--line-2);
+        border-radius: 5px;
+        overflow: hidden;
+        max-width: 1024px;
+      }
+      .menu {
+        padding: 5px 9px;
+        display: flex;
+        gap: 14px;
+        color: var(--ink-2);
+        border-bottom: 1px solid var(--line);
+      }
+      .tools {
+        padding: 5px 9px;
+        display: flex;
+        gap: 11px;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--ink-3);
+      }
+      .sep {
+        width: 1px;
+        height: 14px;
+        background: var(--line-2);
+      }
+      .body {
+        display: flex;
+      }
+      .rail {
+        width: 104px;
+        flex: none;
+        background: var(--panel);
+        border-right: 1px solid var(--line);
+        padding: 7px 6px;
+        color: var(--ink-2);
+      }
+      .rail .cap {
+        color: var(--ink-4);
+        font-size: 10.5px;
+        margin-bottom: 5px;
+      }
+      .rail .row {
+        line-height: 1.95;
+        padding-left: 9px;
+      }
+      .rail .on {
+        background: var(--accent-bg);
+        color: var(--ink);
+        border-radius: 3px;
+      }
+      .main {
+        flex: 1;
+        min-width: 0;
+      }
+      .top {
+        display: flex;
+        align-items: stretch;
+        gap: 1px;
+        background: var(--line);
+      }
+      .vbox {
+        width: 38%;
+        flex: none;
+        background: var(--media);
+        display: flex;
+        flex-direction: column;
+      }
+      .vbox .frame {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #4a4a54;
+        min-height: 96px;
+      }
+      .vslider {
+        height: 3px;
+        background: var(--line-2);
+        position: relative;
+      }
+      .vslider i {
+        position: absolute;
+        left: 0;
+        width: 22%;
+        top: 0;
+        bottom: 0;
+        background: var(--accent);
+      }
+      .vslider b {
+        position: absolute;
+        left: 22%;
+        top: -3px;
+        width: 9px;
+        height: 9px;
+        background: var(--accent);
+        border-radius: 50%;
+      }
+      .vbar {
+        background: var(--panel);
+        padding: 4px 6px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--ink-3);
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+      .tcol {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .audio {
+        background: var(--media);
+        position: relative;
+        height: 104px;
+      }
+      .bars {
+        display: flex;
+        align-items: center;
+        gap: 1.5px;
+        height: 100%;
+        padding: 0 3px;
+        position: relative;
+      }
+      .bars s {
+        flex: 1;
+        background: var(--wave);
+        border-radius: 1px;
+        display: block;
+      }
+      .sel {
+        position: absolute;
+        left: 24%;
+        width: 28%;
+        top: 0;
+        bottom: 0;
+        background: var(--selband);
+      }
+      .mk {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--marker);
+      }
+      .head {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: var(--accent);
+        left: 36%;
+      }
+      .zoom {
+        position: absolute;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 13px;
+        background: var(--panel);
+        border-left: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+      }
+      .zoom u {
+        width: 3px;
+        height: 26px;
+        background: var(--line-2);
+        border-radius: 2px;
+        display: block;
+      }
+      .sash {
+        height: 4px;
+        background: var(--panel);
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .sash i {
+        width: 24px;
+        height: 1px;
+        background: var(--line-2);
+        display: block;
+      }
+      .edit {
+        background: var(--panel);
+        padding: 6px 7px;
+        flex: 1;
+      }
+      .fields {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+        margin-bottom: 5px;
+      }
+      .fld {
+        background: var(--panel-2);
+        border: 1px solid var(--line-2);
+        border-radius: 4px;
+        padding: 3px 6px;
+        font-family: var(--mono);
+      }
+      .src {
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 5px 7px;
+        color: #8e8e9a;
+        margin-bottom: 4px;
+      }
+      .tgt {
+        background: var(--panel-2);
+        border: 1px solid var(--accent);
+        border-radius: 4px;
+        padding: 5px 7px;
+        color: var(--ink);
+      }
+      .gh {
+        display: flex;
+        padding: 5px 7px;
+        gap: 6px;
+        color: var(--ink-4);
+        font-size: 10.5px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+      .gr {
+        display: flex;
+        padding: 5px 7px;
+        gap: 6px;
+        border-bottom: 1px solid #23232a;
+        color: var(--ink-2);
+      }
+      .gr.on {
+        background: var(--accent-bg);
+        color: #cfe4ee;
+      }
+      .gr.flag {
+        background: var(--flag-bg);
+        border-left: 2px solid var(--flag);
+        color: var(--flag-ink);
+      }
+      .n {
+        width: 16px;
+        color: var(--ink-4);
+      }
+      .t {
+        width: 64px;
+        font-family: var(--mono);
+        color: var(--ink-3);
+      }
+      .cps {
+        width: 26px;
+        font-family: var(--mono);
+        color: var(--ink-4);
+      }
+      .c {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .todo {
+        color: #4a4a54;
+      }
+      .new {
+        background: var(--new-bg) !important;
+        color: var(--accent) !important;
+      }
+      .tag {
+        font-size: 10.5px;
+        color: var(--accent);
+      }
+      .legend {
+        display: flex;
+        gap: 14px;
+        font-size: 12px;
+        color: var(--ink-4);
+        margin: 0 0 10px;
+      }
+      .legend i {
+        width: 11px;
+        height: 11px;
+        display: inline-block;
+        vertical-align: -1px;
+        margin-right: 5px;
+        border: 1px solid var(--line-2);
+      }
+      .legend i.a {
+        background: var(--panel);
+      }
+      .legend i.b {
+        background: var(--new-bg);
+        border-color: var(--accent);
+      }
+      svg.ic {
+        width: 15px;
+        height: 15px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 1.6;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute">
+      <symbol id="i-folder" viewBox="0 0 24 24">
+        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      </symbol>
+      <symbol id="i-save" viewBox="0 0 24 24">
+        <path d="M5 4h11l3 3v13H5z" />
+        <path d="M9 4v5h6V4M8 20v-6h8v6" />
+      </symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24">
+        <path d="M9 13 5 9l4-4" />
+        <path d="M5 9h9a5 5 0 0 1 0 10h-4" />
+      </symbol>
+      <symbol id="i-redo" viewBox="0 0 24 24">
+        <path d="m15 13 4-4-4-4" />
+        <path d="M19 9h-9a5 5 0 0 0 0 10h4" />
+      </symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24">
+        <rect x="9" y="3" width="6" height="11" rx="3" />
+        <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+      </symbol>
+      <symbol id="i-book" viewBox="0 0 24 24">
+        <path d="M4 5a2 2 0 0 1 2-2h6v18H6a2 2 0 0 1-2-2z" />
+        <path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6" />
+      </symbol>
+      <symbol id="i-qa" viewBox="0 0 24 24">
+        <path d="m4 7 2 2 3-3M4 15l2 2 3-3M13 8h7M13 16h7" />
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></symbol>
+      <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 12h3l3-7 4 14 3-7h5" /></symbol>
+    </svg>
+
+    <h1>Sublore — shell layout</h1>
+    <p class="note">
+      Ossatura di Aegisub letta dal sorgente (frame_main.cpp:183-216), finitura moderna. Deciso
+      2026-08-29. Specifica in shell-layout.md.
+    </p>
+
+    <h2>1. Mappa: dove finisce il lavoro che manca</h2>
+    <p class="legend">
+      <span><i class="a"></i>c'è già</span><span><i class="b"></i>da costruire</span>
+    </p>
+
+    <div class="win">
+      <div class="menu new">
+        File<span>Modifica</span><span>Sottotitoli</span><span>Tempi</span><span>Video</span
+        ><span>Audio</span><span>Termini</span><span>Vista</span>
+      </div>
+      <div class="tools new">
+        <svg class="ic"><use href="#i-folder" /></svg><svg class="ic"><use href="#i-save" /></svg
+        ><span class="sep"></span><svg class="ic"><use href="#i-undo" /></svg
+        ><svg class="ic"><use href="#i-redo" /></svg><span class="sep"></span
+        ><svg class="ic"><use href="#i-mic" /></svg><svg class="ic"><use href="#i-book" /></svg
+        ><span class="tag" style="margin-left: auto">barra strumenti</span>
+      </div>
+      <div class="body">
+        <div class="rail">
+          <div class="cap">Progetto</div>
+          <div>Serie</div>
+          <div class="row on">Ep. 01</div>
+          <div class="row">Ep. 02</div>
+          <div class="row">Ep. 03</div>
+        </div>
+        <div class="main">
+          <div class="top">
+            <div class="vbox">
+              <div class="frame">
+                <svg class="ic" style="width: 19px; height: 19px"><use href="#i-play" /></svg>
+              </div>
+              <div class="vbar" style="font-family: inherit; color: var(--ink-4)">
+                video · c'è già
+              </div>
+            </div>
+            <div class="tcol">
+              <div
+                class="audio new"
+                style="
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  flex-direction: column;
+                  gap: 6px;
+                "
+              >
+                <svg class="ic" style="width: 19px; height: 19px"><use href="#i-wave" /></svg
+                ><span>waveform · M2.4</span>
+              </div>
+              <div class="edit">
+                <div class="fields">
+                  <span class="fld new" style="border-color: var(--accent)">inizio</span
+                  ><span class="fld new" style="border-color: var(--accent)">fine</span
+                  ><span class="fld new" style="border-color: var(--accent)">durata</span
+                  ><span class="tag">tempi · M2.5</span>
+                </div>
+                <div class="src">originale · c'è già</div>
+                <div class="tgt new">traduzione · M2.6</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="gh">
+              <span class="n">#</span><span class="t">inizio</span><span class="t">fine</span
+              ><span class="cps">cps</span><span class="c">originale</span
+              ><span class="c" style="color: var(--accent)">traduzione · M2.6</span>
+            </div>
+            <div class="gr on">
+              <span class="n">1</span><span class="t">0:00:02.12</span
+              ><span class="t">0:00:04.88</span><span class="cps">14</span
+              ><span class="c">The harbour was empty</span
+              ><span class="c" style="color: var(--accent)">Il porto era vuoto</span>
+            </div>
+            <div class="gr">
+              <span class="n">2</span><span class="t">0:00:05.00</span
+              ><span class="t">0:00:08.34</span><span class="cps">17</span
+              ><span class="c">Nobody had told the crew</span
+              ><span class="c" style="color: var(--accent)">Nessuno aveva avvisato</span>
+            </div>
+            <div class="gr">
+              <span class="n">3</span><span class="t">0:00:09.10</span
+              ><span class="t">0:00:11.76</span><span class="cps">13</span
+              ><span class="c">By then the fog had eaten</span
+              ><span class="c" style="color: var(--accent)">Ormai la nebbia</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2>2. Finitura</h2>
+    <p class="note">
+      Il video sta a sinistra e prende tutta l'altezza del blocco alto; waveform e riquadro della
+      battuta sono impilati alla sua destra, separati da una barra trascinabile. La griglia si
+      prende tutto lo spazio che avanza. La riga 3 mostra il controllo terminologia di M5, la riga 4
+      una battuta da tradurre.
+    </p>
+
+    <div class="win">
+      <div class="menu">
+        File<span>Modifica</span><span>Sottotitoli</span><span>Tempi</span><span>Video</span
+        ><span>Audio</span><span>Termini</span><span>Vista</span>
+      </div>
+      <div class="tools">
+        <svg class="ic"><use href="#i-folder" /></svg><svg class="ic"><use href="#i-save" /></svg
+        ><span class="sep"></span><svg class="ic"><use href="#i-undo" /></svg
+        ><svg class="ic"><use href="#i-redo" /></svg><span class="sep"></span
+        ><svg class="ic"><use href="#i-mic" /></svg><svg class="ic"><use href="#i-book" /></svg
+        ><svg class="ic" style="color: var(--accent)"><use href="#i-qa" /></svg>
+      </div>
+      <div class="body">
+        <div class="rail">
+          <div class="cap">Progetto</div>
+          <div>Serie</div>
+          <div class="row on">Ep. 01</div>
+          <div class="row">Ep. 02</div>
+          <div class="row">Ep. 03</div>
+        </div>
+        <div class="main">
+          <div class="top">
+            <div class="vbox">
+              <div class="frame">video</div>
+              <div class="vslider"><i></i><b></b></div>
+              <div class="vbar">
+                <svg class="ic" style="width: 12px; height: 12px; color: var(--ink-2)">
+                  <use href="#i-play" /></svg
+                ><span>0:04.16</span><span style="color: var(--ink-4)">+2.04 / -0.72</span>
+              </div>
+            </div>
+            <div class="tcol">
+              <div class="audio">
+                <div class="bars">
+                  <span class="sel"></span><span class="mk" style="left: 24%"></span
+                  ><span class="mk" style="left: 52%"></span><span class="head"></span>
+                  <s style="height: 14%"></s><s style="height: 38%"></s><s style="height: 22%"></s
+                  ><s style="height: 64%"></s><s style="height: 41%"></s><s style="height: 78%"></s
+                  ><s style="height: 52%"></s><s style="height: 88%"></s><s style="height: 34%"></s
+                  ><s style="height: 61%"></s><s style="height: 26%"></s><s style="height: 71%"></s
+                  ><s style="height: 44%"></s><s style="height: 19%"></s><s style="height: 56%"></s
+                  ><s style="height: 82%"></s><s style="height: 37%"></s><s style="height: 12%"></s
+                  ><s style="height: 48%"></s><s style="height: 66%"></s><s style="height: 29%"></s
+                  ><s style="height: 74%"></s><s style="height: 16%"></s><s style="height: 59%"></s
+                  ><s style="height: 33%"></s><s style="height: 68%"></s><s style="height: 21%"></s
+                  ><s style="height: 50%"></s><s style="height: 39%"></s><s style="height: 63%"></s>
+                  <span class="zoom"><u></u><u></u></span>
+                </div>
+              </div>
+              <div class="sash"><i></i></div>
+              <div class="edit">
+                <div class="fields">
+                  <span class="fld">0:00:02.12</span><span class="fld">0:00:04.88</span
+                  ><span class="fld" style="color: var(--ink-3)">2.76</span>
+                  <span class="fld" style="color: var(--ink-3)">14 cps</span>
+                </div>
+                <div class="src">The harbour was empty when we got there.</div>
+                <div class="tgt">Il porto era vuoto quando siamo arrivati.</div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="gh">
+              <span class="n">#</span><span class="t">Inizio</span><span class="t">Fine</span
+              ><span class="cps">CPS</span><span class="c">Originale</span
+              ><span class="c">Traduzione</span>
+            </div>
+            <div class="gr on">
+              <span class="n" style="color: #9dc4d8">1</span
+              ><span class="t" style="color: #cfe4ee">0:00:02.12</span
+              ><span class="t" style="color: #cfe4ee">0:00:04.88</span
+              ><span class="cps" style="color: #9dc4d8">14</span
+              ><span class="c">The harbour was empty</span
+              ><span class="c" style="color: #fff">Il porto era vuoto</span>
+            </div>
+            <div class="gr">
+              <span class="n">2</span><span class="t">0:00:05.00</span
+              ><span class="t">0:00:08.34</span><span class="cps">17</span
+              ><span class="c">Nobody had told the crew</span
+              ><span class="c" style="color: var(--ink)">Nessuno aveva avvisato</span>
+            </div>
+            <div class="gr flag">
+              <span class="n">3</span><span class="t">0:00:09.10</span
+              ><span class="t">0:00:11.76</span><span class="cps">13</span
+              ><span class="c">By then the fog had eaten</span
+              ><span class="c">Ormai la nebbia</span>
+            </div>
+            <div class="gr">
+              <span class="n">4</span><span class="t">0:00:12.40</span
+              ><span class="t">0:00:15.02</span><span class="cps todo">—</span
+              ><span class="c">We waited until dark</span><span class="c todo">da tradurre</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
