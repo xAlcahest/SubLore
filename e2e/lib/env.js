@@ -19,10 +19,10 @@ export function appEnv(overrides = {}) {
   const env = {
     ...process.env,
     GDK_BACKEND: "x11",
-    // The NVIDIA WebKit workarounds are keyed on the driver being loaded, which is true on a
-    // developer machine even under Xvfb, where the renderer is llvmpipe and they are not needed.
-    // Measured: with them on, a typed path takes 373 ms to reach React state instead of 186 ms,
-    // and specs that click straight after typing lose that race (docs/reports/n2b-collaudo-reale.md).
+    // Disarmed here because the workarounds key on the driver being loaded, which is true on a
+    // developer machine even under Xvfb, where llvmpipe renders and input reaches React late
+    // enough to lose races (docs/reports/n2b-collaudo-reale.md). So every caller of `appEnv` tests
+    // a configuration no user gets; the armed one is checked by `pnpm e2e:webview`.
     SUBLORE_WEBKIT_WORKAROUNDS: "0",
     ...overrides,
   };
