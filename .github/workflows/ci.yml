@@ -125,8 +125,10 @@ jobs:
       - name: Generate video fixture
         run: sh fixtures/video/make-sample.sh
 
+      # --no-fail-fast: one target that cannot start must not hide the state of the others. The
+      # Windows run of 2026-08-30 stopped at crash_main_thread and told us nothing about the rest.
       - name: Test Rust
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
 
   e2e:
     name: e2e smoke (ubuntu)
@@ -194,27 +196,55 @@ jobs:
       # The screen is sized explicitly: a root window smaller than the 1024x700 app window fails the
       # fixture, and the xvfb-run default differs per distribution.
       - name: Smoke test (window title, video surface)
-        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e 2>&1 | tee ci-logs/smoke.log
 
       - name: Shutdown test (clean exit, no survivors)
-        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:shutdown
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:shutdown 2>&1 | tee ci-logs/shutdown.log
 
       - name: Close gate test (unsaved edits are never dropped silently)
-        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate 2>&1 | tee ci-logs/close-gate.log
 
       - name: Late-edit gate test (an edit made while the answer is in flight is asked about again)
-        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate-late-edit
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate-late-edit 2>&1 | tee ci-logs/late-edit.log
 
       - name: Startup args test (a name the command line cannot carry costs that name, not the launch)
-        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:startup-args
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:startup-args 2>&1 | tee ci-logs/startup-args.log
       - name: mpv context test (a gpu-context mpv refuses costs the request, not the app)
-        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:mpv-context
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:mpv-context 2>&1 | tee ci-logs/mpv-context.log
 
       # The only automated check that catches N2c's fix being removed: every other job misses it
       # because devicePixelRatio is 1 under Xvfb. At GDK_SCALE=2 the window is 2048x1400, larger
       # than the screen, which this bare X server serves without clamping (verified locally).
       - name: Scaled surface test (an integer display scale is applied exactly once)
-        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:scale
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:scale 2>&1 | tee ci-logs/scale.log
 
       # Two behavioural checks are deliberately not steps here, and this is the record of that
       # decision rather than an oversight (gate 2 register, `package.json:19`, `ci.yml:196`).
@@ -224,3 +254,26 @@ jobs:
       # `pnpm e2e:wayland` needs a real Wayland socket; without one mpv falls back to X11 and the
       # check would be green for the wrong reason, so it refuses to run instead. Same owner-machine
       # rule. Neither is silently skippable: both fail loudly when their prerequisite is absent.
+
+      # A diagnostic run collects every failure instead of stopping at the first, but it must not
+      # end green while a check is red: the artefact is the evidence, this step is the verdict.
+      - name: Collect the diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostic-logs
+          path: ci-logs/
+          if-no-files-found: warn
+
+      - name: Verdict (red if any check failed)
+        if: always()
+        run: |
+          failed=""
+          for log in ci-logs/*.log; do
+            grep -qE "check passed \(|Spec Files:.* 0 failed|[0-9]+ passed, [0-9]+ total" "$log" || failed="$failed $(basename "$log" .log)"
+          done
+          if [ -n "$failed" ]; then
+            echo "failing checks:$failed"
+            exit 1
+          fi
+          echo "every check reported success"

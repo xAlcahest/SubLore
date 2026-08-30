@@ -249,6 +249,8 @@ Draft criteria: repeated lines in later episodes surface their earlier translati
 
 ## Parking lot (explicitly not v1 — do not pull forward)
 
+- **Should the CI runner have a minimal window manager? (parked by owner ruling 2026-08-31.)** The first real CI run failed `close-gate-check.js` on `XSetInputFocus` answering `BadMatch`, which is what a bare X server with nothing to hold focus looks like. **For:** users have a window manager, so a runner without one tests an environment nobody has, and focus, stacking and close buttons all behave differently there. **Against:** several checks were built against the WM-less runner and read its behaviour as the baseline — the close gate drives `WM_DELETE_WINDOW` directly, the surface checks read raw stacking — so adding one reopens every one of them at once. Not decided inside gate 2 for that reason. Whoever picks it up starts by listing which checks change meaning under a WM, because that list is the cost.
+
 - **"Still saving" indicator after a threshold (decision 17, 2026-08-31).** The close gate waits on the session lock without a timeout, by ruling, because every automatic release costs the user's work. What is owed is not a bound but a voice: past some threshold the window says it is still saving, so an unbounded wait stops being a silent one.
 
 - **External VAD with timestamp remapping (decision 16, 2026-08-30).** Cue-boundary tuning, done outside whisper.cpp and mapped back onto the transcript's timings. The measured lever is segmentation, not the model and not source separation (`docs/research/asr-anime.md`), but the built-in Silero is ruled out for this domain, so the instrument is external. Post-v1 pipeline task. **No proof of concept before the parking lot promotes it.**
