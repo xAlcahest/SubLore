@@ -311,6 +311,18 @@ pub fn open_session(slot: &SessionSlot, path: &str) -> Result<SubtitleOpened, Su
         dirty: session.dirty(),
         truncated: session.truncated(),
     };
+    // Said out loud because it is the one moment a document becomes the one on screen, and because
+    // nothing else could observe it: the harness had to guess with fixed waits, and the guess was
+    // calibrated on fast hardware (gate 2, the CI run of 2026-08-30).
+    crate::log::info!(
+        "subtitle: opened {path} — {} cues, {}",
+        opened.cues.len(),
+        if opened.truncated {
+            "truncated"
+        } else {
+            "whole"
+        }
+    );
     *guard = Some(session);
     Ok(opened)
 }

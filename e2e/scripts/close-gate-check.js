@@ -31,6 +31,7 @@ import {
   windowHeight,
   windowWidth,
 } from "../lib/paths.js";
+import { SUBTITLE_OPENED, waitForLog } from "../lib/applog.js";
 import { appEnv } from "../lib/env.js";
 import { clickDialogButton } from "../lib/gtk-dialog.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
@@ -153,13 +154,12 @@ async function waitForWindow(state) {
 }
 
 /** Commit a marked edit into the first cue of the file the app opened, leaving it dirty. */
-async function openAndDirty(toplevel) {
+async function openAndDirty(toplevel, dataHome) {
   const at = (point) => ({ x: toplevel.absX + point.x, y: toplevel.absY + point.y });
-  // Fixed, and it has to be: without a DOM there is nothing observable here to wait on. The
-  // webview has to paint, the file named on the command line has to be parsed, and the cue list
-  // has to reach its first row before the double-click below can hit one. If the setup ever stops
-  // landing, `waitForDialog` says so rather than passing.
-  await sleep(3500);
+  // The app says when the document is open, so this waits for that rather than for a number of
+  // milliseconds someone measured on their own machine. The number was 3500 and the first real CI
+  // run was slower than it (gate 2, run 33339776169).
+  await waitForLog(dataHome, SUBTITLE_OPENED, { what: "the subtitle to be open" });
   focusWindow(toplevel.id);
 
   const cue = at(FIRST_CUE_TEXT);
@@ -236,7 +236,7 @@ async function main() {
   let state = launch(dataHome, workFile);
   try {
     const toplevel = await waitForWindow(state);
-    await openAndDirty(toplevel);
+    await openAndDirty(toplevel, dataHome);
     requestClose(toplevel);
 
     const dialog = await waitForDialog(state);
@@ -305,7 +305,7 @@ async function main() {
   state = launch(saveHome, saveFile);
   try {
     const toplevel = await waitForWindow(state);
-    await openAndDirty(toplevel);
+    await openAndDirty(toplevel, saveHome);
     requestClose(toplevel);
 
     const dialog = await waitForDialog(state);

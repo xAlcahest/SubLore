@@ -38,6 +38,7 @@ import {
   windowHeight,
   windowWidth,
 } from "../lib/paths.js";
+import { SUBTITLE_OPENED, waitForLog } from "../lib/applog.js";
 import { appEnv } from "../lib/env.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { allWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
@@ -229,9 +230,9 @@ async function main() {
   const state = launch(dataHome, workFile);
   try {
     const toplevel = await waitForWindow(state);
-    // The webview has to paint and the file named on the command line has to reach the cue list
-    // before a double-click can land on a row.
-    await sleep(3500);
+    // The app says when the document is open; waiting for that instead of for a fixed number of
+    // milliseconds is what makes this run on a slower machine than the one it was written on.
+    await waitForLog(dataHome, SUBTITLE_OPENED, { what: "the subtitle to be open" });
     await editFirstCue(toplevel, EDIT_EARLY, 2500);
 
     requestClose(toplevel);
