@@ -36,7 +36,9 @@ Confirmed by eye as well: colour bars on screen. **The Xvfb flakiness was the so
 
 ## 3. New defect found on the way: the surface is misplaced under fractional scaling
 
-The video plays, but **not where it belongs**. On this display the native surface lands at 395x120 over the transcription bar instead of covering the stage, overlapping the controls. `VideoStage` reports a CSS-pixel rectangle and `apply_region` multiplies it by `window.scale_factor()`; at scale 1.5 the result is wrong in both position and size.
+The video plays, but **not where it belongs**. On this display the native surface lands at 395x120 over the transcription bar instead of covering the stage, overlapping the controls.
+
+The explanation first written here — that `apply_region` multiplies the rectangle by `window.scale_factor()` and gets a fractional factor wrong — is **withdrawn, 2026-08-30**. It is not what the Linux path does: `surface/linux.rs:63-64` uses `logical()` and never applies the scale factor, because GDK applies it itself; `physical()` is the Windows path. So the mechanism behind the misplaced rectangle is unknown, and probe P3 in `docs/design/x11-vs-render-api.md` is the prerequisite to guessing at it: read `devicePixelRatio` in the webview and `scale_factor()` in Rust on that display and see what they actually say.
 
 Not filed as part of N2b. It needs its own task, and it is user-visible on the primary platform.
 

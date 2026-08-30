@@ -115,7 +115,7 @@ async function waitForDialogGone(what) {
  * the dialog disappear. Cancel is not clicked at all, see `dismissDialog`.
  */
 function clickDialogButton(dialog, which) {
-  // rfd adds yes, no, cancel in that order, so Cancel sits rightmost.
+  // `dialog::ask_close` adds save, discard, cancel in that order, so Cancel sits rightmost.
   const slots = { save: 2, discard: 1, cancel: 0 };
   const slot = slots[which];
   if (slot === undefined) {

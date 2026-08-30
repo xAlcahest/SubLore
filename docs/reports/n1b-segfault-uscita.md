@@ -43,3 +43,30 @@ Not a proven cause. The next probe is to defer the destroy by one main-loop iter
 ## What this costs today
 
 `close-gate-check.js` is in CI and will be red roughly once in eleven runs until this is fixed. The check is right and stays as it is: it is catching a real crash, and weakening it would only hide it.
+
+## Correction, 2026-08-30, later the same day: the rfd thread is not the cause
+
+The lead above was pursued and is **wrong**. The close gate's three message dialogs were moved off rfd and onto GTK dialogs created on the main thread, which removes rfd's second GTK thread from the process entirely. The crash survived.
+
+A core dump from the new binary settles it. Only one thread in the process runs `gtk_main_iteration_do`, the main one; `grep` over every symbolised frame of every thread finds no `rfd` and no second GTK loop. The crashing frame is unchanged:
+
+```
+#0  _gdk_x11_display_queue_events   libgdk-3
+#1  gdk_display_get_event           libgdk-3
+#2  gdk_event_source_dispatch       libgdk-3
+#6  gtk_main_iteration_do           libgtk-3
+#8  tao ... event_loop
+```
+
+So the second GTK thread was real, was present in the earlier cores, and is bad practice on its own — but it is not what makes this crash. The claim in "The lead" above should be read as refuted.
+
+What the 30-run battery established is in `n1b-trenta-corse.md`: 25 green, 1 SIGSEGV, 4 unexplained non-crash failures, and no evidence that the rate moved.
+
+What is still true, and is now the whole of what is known: the main thread crashes inside GDK's X event queue, one loop iteration after `close_window` asked for `window.destroy()`, on the save branch, roughly once in a dozen closes under load.
+
+Two candidate differences remain between this path and the ordinary close, which `shutdown-check.js` exercises constantly and which has never been seen to crash:
+
+1. `close_window` calls `window.destroy()` instead of letting the close go through tao's own path.
+2. A GTK dialog was created and destroyed moments earlier.
+
+Neither is established. The discard branch does both and has not been seen to crash, which fits neither cleanly and is itself a fact worth explaining before the next attempt.
