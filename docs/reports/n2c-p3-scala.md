@@ -46,3 +46,30 @@ The frontend reports `getBoundingClientRect()` in CSS pixels (`VideoStage.tsx:26
 The multiplier cannot come from the backend: `window.scale_factor()` is an integer and reports 1 on this display, so both `logical()` and `physical()` are wrong here — `physical()` would multiply by 1. It has to come from the page, which is the only party that knows the ratio.
 
 That makes N2c's fix a change to what crosses the IPC boundary, not an arithmetic correction behind it, and CLAUDE.md section 6 applies: the region contract is a public interface, so the Windows path moves in the same change or it double-scales — there `scale_factor()` does carry the ratio, and `physical()` multiplies by it today.
+
+## The fix, and the second mechanism the first attempt missed
+
+Resolving the rectangle in the page was necessary and not sufficient. With the page sending native pixels and the Linux backend passing them through, `GDK_SCALE=2` put the surface at **four times** its rectangle rather than two.
+
+There are two mechanisms, and only one of them is N2c:
+
+| ratio comes from | GTK's own factor | does GDK re-apply it? | what the page must send | what the backend must do |
+| ---------------- | ---------------- | --------------------- | ----------------------- | ------------------------ |
+| page zoom, 1.5   | 1                | no                    | native pixels           | nothing                  |
+| `GDK_SCALE`, 2   | 2                | yes                   | native pixels           | divide by 2              |
+
+So the Linux backend now divides by the GDK window's own scale factor before handing the geometry to GDK, and Windows, which re-applies nothing, takes the numbers as they are. The factor still never crosses the IPC boundary: the page sends one number, and each platform undoes only what it is about to redo. The divisor is read from `gdk::Window::scale_factor()` where it lives, not threaded through from anywhere.
+
+**A consequence worth stating plainly: `e2e/scripts/scaled-surface-check.js` does not prove N2c.** Under `GDK_SCALE` the old code was already correct, because GDK re-applied exactly the factor the page had not. That check guards the 4x regression this work nearly shipped, and nothing else. A fractional ratio cannot be produced on this harness at all — `Xft.dpi` through `xrdb` and a `gtk-xft-dpi` settings file both leave `devicePixelRatio` at 1, measured.
+
+## Verified on the owner's display, 3840x2160 at 1.5
+
+Launched with the fixture as a command-line argument, window 1024x700 native:
+
+```
+surface 592x180 at +432+500
+```
+
+The stage's CSS rectangle is 394.67x120 at 288,333, and 1.5 times that is 592x180 at 432,500 — exactly what X reports. Before the change the same launch put the surface at 395x120, the raw CSS numbers, over the transcription bar. A capture of the window shows the picture inside the stage.
+
+The 800x600 suspect carried from the first half of this report **did not reproduce**: this launch kept the 1024x700 it asked for. It stays on the record as open rather than closed, because one clean launch is not an explanation.

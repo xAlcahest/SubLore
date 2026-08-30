@@ -23,12 +23,21 @@ export default function VideoStage({ hasVideo, onRegionChange }: VideoStageProps
     let frame = 0;
     const report = () => {
       frame = 0;
+      // Resolved here, in native pixels, because this is the only place the ratio is known: the
+      // backend's `scale_factor()` is an integer and reports 1 on a fractionally scaled display
+      // (docs/reports/n2c-p3-scala.md). Sending the ratio alongside would put the same fact in two
+      // places that have to agree.
       const rect = element.getBoundingClientRect();
+      const ratio = window.devicePixelRatio;
+      // Edges first, then the size from them, so a rectangle never gains or loses a pixel to
+      // rounding each side independently.
+      const x = Math.round(rect.left * ratio);
+      const y = Math.round(rect.top * ratio);
       onRegionChange({
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
+        x,
+        y,
+        width: Math.round(rect.right * ratio) - x,
+        height: Math.round(rect.bottom * ratio) - y,
       });
     };
     // Coalesce the observer, the window resize and the mount into one update per frame.

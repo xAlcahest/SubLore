@@ -15,7 +15,8 @@
     "e2e:build": "tauri build --debug --no-bundle",
     "e2e:shutdown": "node e2e/scripts/shutdown-check.js",
     "e2e:close-gate": "node e2e/scripts/close-gate-check.js",
-    "e2e:wayland": "node e2e/scripts/wayland-attach-check.js"
+    "e2e:wayland": "node e2e/scripts/wayland-attach-check.js",
+    "e2e:scale": "node e2e/scripts/scaled-surface-check.js"
   },
   "pnpm": {
     "onlyBuiltDependencies": [],

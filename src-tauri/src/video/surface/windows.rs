@@ -55,8 +55,8 @@ impl Surface {
     }
 
     pub fn set_region(&self, region: SurfaceRegion) -> Result<(), VideoError> {
-        // Win32 geometry is in physical pixels, so the scale factor is applied here.
-        let (x, y, width, height) = region.physical();
+        // Already native pixels, resolved by the page. See SurfaceRegion.
+        let (x, y, width, height) = region.pixels();
         // SAFETY: our own child window, main thread only.
         unsafe {
             SetWindowPos(

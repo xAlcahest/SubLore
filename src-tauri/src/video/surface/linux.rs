@@ -60,8 +60,9 @@ impl Surface {
     }
 
     pub fn set_region(&self, region: SurfaceRegion) -> Result<(), VideoError> {
-        // GDK geometry is in logical pixels; the X11 backend applies the scale factor itself.
-        let (x, y, width, height) = region.logical();
+        // GDK multiplies child geometry by this factor on the way to X, so it comes out here
+        // first: without that an integer scale lands twice. See BACKLOG N2c.
+        let (x, y, width, height) = region.pixels_over(f64::from(self.window.scale_factor()));
         self.window.move_resize(x, y, width, height);
         self.window.raise();
         Ok(())

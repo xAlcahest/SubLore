@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri::{AppHandle, Manager, State};
 
 use crate::crash::force::{trip, ForcePoint};
 use crate::log;
@@ -218,18 +218,14 @@ pub async fn video_seek(state: State<'_, VideoState>, position: f64) -> Result<(
 }
 
 #[tauri::command]
-pub async fn video_set_region(
-    app: AppHandle,
-    window: WebviewWindow,
-    region: VideoRegion,
-) -> Result<(), VideoError> {
+pub async fn video_set_region(app: AppHandle, region: VideoRegion) -> Result<(), VideoError> {
     if !(region.x.is_finite() && region.y.is_finite()) {
         return Err(VideoError::command_failed(
             "region position is not a number",
         ));
     }
 
-    on_main_thread(&app, move || apply_region(&window, region)).await
+    on_main_thread(&app, move || apply_region(region)).await
 }
 
 /// Run `action` on the main thread and wait for its result. `run_on_main_thread` only queues the
@@ -264,16 +260,12 @@ fn with_surface(
 }
 
 /// Main thread only: called from inside `run_on_main_thread`.
-fn apply_region(window: &WebviewWindow, region: VideoRegion) -> Result<(), VideoError> {
-    let scale = window
-        .scale_factor()
-        .map_err(|error| VideoError::command_failed(format!("scale factor: {error}")))?;
+fn apply_region(region: VideoRegion) -> Result<(), VideoError> {
     let region = SurfaceRegion {
         x: region.x,
         y: region.y,
         width: region.width,
         height: region.height,
-        scale,
     };
 
     // Geometry first, then the one place that decides visibility. See BACKLOG N2.

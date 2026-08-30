@@ -1,10 +1,10 @@
 /** The video IPC contract. Mirrors src-tauri/src/video; changing either side means changing both. */
 
 export type VideoRegion = {
-  /** CSS px, relative to the webview viewport. */
+  /** Native device px, relative to the webview viewport. Resolved by the page: see VideoStage. */
   x: number;
   y: number;
-  /** CSS px. Zero in either dimension hides the surface. */
+  /** Native device px. Zero in either dimension hides the surface. */
   width: number;
   height: number;
 };
