@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -42,6 +43,17 @@ export function requireAppBinary() {
 
 export function requireVideoFixture() {
   return requireFile(videoFixture, "sh fixtures/video/make-sample.sh");
+}
+
+/** A command the harness drives the app with. Missing means one sentence, never a cryptic error. */
+export function requireTool(name, what) {
+  try {
+    execFileSync("sh", ["-c", `command -v ${name}`], { stdio: "ignore", timeout: 10000 });
+  } catch {
+    throw new Error(
+      `E2E prerequisite missing: ${name} is not on PATH. The harness uses it to ${what}.`,
+    );
+  }
 }
 
 export function requireCloseWindowTool() {

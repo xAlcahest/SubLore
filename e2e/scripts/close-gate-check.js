@@ -31,6 +31,7 @@ import {
   windowHeight,
   windowWidth,
 } from "../lib/paths.js";
+import { appEnv } from "../lib/env.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { allWindows, findToplevel, rootTree } from "../lib/x11.js";
 
@@ -143,7 +144,7 @@ function launch(dataHome) {
   const app = spawn(requireAppBinary(), [], {
     detached: true,
     stdio: ["ignore", "inherit", "inherit"],
-    env: { ...process.env, XDG_DATA_HOME: dataHome },
+    env: appEnv({ XDG_DATA_HOME: dataHome }),
   });
   const state = { app, pgid: app.pid, exit: null, spawnError: null };
   app.on("error", (error) => {

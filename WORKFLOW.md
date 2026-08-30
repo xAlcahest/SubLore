@@ -14,7 +14,8 @@ This file defines how agent sessions run. CLAUDE.md defines what may be built; B
 2. Write the behavioral tests from the acceptance criteria first. They must fail before implementation.
 3. Implement the minimum that makes them pass. One task = one branch = one delivery.
 4. Run the full test suite, not just the new tests.
-5. Run `/review`; fix findings or state explicitly why a finding is acknowledged and unfixed.
+5. **Self-check the diff** (owner ruling 2026-08-30, replacing the per-delivery review). Read your own diff line by line against CLAUDE.md §3 and §6: data-loss paths, errors that reach the user instead of a log, no `unwrap` outside tests, comments that carry measurements rather than intentions. Then the test-side pass: every assertion can fail for a cause the test builds, no assertion on a constant, no threshold or number in a comment that was not actually measured. A delegated lens is not run per task any more; it runs at the gate.
+5b. **No assertion on a constant.** `expect(x).toBe(true)` where `x` can only be `true`, and any check whose condition the test itself guarantees, is banned: it inflates the count that exists to catch removed assertions. Every check must be able to fail for a cause the test constructs. Three separate reviews in this repo have found the same defect.
 6. Self-check against CLAUDE.md §6 checklist and §3 data-safety rules.
 7. Delivery description: what changed, why, and human verification steps written for a non-coder ("open file X, click Y, expect Z").
 8. Mark the task done in BACKLOG.md with its verification status: `verified-by-tests` or `needs-human-e2e`.
@@ -38,9 +39,30 @@ A BLOCKED report states: the task, what was attempted, why it stopped, and 1–3
 - The orchestrator re-reads acceptance criteria before accepting any delivery: tests passing is necessary, criteria met is the standard.
 - Any test weakened, skipped, or deleted must be named in the delivery description with the reason. Silent test changes are grounds for rejection.
 
+## 4a. Gates (owner ruling 2026-08-30)
+
+Reviews no longer run per delivery. They run in batches, at gates, and a gate is the only thing that stops new code.
+
+**Between gates:** each task closes with its own behavioural tests, a green full battery, and the self-check of §2.5. Then it merges into main and the next task starts. Speed comes from here.
+
+**At a gate:** new code stops. One large multi-lens review workflow runs over every delivery since the previous gate, diff by diff, in the shape of the Aegisub scan — many lenses in parallel, each with its own hunt list, each writing its report to a file and then terminating. The standing lenses are: what the corrections themselves broke, data-loss paths, assertions that cannot fail, and platform claims that were only checked on one machine. The orchestrator adds a lens for every point it declares suspect, and saying "nothing looks suspect" is not an available answer.
+
+**Every finding is fixed before the gate opens.** Not triaged, not deferred with a note: fixed, or explicitly ruled on by the owner. The gate opening is what lets new code start again.
+
+**The gates:**
+
+1. Now: N2, and everything merged since N1.
+2. After N2b and decision 1, immediately before the owner's manual checklist.
+3. The end of every M2.x milestone.
+4. Before any merge that touches saving, subtitle formats, or the open-core boundary — whatever the regime, whatever the schedule. These three stay watched because a defect there costs the user's work, their file, or the licence line.
+
+**The pipeline never fully stops.** A gate freezes merges of new code and nothing else: documentation, the M2.0 preparation, task decomposition and planning all keep running through it.
+
 ## 4b. Delegates (owner ruling 2026-08-29)
 
 The repo is local and private. There is no collaboration platform and no pull requests: a task produces a **delivery** — a branch plus a description saying what changed, why, and how to verify it by using the app in steps a non-coder can follow — and integration is a **local merge** into main, allowed only once the delegated review has passed and the full battery is green.
+
+**Every delegated agent writes its report to a file, then stops.** The brief says to terminate once the file is written; a delegate that has written its file and keeps talking is stopped and treated as finished, and nothing after the file is read. One review agent repeated its whole summary four times instead of ending.
 
 **Every delegated agent writes its report to a file, and the caller reads that file.** The brief must name a path under `docs/reports/` and require the report to be written there before the agent finishes. The caller never treats the closing message as the report. An agent whose report file is missing or empty has failed, whatever its closing message says.
 
@@ -48,7 +70,7 @@ This rule is paid for. Two delegations in one session returned "Concluso." as th
 
 **A review's own fixes get reviewed.** Corrections written under review pressure are new code, and the next pass hunts explicitly for what they broke. The second N1 review found a blocker created by a fix from the first one.
 
-**Reviews are always delegated, and start from `docs/reviews/review-prompt.md`.** The implementer reading their own diff never satisfies the review requirement, however carefully they read it. The template is there because the review it came from found, in code its author had just declared clean, a save path that could never succeed, a behavioural test whose assertion counter guarded three assertions that asserted nothing, and an acceptance criterion no automation ran.
+**Gate reviews are always delegated, and start from `docs/reviews/review-prompt.md`.** The implementer reading their own diff is the per-task self-check of §2.5, and it never satisfies the gate: the gate exists because the author's blind spots survive their own rereading. The template is there because the review it came from found, in code its author had just declared clean, a save path that could never succeed, a behavioural test whose assertion counter guarded three assertions that asserted nothing, and an acceptance criterion no automation ran.
 
 ## 5. Parallelism
 

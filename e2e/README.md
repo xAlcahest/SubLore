@@ -4,6 +4,12 @@ Behavioral tests that launch the real Sublore binary on a real X server and asse
 would see. Nothing here reads Rust or TypeScript source: the harness only drives the app and looks
 at the window.
 
+Tools the harness needs on PATH: `xdotool`, `xwininfo`, `python3` with python-xlib, and `ffmpeg`.
+ffmpeg measures whether the video surface is showing a picture, and it is already a build
+dependency; ImageMagick is deliberately not used, because `magick` ships only with version 7
+and the CI runner has 6. xdotool, xwininfo and ffmpeg are each checked before any spec starts, so a missing one is a
+sentence naming it rather than a timeout inside whichever spec needed it first.
+
 ## What each spec proves
 
 | File                          | Test                                                                                | Acceptance criterion it binds                                                                                                                                                                                                                                       |
@@ -37,6 +43,9 @@ at the window.
 | `specs/project.spec.js`       | `deletes the project without touching the files it points at`                       | `project.sublore` is gone, the attached subtitle outside the folder is byte-identical, and the folder itself still exists.                                                                                                                                          |
 | `scripts/shutdown-check.js`   | 5 checks                                                                            | Closing the window exits 0, unsignalled, with nothing left alive in the app's process group, and with no close gate raised over a document nobody edited.                                                                                                           |
 | `scripts/close-gate-check.js` | 12 checks                                                                           | Closing with unsaved edits asks save/discard/cancel; each answer is proved by the dialog going away, cancel keeps the app and the file, discard exits 0 leaving the file untouched, save writes the edit, moves nothing else and keeps a backup (BACKLOG N1).       |
+| `specs/video-surface.spec.js` | `brings the picture back after hide and show, with the video playing`               | Collapsing the stage unmaps the native surface; restoring it brings the picture back and mpv's clock keeps advancing (BACKLOG N2).                                                                                                                                  |
+| `specs/video-surface.spec.js` | `brings the picture back with the video paused, without restarting playback`        | Same, with the video paused: the frame returns with no seek, play or redraw, and the clock never moves.                                                                                                                                                             |
+| `specs/video-surface.spec.js` | `survives ten hide and show cycles without leaking a surface`                       | Ten cycles leave exactly one surface, still showing a picture.                                                                                                                                                                                                      |
 
 The window title AC is covered by the **native** assertion. The document title is a second, weaker
 signal kept because a blank webview is otherwise invisible to X11 assertions.
@@ -91,7 +100,7 @@ A harness that runs nothing must not report success. WebdriverIO does not reliab
 specs, so `wdio.conf.js` asserts the count itself:
 
 ```js
-const EXPECTED_TESTS = 27;
+const EXPECTED_TESTS = 30;
 ```
 
 `onComplete` throws if fewer than that many tests passed, which covers a deleted spec file, an

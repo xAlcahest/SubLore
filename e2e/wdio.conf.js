@@ -4,25 +4,34 @@ import path from "node:path";
 import process from "node:process";
 
 import { asrDir, installStubSidecar, stubBinary } from "./lib/asr.js";
+import { appEnv } from "./lib/env.js";
+import { requireFfmpeg } from "./lib/pixels.js";
 import { driverPort, startDriver, stopDriver } from "./lib/driver.js";
-import { requireAppBinary, requireDisplay, requireVideoFixture } from "./lib/paths.js";
+import { requireAppBinary, requireDisplay, requireTool, requireVideoFixture } from "./lib/paths.js";
 import { passedTests, recordPassedTest, resetTally } from "./lib/tally.js";
 
 /**
  * Every spec that exists must run. WebdriverIO does not reliably fail a run that executed nothing,
  * so the count is asserted here. Bump it when you add a test; see e2e/README.md.
  */
-const EXPECTED_TESTS = 27;
+const EXPECTED_TESTS = 33;
 
 // Keeps a run out of the real data dir. Created once in the launcher; workers inherit the value.
 process.env.SUBLORE_E2E_DATA_HOME ??= mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-"));
 process.env.XDG_DATA_HOME = process.env.SUBLORE_E2E_DATA_HOME;
+// One rule, one place: `appEnv` owns it and this copies the result onto the environment the
+// driver chain inherits.
+Object.assign(process.env, appEnv());
+delete process.env.WAYLAND_DISPLAY;
 
 // The transcription spec always runs against the stand-in sidecar, never a real whisper build: it
 // needs a run it can cancel mid-flight, and CI has no model. Set unconditionally, so an inherited
 // SUBLORE_WHISPER_BIN cannot quietly change what asr.spec.js is asserting. See e2e/README.md.
 process.env.SUBLORE_E2E_ASR_DIR = asrDir();
 process.env.SUBLORE_WHISPER_BIN = stubBinary();
+// Every prerequisite is checked once, before any spec starts, so a missing tool is one clear
+// sentence instead of a timeout inside whichever spec happened to need it first.
+requireFfmpeg();
 
 export const config = {
   runner: "local",
@@ -40,6 +49,8 @@ export const config = {
   onPrepare: () => {
     // Fail before the first session rather than mid-assertion with a confusing message.
     requireDisplay();
+    requireTool("xdotool", "click and type into the app");
+    requireTool("xwininfo", "read the window tree");
     requireAppBinary();
     requireVideoFixture();
     installStubSidecar();
