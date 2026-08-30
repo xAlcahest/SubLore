@@ -18,7 +18,7 @@ All thirteen open questions raised in `post-v1-plan.md` under "Decisions due now
 
 When a menu or a dialog opens over the video, the native surface hides, and it comes back when the layer closes. No native system menus, no separate popup windows.
 
-**Why.** The surface raises above the webview on every region update (`surface/mod.rs:80`, `linux.rs:66`), and M2.0 puts a menu bar and a transcription dialog exactly there. Of the three ways out, native menus would mean giving up the shared look across Windows and Linux that the CSS chrome buys us, and separate windows are heavier and worse on tiling WMs. Hiding is cheap and keeps one implementation.
+**Why.** The surface raises above the webview on every region update (`surface/mod.rs:99-101` — `set_region`, moved here by `c7261a5`'s 146-line addition; `linux.rs:66-67`), and M2.0 puts a menu bar and a transcription dialog exactly there. Of the three ways out, native menus would mean giving up the shared look across Windows and Linux that the CSS chrome buys us, and separate windows are heavier and worse on tiling WMs. Hiding is cheap and keeps one implementation.
 
 **Delivery.** E2E test: a menu opened over a playing video is visible. Belongs to M2.0. Depends on decision 2.
 
@@ -26,7 +26,7 @@ When a menu or a dialog opens over the video, the native surface hides, and it c
 
 Build the re-show path immediately, with a behavioural test that hides and re-shows while a video is already loaded, asserting on **the visible frame**, not on the internal state flag.
 
-**Why.** `show()` is called in exactly one place, inside `video_open` (`video/mod.rs:106`), and its own comment warns it must run before mpv builds its video output, because mpv creates its window inside ours and leaves it unmapped if ours is (`surface/mod.rs:82-84`). Hide-then-show after opening has never been exercised. Decision 1 rests entirely on this working, and M2.0's rule that panels disappear with their provider only works one way without it.
+**Why.** `show()` is called in exactly one place, inside `video_open` (`video/mod.rs:106`), and its own comment warns it must run before mpv builds its video output, because mpv creates its window inside ours and leaves it unmapped if ours is (`surface/mod.rs:98-99`, moved here by `c7261a5`'s 146-line addition). Hide-then-show after opening has never been exercised. Decision 1 rests entirely on this working, and M2.0's rule that panels disappear with their provider only works one way without it.
 
 **Delivery.** Precedes M2.0. Asserting on state instead of pixels would pass while the user sees black.
 
@@ -101,3 +101,21 @@ M2.4 reuses the shape of the ASR path — ffmpeg discovery, background execution
 A command in M2.6 creates a new document inheriting the source's cues and timings with empty text. The source is read-only while translating. The first save asks for name and location with a sensible proposal (episode plus language). **The source is never modified or overwritten.**
 
 **Why.** There is no new-document command, and save-as writes a copy elsewhere while leaving the session pointed at the original and still dirty, by declared choice (`subtitle/mod.rs:390-391`). A translator handed only a source file has no clean route to a target; the route they would find on their own goes through the unsaved-changes refusal and a Discard button pointed at the source file. That is the first gesture of their working day.
+
+---
+
+## 15. One ASR model for all four languages — owner ruling 2026-08-30
+
+Sublore ships **`whisper-large-v3-turbo`** (MIT) as the single model for Japanese, Korean, Chinese and English. Language-specific fine-tunes are excluded: insufficient evidence or technical risk — dated bases, quantisation the authors advise against, foreign runtimes. Parakeet stays on the record as an English reference that cannot be shipped.
+
+**Why.** Two sweeps, `docs/research/asr-anime.md` and `docs/research/asr-ko-zh-en.md`, are the source. Between them: no anime ASR exists — the models labelled anime are trained on visual-novel voice, dry studio recordings with no music, no effects, no overlap, so "anime" there names an acting style and not an audio source; the strongest of them are unshippable anyway, one under a corpus that forbids commercial use of any model derived from it and the others under no licence at all; and on anime-style audio plain `large-v3` beats kotoba-whisper, parakeet-ja and reazonspeech. Korean has nothing shippable that beats Whisper. Chinese does have a real candidate, and it is not taken: see below.
+
+**Chinese punctuation is a post-ASR problem**, parked beside re-punctuation rather than solved by a second model. This is the one place the sweep found a shippable in-architecture win — `Belle-whisper-large-v3-zh-punct`, Apache-2.0, roughly halving Mandarin CER with native punctuation — and the ruling declines it anyway, because a per-language model is a UI, a download, an in-app licence and a verification matrix, not a model swap.
+
+## 16. Boundary tuning moves to an external VAD — owner ruling 2026-08-30
+
+whisper.cpp's built-in Silero VAD is **not** the route for this domain. Cue-boundary tuning becomes "external VAD with timestamp remapping", parked as a post-v1 pipeline task, not a flag.
+
+**Source, stated honestly.** The ruling cites empty transcriptions documented on Japanese audio with background music, from the kotoba-whisper-v2.2 card. That statement **could not be confirmed**: both the v2.2 and the v2.1 cards were read on 2026-08-30 and neither mentions Silero, any VAD, or that failure mode. The decision stands on the owner's authority; the citation is owed and this paragraph stays until it arrives or is withdrawn.
+
+**What this changes in what was already written.** `asr-anime.md` presented the built-in `--vad` as a free lever, zero new dependencies. That recommendation is superseded here. The measurement behind it is untouched and still holds — segmentation moves the number and source separation does not — but the instrument changes.
