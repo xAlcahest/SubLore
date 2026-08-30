@@ -16,7 +16,16 @@ import process from "node:process";
  * same place instead of from whatever the developer's shell exported.
  */
 export function appEnv(overrides = {}) {
-  const env = { ...process.env, GDK_BACKEND: "x11", ...overrides };
+  const env = {
+    ...process.env,
+    GDK_BACKEND: "x11",
+    // The NVIDIA WebKit workarounds are keyed on the driver being loaded, which is true on a
+    // developer machine even under Xvfb, where the renderer is llvmpipe and they are not needed.
+    // Measured: with them on, a typed path takes 373 ms to reach React state instead of 186 ms,
+    // and specs that click straight after typing lose that race (docs/reports/n2b-collaudo-reale.md).
+    SUBLORE_WEBKIT_WORKAROUNDS: "0",
+    ...overrides,
+  };
   delete env.WAYLAND_DISPLAY;
   return env;
 }

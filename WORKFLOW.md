@@ -72,6 +72,13 @@ This rule is paid for. Two delegations in one session returned "Concluso." as th
 
 **Gate reviews are always delegated, and start from `docs/reviews/review-prompt.md`.** The implementer reading their own diff is the per-task self-check of §2.5, and it never satisfies the gate: the gate exists because the author's blind spots survive their own rereading. The template is there because the review it came from found, in code its author had just declared clean, a save path that could never succeed, a behavioural test whose assertion counter guarded three assertions that asserted nothing, and an acceptance criterion no automation ran.
 
+## 4c. Driving the app (owner ruling 2026-08-30)
+
+- **Synthetic input belongs in an isolated server.** `xdotool` typing, clicks and key presses are allowed only inside an X server the harness owns and started itself (Xvfb). They are never used on the owner's real display: on a live compositor keystrokes go to whichever window holds the focus, and during the N2b check they landed in the owner's own window and typed a fixture path into it.
+- **On the real display, three things are allowed:** launching the app, passing it files as command-line arguments, and capturing its own window. Nothing else. `startup_files` in `src-tauri/src/lib.rs` exists so that a real-session check can reach a loaded document without touching the keyboard.
+- **Capture the window, not the screen.** Under rootless XWayland `x11grab` on the root window reads black whatever the app draws; `import -window <id>` reads the window directly and needs no raise and no focus.
+- **The E2E binary is built last.** `cargo test` and `cargo clippy --all-targets` rebuild `src-tauri/target/debug/sublore` as a plain cargo debug binary, which looks for the Vite dev server instead of the embedded assets, and `pnpm build` regenerates `dist` under a binary already built. Everything that compiles Rust or the frontend runs before `pnpm e2e:build`, never after. Twice now this ordering has made a green suite look red and cost a debugging session.
+
 ## 5. Parallelism
 
 Independent tasks may run as parallel implementers (agent teams per the parallel-build skill). Rules:

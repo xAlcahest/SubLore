@@ -185,6 +185,10 @@ impl Player {
             }
             if let Some(wid) = config.wid {
                 init.set_option("wid", wid)?;
+                // `wid` is an X11 window id, and with a Wayland display in the environment mpv's
+                // `gpu-context=auto` picks Wayland and draws past it. See docs/reports/n2b-probe.md.
+                #[cfg(target_os = "linux")]
+                init.set_option("gpu-context", "x11egl")?;
             }
             Ok(())
         })

@@ -8,6 +8,7 @@ import VideoControls from "./components/VideoControls";
 import VideoOpenBar from "./components/VideoOpenBar";
 import VideoStage from "./components/VideoStage";
 import { useProject } from "./hooks/useProject";
+import { useStartupFiles } from "./hooks/useStartupFiles";
 import { useSubtitleFile } from "./hooks/useSubtitleFile";
 import { useTranscription } from "./hooks/useTranscription";
 import { useVideoPlayer, videoErrorMessage } from "./hooks/useVideoPlayer";
@@ -19,6 +20,7 @@ export default function App() {
   const project = useProject();
   const transcription = useTranscription();
   const ready = state.status === "ready";
+  useStartupFiles(open, subtitle.open);
   // Saving writes the document, so it has to include the text sitting in an open editor, and an
   // open editor is unsaved work whether or not it has reached the document yet.
   const flushEditor = useRef<() => Promise<void>>(() => Promise.resolve());
