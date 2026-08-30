@@ -14,42 +14,55 @@ mod platform;
 #[cfg(not(any(target_os = "linux", windows)))]
 compile_error!("Sublore targets Windows and Linux; see CLAUDE.md section on platform policy.");
 
-/// A rectangle in CSS pixels plus the window's scale factor. Each platform converts it as its own
-/// window API expects: GDK geometry is logical, Win32 geometry is physical.
+/// A rectangle in native device pixels, resolved by the page before it crosses the IPC boundary.
+///
+/// The ratio never travels with it: one number, one owner. The page is the only party that knows
+/// the full ratio — `window.scale_factor()` is an integer in `tao` and reports 1 on a fractionally
+/// scaled display, where the 1.5 arrives as page zoom instead (`docs/reports/n2c-p3-scala.md`).
+///
+/// What each platform does with these numbers is its own business and stays behind this type.
+/// Win32 geometry is physical, so Windows takes them as they are. GDK multiplies child geometry by
+/// the window's integer scale factor on the way to X, so the Linux backend divides by that factor
+/// first, or an integer scale lands twice — measured at 4x instead of 2x under `GDK_SCALE=2`.
 #[derive(Clone, Copy, Debug)]
 pub struct SurfaceRegion {
     pub x: f64,
     pub y: f64,
     pub width: f64,
     pub height: f64,
-    pub scale: f64,
 }
 
 /// X11 window coordinates are 16 bit, so clamp before casting rather than trusting the caller.
 const COORD_LIMIT: f64 = i16::MAX as f64;
 
 impl SurfaceRegion {
-    fn scaled(&self, factor: f64) -> (i32, i32, i32, i32) {
-        let clamp = |value: f64| (value * factor).round().clamp(-COORD_LIMIT, COORD_LIMIT) as i32;
-        let size = |value: f64| (value * factor).round().clamp(1.0, COORD_LIMIT) as i32;
+    /// The rectangle as integers a window API can take, clamped to what X11 coordinates can hold.
+    /// A size of zero would be rejected by both toolkits, so it floors at one; an empty region
+    /// hides the surface and never reaches here (`is_empty`).
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    pub fn pixels(&self) -> (i32, i32, i32, i32) {
+        self.pixels_over(1.0)
+    }
+
+    /// The same, divided by whatever the window system will multiply back. See the type's note.
+    /// The division happens before rounding, so the result is the nearest whole pixel to the
+    /// rectangle the page asked for rather than the nearest to an already rounded one.
+    #[cfg_attr(windows, allow(dead_code))]
+    pub fn pixels_over(&self, divisor: f64) -> (i32, i32, i32, i32) {
+        let divisor = if divisor.is_finite() && divisor >= 1.0 {
+            divisor
+        } else {
+            1.0
+        };
+        let position =
+            |value: f64| (value / divisor).round().clamp(-COORD_LIMIT, COORD_LIMIT) as i32;
+        let size = |value: f64| (value / divisor).round().clamp(1.0, COORD_LIMIT) as i32;
         (
-            clamp(self.x),
-            clamp(self.y),
+            position(self.x),
+            position(self.y),
             size(self.width),
             size(self.height),
         )
-    }
-
-    /// Logical pixels, for window systems that scale for us.
-    #[cfg_attr(windows, allow(dead_code))]
-    fn logical(&self) -> (i32, i32, i32, i32) {
-        self.scaled(1.0)
-    }
-
-    /// Physical pixels, for window systems that do not.
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
-    fn physical(&self) -> (i32, i32, i32, i32) {
-        self.scaled(self.scale)
     }
 
     /// A region with no area hides the surface instead of moving it.
@@ -96,5 +109,98 @@ impl VideoSurface {
     /// Destroy. Main thread only, and only after mpv is gone.
     pub fn destroy(self) -> Result<(), VideoError> {
         self.inner.destroy()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SurfaceRegion, COORD_LIMIT};
+
+    fn region(x: f64, y: f64, width: f64, height: f64) -> SurfaceRegion {
+        SurfaceRegion {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    /// The numbers a page produces at a fractional ratio reach the window API unchanged. 682 x 1.5
+    /// is 1023, which is what the owner's display actually measured (docs/reports/n2c-p3-scala.md);
+    /// nothing here may quietly scale it a second time.
+    #[test]
+    fn a_fractionally_scaled_rectangle_passes_through() {
+        assert_eq!(
+            region(432.0, 444.0, 1023.0, 699.0).pixels(),
+            (432, 444, 1023, 699)
+        );
+    }
+
+    /// The two ratios that matter, against the two things a window system does with them. A
+    /// fractional ratio comes from page zoom while GDK's own factor stays 1, so nothing is divided
+    /// out and the native rectangle is what X gets. An integer ratio comes from GDK's factor, which
+    /// GDK re-applies, so it has to be divided back out — measured at 4x instead of 2x when it was
+    /// not (`e2e/scripts/scaled-surface-check.js`).
+    #[test]
+    fn the_divisor_undoes_only_what_the_window_system_re_applies() {
+        let css = (288.0, 296.0, 512.0, 120.0);
+
+        // 1.5 from page zoom, GDK's factor 1: nothing to undo.
+        let native = region(css.0 * 1.5, css.1 * 1.5, css.2 * 1.5, css.3 * 1.5);
+        assert_eq!(native.pixels_over(1.0), (432, 444, 768, 180));
+
+        // 2 from GDK, which multiplies by 2 again: the page's own numbers come back.
+        let native = region(css.0 * 2.0, css.1 * 2.0, css.2 * 2.0, css.3 * 2.0);
+        assert_eq!(native.pixels_over(2.0), (288, 296, 512, 120));
+
+        // Windows re-applies nothing, so the native rectangle passes through.
+        assert_eq!(native.pixels(), (576, 592, 1024, 240));
+    }
+
+    /// A divisor below one, or not a number at all, would grow the rectangle instead of shrinking
+    /// it. `scale_factor()` cannot return those today; this is here so it stays that way.
+    #[test]
+    fn a_nonsense_divisor_is_ignored_rather_than_applied() {
+        let native = region(100.0, 100.0, 200.0, 200.0);
+        for divisor in [0.0, -2.0, 0.5, f64::NAN] {
+            assert_eq!(native.pixels_over(divisor), native.pixels(), "{divisor}");
+        }
+    }
+    #[test]
+    fn halves_round_away_from_zero() {
+        assert_eq!(region(0.5, -0.5, 2.5, 3.5).pixels(), (1, -1, 3, 4));
+    }
+
+    /// X11 window coordinates are 16 bit. A rectangle past that limit is clamped rather than cast,
+    /// because casting wraps and a wrapped coordinate puts the video somewhere nobody asked for.
+    #[test]
+    fn coordinates_clamp_to_the_x11_limit() {
+        let huge = COORD_LIMIT * 4.0;
+        let (x, y, width, height) = region(-huge, huge, huge, huge).pixels();
+        assert_eq!(
+            (x, y, width, height),
+            (
+                -(COORD_LIMIT as i32),
+                COORD_LIMIT as i32,
+                COORD_LIMIT as i32,
+                COORD_LIMIT as i32
+            )
+        );
+    }
+
+    /// Zero is not a size any window API accepts, and an empty region hides the surface instead of
+    /// reaching here, so the floor is one rather than zero.
+    #[test]
+    fn sizes_never_reach_the_window_api_as_zero() {
+        let (_, _, width, height) = region(0.0, 0.0, 0.4, 0.0).pixels();
+        assert_eq!((width, height), (1, 1));
+    }
+
+    #[test]
+    fn an_empty_region_is_recognised_before_it_is_converted() {
+        assert!(region(0.0, 0.0, 0.0, 100.0).is_empty());
+        assert!(region(0.0, 0.0, 100.0, 0.0).is_empty());
+        assert!(region(0.0, 0.0, f64::NAN, 100.0).is_empty());
+        assert!(!region(0.0, 0.0, 1.0, 1.0).is_empty());
     }
 }
