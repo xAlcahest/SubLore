@@ -247,6 +247,8 @@ Draft criteria: repeated lines in later episodes surface their earlier translati
 
 ## Parking lot (explicitly not v1 — do not pull forward)
 
+- **"Still saving" indicator after a threshold (decision 17, 2026-08-31).** The close gate waits on the session lock without a timeout, by ruling, because every automatic release costs the user's work. What is owed is not a bound but a voice: past some threshold the window says it is still saving, so an unbounded wait stops being a silent one.
+
 - **External VAD with timestamp remapping (decision 16, 2026-08-30).** Cue-boundary tuning, done outside whisper.cpp and mapped back onto the transcript's timings. The measured lever is segmentation, not the model and not source separation (`docs/research/asr-anime.md`), but the built-in Silero is ruled out for this domain, so the instrument is external. Post-v1 pipeline task. **No proof of concept before the parking lot promotes it.**
 - **Chinese punctuation as a post-ASR pass (decision 15, 2026-08-30).** Beside re-punctuation. The one shippable in-architecture win the sweep found was a punctuating Mandarin fine-tune, and decision 15 declines it: a per-language model is a UI, a download, an in-app licence and a verification matrix.
 
