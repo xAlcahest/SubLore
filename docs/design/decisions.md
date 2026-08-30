@@ -119,3 +119,17 @@ whisper.cpp's built-in Silero VAD is **not** the route for this domain. Cue-boun
 **Source, stated honestly.** The ruling cites empty transcriptions documented on Japanese audio with background music, from the kotoba-whisper-v2.2 card. That statement **could not be confirmed**: both the v2.2 and the v2.1 cards were read on 2026-08-30 and neither mentions Silero, any VAD, or that failure mode. The decision stands on the owner's authority; the citation is owed and this paragraph stays until it arrives or is withdrawn.
 
 **What this changes in what was already written.** `asr-anime.md` presented the built-in `--vad` as a free lever, zero new dependencies. That recommendation is superseded here. The measurement behind it is untouched and still holds — segmentation moves the number and source separation does not — but the instrument changes.
+
+## 17. A save that wedges holds the window, on purpose — owner ruling 2026-08-31
+
+`save_current` takes the session lock and waits. If another command never releases it, the close gate stays in `Acting` for the life of the process and the window cannot be closed. **This is accepted, and no timeout is added.**
+
+**Why.** Every automatic release is worse than the wedge. Forcing the close over a save in flight throws away the work the gate exists to protect, and raising a second dialog puts two saves in a race on one session. Data safety wins over responsiveness; a window that will not close is visible and recoverable, work that vanished is neither.
+
+**What is owed instead.** A post-v1 parking-lot item: after a threshold, say so — a "still saving" indicator, so that an unbounded wait is at least loud. The wait stays unbounded; it stops being silent.
+
+## 18. The NVIDIA signal stays broad — owner ruling 2026-08-31
+
+`main.rs` looks for `/sys/module/nvidia`, which answers "is the module loaded", not "is NVIDIA drawing". **The broad signal is kept.**
+
+**Why.** The asymmetry decides it. A false positive costs the slower rendering path, which is an annoyance. A false negative costs a blank window, which is a dead product at launch. `SUBLORE_WEBKIT_WORKAROUNDS` exists in both directions for whoever is on the wrong side of the guess. Reopened only on a real report from a hybrid laptop, not on the theory of one. The sysfs measurements that would argue the other way are in `docs/reports/gate2-fix-env.md`.
