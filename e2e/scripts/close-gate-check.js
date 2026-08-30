@@ -39,9 +39,7 @@ import { allWindows, findToplevel, rootTree } from "../lib/x11.js";
 const EXPECTED_CHECKS = 12;
 let checksRun = 0;
 
-/** Points in the current shell, relative to the toplevel origin. M2.0 must revisit these. */
-const SUBTITLE_PATH_FIELD = { x: 506, y: 73 };
-const SUBTITLE_OPEN_BUTTON = { x: 676, y: 73 };
+/** Point in the current shell, relative to the toplevel origin. M2.0 must revisit this. */
 const FIRST_CUE_TEXT = { x: 750, y: 540 };
 
 /** The close dialog's window name. Frozen contract with src-tauri/src/strings.rs. */
@@ -131,17 +129,18 @@ function clickDialogButton(dialog, which) {
 }
 
 /**
- * Cancel, driven by Escape rather than by a click. GTK maps Escape to the delete event, rfd maps
- * that to `Cancel`, and the app's catch-all keeps the window: deterministic, and free of the
- * button geometry the other two branches have to estimate.
+ * Cancel, driven by Escape rather than by a click. GTK answers Escape with the delete response and
+ * the app's catch-all reads that as Cancel: deterministic, and free of the button geometry the
+ * other two branches have to estimate.
  */
 function dismissDialog(dialog) {
   focusWindow(dialog.id);
   pressKey("Escape");
 }
 
-function launch(dataHome) {
-  const app = spawn(requireAppBinary(), [], {
+/** The subtitle is passed as an argument, never typed: see WORKFLOW.md 4c and `startup_files`. */
+function launch(dataHome, file) {
+  const app = spawn(requireAppBinary(), [file], {
     detached: true,
     stdio: ["ignore", "inherit", "inherit"],
     env: appEnv({ XDG_DATA_HOME: dataHome }),
@@ -171,23 +170,15 @@ async function waitForWindow(state) {
   );
 }
 
-/** Open `file` in the app and commit a marked edit into the first cue, leaving it dirty. */
-async function openAndDirty(toplevel, file) {
+/** Commit a marked edit into the first cue of the file the app opened, leaving it dirty. */
+async function openAndDirty(toplevel) {
   const at = (point) => ({ x: toplevel.absX + point.x, y: toplevel.absY + point.y });
-  // The toplevel maps before the webview has painted, and a click into an unpainted webview is
-  // swallowed. There is no DOM here to wait on, so this one is a fixed wait and is named as such.
-  await sleep(2000);
+  // Fixed, and it has to be: without a DOM there is nothing observable here to wait on. The
+  // webview has to paint, the file named on the command line has to be parsed, and the cue list
+  // has to reach its first row before the double-click below can hit one. If the setup ever stops
+  // landing, `waitForDialog` says so rather than passing.
+  await sleep(3500);
   focusWindow(toplevel.id);
-
-  const field = at(SUBTITLE_PATH_FIELD);
-  clickAt(field.x, field.y);
-  typeText(file);
-  const open = at(SUBTITLE_OPEN_BUTTON);
-  clickAt(open.x, open.y);
-  // Fixed, and it has to be: without a DOM there is nothing observable here to wait on. The parse
-  // and the first paint of the cue list both have to land before the double-click below can hit a
-  // row. If the setup ever stops landing, `waitForDialog` says so rather than passing.
-  await sleep(1500);
 
   const cue = at(FIRST_CUE_TEXT);
   doubleClickAt(cue.x, cue.y);
@@ -260,10 +251,10 @@ async function main() {
   const workFile = path.join(dataHome, "cancel-then-discard.srt");
   copyFileSync(source, workFile);
 
-  let state = launch(dataHome);
+  let state = launch(dataHome, workFile);
   try {
     const toplevel = await waitForWindow(state);
-    await openAndDirty(toplevel, workFile);
+    await openAndDirty(toplevel);
     requestClose(toplevel);
 
     const dialog = await waitForDialog(state);
@@ -321,10 +312,10 @@ async function main() {
   const saveFile = path.join(saveHome, "save-on-close.srt");
   copyFileSync(source, saveFile);
 
-  state = launch(saveHome);
+  state = launch(saveHome, saveFile);
   try {
     const toplevel = await waitForWindow(state);
-    await openAndDirty(toplevel, saveFile);
+    await openAndDirty(toplevel);
     requestClose(toplevel);
 
     const dialog = await waitForDialog(state);
