@@ -91,6 +91,13 @@ wrong on the remote is worse than one that is wrong in both places, because it l
 This is the one place the commit-preview rule does not apply. Code still gets its message shown and
 approved before it lands; markdown does not, because the delay is the defect.
 
+**Documents and the code they describe go out together, or the documents wait** (owner ruling
+2026-08-31, learned here). On 2026-08-30 the gate 2 record was pushed while the fixes it declared
+closed sat uncommitted, so the remote asserted that defects were fixed in code it did not contain.
+A remote that declares closed what it does not hold is worse than one that is merely behind: the
+first is trusted, the second is obviously stale. Commit markdown as it changes, and when a document
+and its code describe each other, push them in the same round.
+
 ## 5. Parallelism
 
 Independent tasks may run as parallel implementers (agent teams per the parallel-build skill). Rules:
