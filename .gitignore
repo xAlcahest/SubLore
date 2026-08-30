@@ -30,3 +30,10 @@ fixtures/audio/*.wav
 
 # Whisper models are downloaded by the user, never committed.
 *.bin
+
+# Claude Code workspace. Only the git-identity hook is tracked — without it in the
+# clone, a web session commits as `Claude` (owner ruling 2026-08-30). Everything else
+# there is local state: session files, settings.local.json, whatever the tool writes.
+.claude/*
+!.claude/settings.json
+!.claude/session-start-git-identity.sh
