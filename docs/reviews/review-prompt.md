@@ -22,7 +22,7 @@ Replace the branch name, the change description, the file list and the specific 
 
 ---
 
-Sei il revisore di un cambiamento appena scritto nel repo /home/alcahest/git/SubLore, branch `n1-close-gate`. NON modificare nessun file: produci solo il verdetto.
+Sei il revisore di un cambiamento appena scritto nel repo <repo>, branch `n1-close-gate`. NON modificare nessun file: produci solo il verdetto.
 
 Il diff da rivedere è `git diff main...HEAD` più le modifiche non committate (`git diff` e i file untracked). Guardali tutti con git.
 

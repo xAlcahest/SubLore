@@ -1,8 +1,12 @@
 # Sublore
 
-Translation memory for subtitles. Sublore is a local-first desktop app for subtitle translation: your terminology, enforced across the whole series.
+> **Pre-alpha, under construction, not usable yet.** The repository is public so the work can be read, not because there is something to run. There are no releases and no builds to download, and the parts that exist are being reshaped as the editor's layout is rewritten.
 
-Early development. Nothing is released yet, and the app does not do much so far.
+**Translation memory for subtitles.** A local-first desktop app for translating subtitles across a whole series: your terminology, enforced everywhere it appears, instead of remembered episode by episode.
+
+Whisper transcription is a commodity Sublore wraps. The product is the memory — a persistent termbase and translation memory that follows the translator through every episode, and a QA pass that flags every line where an approved term was not used.
+
+`CLAUDE.md` is the honest description of how this is built and what the rules are, including the ones about what is verified and what is merely assumed. `WORKFLOW.md` is how the work moves and `BACKLOG.md` is what is left.
 
 Sublore works offline. It does not phone home, has no accounts, and collects no telemetry.
 

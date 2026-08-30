@@ -1,9 +1,13 @@
 name: CI
 
+# Triggers, owner ruling 2026-08-31. Task branches never build: a push to a branch nobody has
+# opened a pull request for is work in progress, and a red mark on it is noise, not information.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,7 +19,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Windows runs on main, on tags and on demand, not on every pull request: it compiles there
+        # and nothing behavioural has ever been run on it, so a per-PR Windows compile buys less
+        # than the wait it costs. See CLAUDE.md's platform policy and the MW milestone.
+        os: ${{ (github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]'))
+          || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     defaults:
       run:
         shell: bash

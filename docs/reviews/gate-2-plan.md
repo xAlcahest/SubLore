@@ -494,7 +494,7 @@ commit?
   crops afterwards, which is the screen and not the window, and puts whatever else was on the
   owner's screen into `/tmp`. The crop PNGs are never removed: `rmSync` at `:97` deletes only the
   full-screen capture, and only on the success path.
-- `const REPO = "/home/alcahest/git/SubLore"` at `:27`, absolute and committed; dynamic `import()`
+- `const REPO = "<repo>"` at `:27`, absolute and committed; dynamic `import()`
   of harness modules by absolute path; `path.join(REPO, "target/debug/sublore")` instead of
   `requireAppBinary()`, so the guard message about the Vite-dev-URL binary never fires.
 - No `check()`, no `EXPECTED_CHECKS`, no non-zero exit — it prints a table. Not in `package.json`,
@@ -813,7 +813,7 @@ file and terminates.
 Set these once, in every brief, so nobody reconstructs them under pressure.
 
 ```sh
-cd /home/alcahest/git/SubLore
+cd <repo>
 GATE_BASE=f0b0058          # parent of 062f201; gate 1 covered everything up to here
 GATE_HEAD=eca9806          # recorded at Wave 0, 2026-08-30: the last commit of the N2c delivery
 ```
