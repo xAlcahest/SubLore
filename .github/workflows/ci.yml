@@ -19,11 +19,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows runs on main, on tags and on demand, not on every pull request: it compiles there
-        # and nothing behavioural has ever been run on it, so a per-PR Windows compile buys less
-        # than the wait it costs. See CLAUDE.md's platform policy and the MW milestone.
-        os: ${{ (github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]'))
-          || fromJSON('["ubuntu-latest", "windows-latest"]') }}
+        # Windows on every event Linux runs on, pull requests included (owner ruling 2026-08-31).
+        # It only compiles there — no behaviour has ever been run on Windows — but a compile that
+        # breaks is worth knowing about before a merge, not after.
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         shell: bash
