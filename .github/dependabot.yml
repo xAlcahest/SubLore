@@ -28,8 +28,15 @@ updates:
       cargo:
         update-types: [minor, patch]
     ignore:
-      # Pinned deliberately and verified against the DLL it links: see the libmpv step in ci.yml.
+      # Pinned deliberately and verified against the DLL it links (see the libmpv step in ci.yml),
+      # so ordinary version bumps are noise here. Qualified by update-type on purpose: an unqualified
+      # `ignore` silences security advisories as well, and this pin is a reason to look harder at a
+      # libmpv advisory, not to never hear about one.
       - dependency-name: libmpv2
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
 
   - package-ecosystem: npm
     directory: /
