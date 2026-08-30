@@ -669,6 +669,21 @@ are probably legitimate, a six-line block inside a `before()` hook probably is n
 
 ---
 
+## 2b. Findings that enter the register without a lens
+
+Recorded here at Wave 0 so Wave 2 counts them once and nobody presents them as a lens's discovery.
+
+- **`src-tauri/src/video/mod.rs:90` documents `VideoRegion` as "in CSS pixels" after N2c changed the
+  unit.** The other side of the same contract, `src/types/video.ts:4`, correctly says native device
+  pixels — and its own header says "changing either side means changing both". So the N2c delivery
+  changed one side of a public interface and left the other describing the old unit. Found on
+  2026-08-30 during the M2.0 plan corrections, by an agent reading the tree for something else, not
+  by a lens. **L11 owns it**, and L11 should treat it as a starting point rather than a result: a
+  contract documented in two units is exactly the class of defect it was written to hunt, and where
+  one was found there may be more.
+
+---
+
 ## 3. Coverage check
 
 Every code file changed in the range is claimed by at least two lenses.
@@ -703,6 +718,10 @@ to a file and then terminating) and §4b (gate reviews are always delegated, sta
 `docs/reviews/review-prompt.md`, and the caller reads the file, never the closing message).
 
 ### Wave 0 — freeze (orchestrator, minutes)
+
+> **Wave 0 executed 2026-08-30.** `GATE_HEAD=eca9806`, `GATE_BASE=f0b0058`. New code has stopped;
+> documentation and M2.0 preparation continue. The reference battery result is recorded in
+> `docs/reports/gate2-battery-baseline.md`.
 
 1. N2c merges to main. **New code stops.** Documentation, M2.0 preparation and planning continue;
    a gate freezes merges and nothing else.
@@ -796,7 +815,7 @@ Set these once, in every brief, so nobody reconstructs them under pressure.
 ```sh
 cd /home/alcahest/git/SubLore
 GATE_BASE=f0b0058          # parent of 062f201; gate 1 covered everything up to here
-GATE_HEAD=<n2c merge sha>  # filled in at Wave 0, once N2c is on main
+GATE_HEAD=eca9806          # recorded at Wave 0, 2026-08-30: the last commit of the N2c delivery
 ```
 
 The whole gate range, one diff:

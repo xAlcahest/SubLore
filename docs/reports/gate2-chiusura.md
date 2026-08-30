@@ -1,0 +1,81 @@
+# Gate 2 — closing report
+
+`GATE_BASE=f0b0058` · `GATE_HEAD=eca9806` · opened 2026-08-30, seven merged deliveries plus N2c, none of which had a dedicated review by choice of regime.
+
+**Verdict: the gate cannot open yet, and not for an engineering reason.** The second closure audit re-derived all 59 rows independently and closed 51, several by mutation-testing the fix itself — reintroducing the guard-in-scrutinee deadlock and watching the invariant test go red. One row is owner-ruled by the standing platform policy. **Seven are open, and four of those are sound implementer arguments waiting on a decision that has never been recorded.** The plan's exit condition asks for every finding to be fixed _or explicitly ruled on by the owner_; these are the second kind, and only the owner can supply them.
+
+Two of the seven were the orchestrator's and are now closed: a report naming the probe by the filename it had in a scratch directory, and citation drift in `decisions.md` reopened by a concurrent edit.
+
+## What the gate still needs from the owner
+
+1. **`lib.rs:192` — an answer worker that blocks forever holds the window shut.** `save_current` takes the session lock deliberately; if another command never releases it, the gate stays in `Acting` for the life of the process and the window cannot close. The implementer added no timeout and argued that every automatic release is worse than the wedge: letting the close through discards the work the gate protects, and raising a second dialog puts two saves on one session. The argument is sound and it is not a decision an implementer can take.
+2. **`main.rs:14` and `:26` — the NVIDIA signal is broad on purpose.** `/sys/module/nvidia` answers "is the module loaded", not "is NVIDIA drawing". The implementer measured that narrowing would work on this machine and refused to narrow anyway: on a PRIME-offload laptop the panel hangs off the iGPU while NVIDIA renders the webview, and the narrow signal would disarm the mitigation and turn a latency cost into a blank window. The sysfs data to overrule that is in `gate2-fix-env.md`.
+3. **`main.rs:27` — the mitigation's cost was never measured against a budget.** CLAUDE.md section 7 sets cold start under 2 s and idle memory under 400 MB. The armed-versus-disarmed latency was measured under Xvfb, where the renderer is llvmpipe and the mitigation does not ship. Cold start and idle PSS on the real display, armed and disarmed, are owed — or a ruling that they wait.
+4. **`main.rs:37` — nothing pins the toolchain.** There is no `rust-toolchain.toml`; the edition is pinned in `Cargo.toml` and nothing else is. Either a file lands or the row is ruled a non-goal.
+
+Rows 2, 3 and 4 are all in the mitigation's neighbourhood, which is the code the owner promoted to blocker and the code a real run now exercises. The engineering there is done; what is missing is a signature.
+
+## What the gate did
+
+| wave          | shape                                            | outcome                                                                                                         |
+| ------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| 0             | freeze, GATE_HEAD recorded, reference battery    | green, `gate2-battery-baseline.md`                                                                              |
+| 1             | twelve lenses in one parallel wave               | 72 findings → 59 register rows: 2 blockers, 26 serious, 31 minor                                                |
+| 2             | dedup and triage, orchestrator, not delegated    | `gate2-register.md`; no lens contradicted another, so no adjudication was needed                                |
+| 3 round one   | six implementers, file-disjoint, none the author | fixes across 25 files; two findings ruled **not a defect** with argument, several left unfixed with reasons     |
+| consolidation | merge two duplicate checks, wire CI              | one check of 6 assertions from 4+3; two checks left out of CI **with the reason recorded in the workflow file** |
+| 4 round one   | two delegates, neither a fixer                   | **a blocker created by a fix**: a self-deadlock in the close gate, reproduced with standalone programs          |
+| 3 round two   | four implementers, parallel                      | the deadlock, a reverted narrowing, the silent argument drop, the two not-closed rows                           |
+| 4 round two   | two delegates, independent re-derivation         | pending                                                                                                         |
+
+## The two blockers Wave 1 found, and where they came from
+
+Both were in code written the same day as the gate, by the orchestrator.
+
+- `src-tauri/src/lib.rs:75` — `std::env::args()` panics on an argument that is not valid Unicode, and a Linux filename is an arbitrary byte string. `sublore <non-utf8-name>` killed the app before its window existed. Found independently by L1 and L2. Closed with `OsString`, proved by `startup-args-check.js`, 7 assertions.
+- `src-tauri/src/lib.rs:138` — the `CLOSING` arm ran before the dirty check, so an edit committed while the gate's save was in flight was closed away in silence. CLAUDE.md section 3. Found by L2 and L5. Closed, proved by `close-gate-late-edit-check.js`, 8 assertions, and the app now logs "main was edited after its gate was answered, asking again".
+
+The owner's named lens — the close path and the single-use `CLOSING` flag — is where the second one was found. It was named in advance because that code is adjacent to data safety and deserved eyes that were not its author's, and it returned exactly that.
+
+## The finding the owner promoted
+
+L7 established that the shipping configuration was exercised by no path that runs anywhere: `e2e/lib/env.js` disarms the mitigation for the whole suite, so every automated run tested a configuration no user gets. Promoted to blocker by owner ruling, with a real run required rather than a test that observes.
+
+Measured on the owner's display, after `main.rs` changed in round two and re-run for that reason:
+
+```
+armed:    luma 16..235 (range 219), painted, 1749 ms to first painted capture
+disarmed: luma 46..46  (range 0),   never painted
+```
+
+The mitigation is what makes the window paint on that machine. A shipped mitigation nothing exercises is indistinguishable from a broken one; it is now exercised and asserted.
+
+## The battery, against Wave 0's baseline
+
+|                                   | Wave 0            | after round two   |
+| --------------------------------- | ----------------- | ----------------- |
+| cargo test                        | 502               | **538**           |
+| wdio specs                        | 8                 | 8                 |
+| shutdown · close gate · scale     | 5/5 · 12/12 · 5/5 | 5/5 · 12/12 · 5/5 |
+| startup-args                      | did not exist     | 7/7               |
+| close-gate-late-edit              | did not exist     | 8/8               |
+| wayland ×3                        | 4/4               | 4/4               |
+| webview-paint on the real display | did not exist     | 5/5               |
+
+## What the gate cost, and what it caught that the suite could not
+
+Three things were green throughout and wrong: the self-deadlock, the silent argument drop, and the mitigation nobody ran. None of them is visible to a passing suite, which is the argument for the gate existing at all.
+
+Two harness lessons were paid for in false reds and are now rules in WORKFLOW section 4c: a battery must not reuse an `xvfb-run` display number, and a discrimination experiment must check that its rebuild happened before it measures.
+
+## Residue, filed rather than fixed
+
+By owner ruling the gate opens on blockers and serious, not on minor perfection: a gate that demands minor perfection becomes a wall, and walls get walked around. `N5` carries the minors that were not co-located with a fix, each with the register row that originates it. `N6` carries something Wave 4 found while reading for something else: the close gate protects `CloseRequested` and nothing else, so the moment M2.0's T7 adds a menu with a Quit item, unsaved work leaves with the process.
+
+## The ordering decision the owner still owes: N1c
+
+`docs/design/m2-0-tasks.md` poses it and does not settle it. The picker still goes through the dialog plugin (`project/mod.rs:244-257`), and T2 turns one plugin call site into four.
+
+- **Option A, as written in the plan.** N1c first, T2 inherits a GTK-direct picker. T1's by-title lookup is re-validated against the new picker before T2 begins.
+- **Option B, as written in the plan.** T2 builds the four choosers on GTK directly and closes N1c in the same delivery.
+- **Option C, recommended.** N1c immediately after the gate opens, **before T1**. T1 builds the harness helper that identifies the chooser window by title, and that helper assumes an rfd/GTK3 toplevel. If the chooser changes after T1, the helper needs re-validating; if it changes before, T1 is built once against the final thing and T2 inherits it with no rework. Cost: one delivery before T1 starts. Benefit: no re-validation of T1, no doubling of T2.
