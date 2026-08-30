@@ -1,0 +1,9 @@
+# One compiler for the owner's machine, the Linux runner and the Windows runner: "works on my
+# machine" loses a variable. Bump only in a commit of its own (owner ruling 2026-08-31).
+#
+# Until today the two disagreed — the owner's default toolchain was nightly while CI used
+# dtolnay/rust-toolchain@stable — so no build had ever been reproduced across the two.
+[toolchain]
+channel = "1.93.0"
+profile = "default"
+components = ["clippy", "rustfmt"]
