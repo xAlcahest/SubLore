@@ -1,4 +1,7 @@
-/** The video IPC contract. Mirrors src-tauri/src/video; changing either side means changing both. */
+/**
+ * The video IPC contract. Mirrors src-tauri/src/video. The region's unit is stated in three places
+ * (here, `VideoRegion` in video/mod.rs, `SurfaceRegion` in video/surface) and they change together.
+ */
 
 export type VideoRegion = {
   /** Native device px, relative to the webview viewport. Resolved by the page: see VideoStage. */

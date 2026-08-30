@@ -5,6 +5,10 @@ import { type VideoRegion } from "../types/video";
 
 const HIDDEN: VideoRegion = { x: 0, y: 0, width: 0, height: 0 };
 
+/** Between the integer scale factors a window system hands out, so a move from one to the next
+ * crosses exactly one threshold. */
+const RATIO_THRESHOLDS = [1.5, 2.5, 3.5];
+
 type VideoStageProps = {
   hasVideo: boolean;
   onRegionChange: (region: VideoRegion) => void;
@@ -47,6 +51,22 @@ export default function VideoStage({ hasVideo, onRegionChange }: VideoStageProps
       }
     };
 
+    // A scale-factor change moves the ratio and leaves the CSS box exactly where it was, so the
+    // two listeners below never fire. Thresholds rather than the ratio itself: `resolution` is the
+    // device's own factor, which on a fractionally scaled display is not `devicePixelRatio`.
+    // One at a time, so a webview missing either call costs these listeners and not the page.
+    const ratioQueries: MediaQueryList[] = [];
+    for (const threshold of RATIO_THRESHOLDS) {
+      try {
+        const query = window.matchMedia(`(min-resolution: ${threshold}dppx)`);
+        query.addEventListener("change", schedule);
+        ratioQueries.push(query);
+      } catch (error) {
+        // Degradation, not failure: the surface then keeps its size until the next resize.
+        console.warn(`video stage: no listener for ${threshold}dppx`, error);
+      }
+    }
+
     const observer = new ResizeObserver(schedule);
     observer.observe(element);
     window.addEventListener("resize", schedule);
@@ -58,6 +78,9 @@ export default function VideoStage({ hasVideo, onRegionChange }: VideoStageProps
       }
       observer.disconnect();
       window.removeEventListener("resize", schedule);
+      for (const query of ratioQueries) {
+        query.removeEventListener("change", schedule);
+      }
       onRegionChange(HIDDEN);
     };
   }, [onRegionChange]);

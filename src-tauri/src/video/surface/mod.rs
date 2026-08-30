@@ -16,9 +16,11 @@ compile_error!("Sublore targets Windows and Linux; see CLAUDE.md section on plat
 
 /// A rectangle in native device pixels, resolved by the page before it crosses the IPC boundary.
 ///
-/// The ratio never travels with it: one number, one owner. The page is the only party that knows
-/// the full ratio — `window.scale_factor()` is an integer in `tao` and reports 1 on a fractionally
-/// scaled display, where the 1.5 arrives as page zoom instead (`docs/reports/n2c-p3-scala.md`).
+/// The ratio does not cross the IPC boundary: the page is the only party that knows the full one,
+/// since `window.scale_factor()` is an integer in `tao` and reports 1 on a fractionally scaled
+/// display, where the 1.5 arrives as page zoom instead (`docs/reports/n2c-p3-scala.md`). Each side
+/// still reads its own half locally, and the geometry is right only while the two agree: the page
+/// re-reports on every ratio change (`VideoStage.tsx`) so that they do.
 ///
 /// What each platform does with these numbers is its own business and stays behind this type.
 /// Win32 geometry is physical, so Windows takes them as they are. GDK multiplies child geometry by
@@ -40,7 +42,7 @@ impl SurfaceRegion {
     /// A size of zero would be rejected by both toolkits, so it floors at one; an empty region
     /// hides the surface and never reaches here (`is_empty`).
     #[cfg_attr(target_os = "linux", allow(dead_code))]
-    pub fn pixels(&self) -> (i32, i32, i32, i32) {
+    fn pixels(&self) -> (i32, i32, i32, i32) {
         self.pixels_over(1.0)
     }
 
@@ -48,20 +50,23 @@ impl SurfaceRegion {
     /// The division happens before rounding, so the result is the nearest whole pixel to the
     /// rectangle the page asked for rather than the nearest to an already rounded one.
     #[cfg_attr(windows, allow(dead_code))]
-    pub fn pixels_over(&self, divisor: f64) -> (i32, i32, i32, i32) {
+    fn pixels_over(&self, divisor: f64) -> (i32, i32, i32, i32) {
         let divisor = if divisor.is_finite() && divisor >= 1.0 {
             divisor
         } else {
             1.0
         };
-        let position =
-            |value: f64| (value / divisor).round().clamp(-COORD_LIMIT, COORD_LIMIT) as i32;
-        let size = |value: f64| (value / divisor).round().clamp(1.0, COORD_LIMIT) as i32;
+        let edge = |value: f64| (value / divisor).round();
+        // Edges first, then the size from them: the same rule the page uses, so a rectangle never
+        // gains or loses a pixel to rounding each side on its own (`VideoStage.tsx`).
+        let span = |start: f64, length: f64| {
+            (edge(start + length) - edge(start)).clamp(1.0, COORD_LIMIT) as i32
+        };
         (
-            position(self.x),
-            position(self.y),
-            size(self.width),
-            size(self.height),
+            edge(self.x).clamp(-COORD_LIMIT, COORD_LIMIT) as i32,
+            edge(self.y).clamp(-COORD_LIMIT, COORD_LIMIT) as i32,
+            span(self.x, self.width),
+            span(self.y, self.height),
         )
     }
 
@@ -166,9 +171,23 @@ mod tests {
             assert_eq!(native.pixels_over(divisor), native.pixels(), "{divisor}");
         }
     }
+    /// Positions round halves away from zero, as Rust's `f64::round` does. The width is 2 and not
+    /// 3 because the size is the distance between the rounded edges, which is the next test.
     #[test]
     fn halves_round_away_from_zero() {
-        assert_eq!(region(0.5, -0.5, 2.5, 3.5).pixels(), (1, -1, 3, 4));
+        assert_eq!(region(0.5, -0.5, 2.5, 3.5).pixels(), (1, -1, 2, 4));
+    }
+
+    /// The size comes from the rounded edges, never from rounding the length on its own: at
+    /// `GDK_SCALE=2` a stage the page reports as x 577 width 1025 has edges at 288.5 and 801, so
+    /// the surface is 512 wide. Rounding the length by itself gives 513 and hangs a pixel past the
+    /// stage's right edge — the invariant `VideoStage.tsx` states and this side has to keep too.
+    #[test]
+    fn a_size_never_overshoots_the_edges_it_came_from() {
+        assert_eq!(
+            region(577.0, 333.0, 1025.0, 181.0).pixels_over(2.0),
+            (289, 167, 512, 90)
+        );
     }
 
     /// X11 window coordinates are 16 bit. A rectangle past that limit is clamped rather than cast,

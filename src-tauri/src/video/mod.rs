@@ -87,7 +87,9 @@ fn settle(change: impl FnOnce(&mut SurfaceState)) -> Result<(), VideoError> {
     Ok(())
 }
 
-/// A rectangle measured by the frontend with `getBoundingClientRect`, in CSS pixels.
+/// A rectangle already resolved to native device pixels by the page, relative to the webview
+/// viewport. The unit is the contract: `src/types/video.ts` and `surface::SurfaceRegion` say the
+/// same thing, and changing one means changing all three. See BACKLOG N2c.
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoRegion {
