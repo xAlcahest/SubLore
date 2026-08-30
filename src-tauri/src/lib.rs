@@ -133,9 +133,15 @@ pub fn run() -> tauri::Result<()> {
             event: WindowEvent::CloseRequested { api, .. },
             ..
         } => {
+            // An answered gate already decided this close, and the flag is consumed here so it
+            // can wave through exactly one request and never a later one. See BACKLOG N1b.
+            if CLOSING.swap(false, Ordering::SeqCst) {
+                asr::shutdown(app_handle);
+                shutdown_video(app_handle);
+            }
             // Unsaved edits are the user's to keep or drop, never ours to discard silently
             // (CLAUDE.md §3). See BACKLOG N1.
-            if unsaved_work(app_handle) {
+            else if unsaved_work(app_handle) {
                 api.prevent_close();
                 // A gate already up owns this decision; raising a second one over it would let the
                 // first answer destroy the window the second is still asking about.
@@ -184,6 +190,11 @@ fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 /// dialog on the same document, and answering the first destroys the window the second is still
 /// deciding about.
 static GATE_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// Set once the gate has been answered with save or discard, so the close that follows goes through
+/// without asking again. Consumed by the handler that reads it: a flag left standing would let a
+/// later close skip the gate in silence, which is how the work it guards gets lost. See BACKLOG N1b.
+static CLOSING: AtomicBool = AtomicBool::new(false);
 
 /// True when the window must not close without asking. `Unknown` counts as unsaved: the gate is
 /// there for the bad moment, and refusing to ask during one is how work gets lost (BACKLOG N1).
@@ -275,8 +286,9 @@ fn discard_open_file(app: &AppHandle) -> bool {
     true
 }
 
-/// mpv draws into a child of the window, so it has to be gone before the window is, and both the
-/// surface teardown and `destroy` belong to the main thread.
+/// Ask for the close on the main thread, and let the close event do the teardown. mpv draws into a
+/// child of the window and has to be gone before the window is; `CloseRequested` is where that
+/// happens for every other close, and this one now joins it instead of having its own order.
 ///
 /// A failure here leaves a window that is open but no longer backed by its session, so it is said
 /// out loud rather than logged: silently, the next edit would fail with no document and the next
@@ -284,12 +296,14 @@ fn discard_open_file(app: &AppHandle) -> bool {
 fn close_window(app: AppHandle, label: String) {
     let handle = app.clone();
     let posted = app.run_on_main_thread(move || {
-        asr::shutdown(&handle);
-        shutdown_video(&handle);
         match handle.get_webview_window(&label) {
             Some(window) => {
-                if let Err(error) = window.destroy() {
-                    log::error!("close gate: destroying the window failed: {error:?}");
+                // `close`, not `destroy`: destroying the GTK window directly skips tao's close
+                // sequence and the main loop dies in GDK's event queue. See BACKLOG N1b.
+                CLOSING.store(true, Ordering::SeqCst);
+                if let Err(error) = window.close() {
+                    CLOSING.store(false, Ordering::SeqCst);
+                    log::error!("close gate: closing the window failed: {error:?}");
                     report_close_failure(&handle, &error.to_string());
                 }
             }
