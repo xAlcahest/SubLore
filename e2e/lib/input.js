@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
 
+import { mapState } from "./x11.js";
+
 /**
  * Real X11 input. WebKitWebDriver answers Element Click, Element Send Keys and the Actions
  * endpoint with "unsupported operation" against a wry webview, so the harness types and clicks
@@ -10,8 +12,57 @@ function xdotool(args) {
 }
 
 /** XSetInputFocus, which works without a window manager. Typed keys follow the input focus. */
-export function focusWindow(id) {
-  xdotool(["windowfocus", "--sync", id]);
+/**
+ * Focus a window, waiting until X can actually give it focus.
+ *
+ * `XSetInputFocus` answers `BadMatch` for a window that is not viewable, and on a bare X server with
+ * no window manager a toplevel can be mapped without being viewable for a while — or, if nothing
+ * ever maps it, forever. The two cases look identical from the error and are not the same defect,
+ * so this waits for `IsViewable` and then says which one it met.
+ */
+export function focusWindow(id, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let state = "unknown";
+  for (;;) {
+    state = mapState(id);
+    if (state === "IsViewable") {
+      break;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `window ${id} never became viewable in ${timeoutMs}ms (it is ${state}), so X would answer ` +
+          `BadMatch to a focus request. Either nothing mapped it, or this machine is slower than ` +
+          `the wait.\n${describeWindow(id)}`,
+      );
+    }
+    sleepBriefly();
+  }
+  try {
+    xdotool(["windowfocus", "--sync", id]);
+  } catch (error) {
+    // Viewable and still refused: not a race. The usual cause is that nothing on this display can
+    // hold focus, which is what a bare X server with no window manager looks like.
+    throw new Error(
+      `window ${id} is ${state} and X still refused focus: ${error.message}\n${describeWindow(id)}`,
+    );
+  }
+}
+
+/** `xwininfo` for one window, for an error message that can be read without a second run. */
+function describeWindow(id) {
+  try {
+    return execFileSync("xwininfo", ["-id", id], { encoding: "utf8", timeout: 10000 });
+  } catch (error) {
+    return `xwininfo could not describe ${id}: ${error.message}`;
+  }
+}
+
+/** Busy-wait in small steps: this file is synchronous and its callers are not all async. */
+function sleepBriefly() {
+  const until = Date.now() + 50;
+  while (Date.now() < until) {
+    // Spin. Fifty milliseconds at a time, bounded by the caller's timeout.
+  }
 }
 
 /** Where the pointer is, in root coordinates. */
