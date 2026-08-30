@@ -53,3 +53,21 @@ The old criterion — thirty consecutive clean runs — is now known to be unabl
 - The existing `close-gate-check.js` stays armed and unchanged, and thirty sequential runs of it stay clean. It is not the instrument that can prove a fix, but it is the one that guards the behaviour.
 
 For CI this matters more than the sequential number suggested: the runner is small and busy, which is the condition under which this reproduces.
+
+## The cure, and the battery that judged it — later the same day
+
+The second attempt was authorised against the measured hypothesis rather than against a guess. One shape was available. Hiding the dialog instead of destroying it would have been the cleaner sequencing, but `allWindows()` reads the whole window tree and a hidden window stays in it under its own name, so `close-gate-check.js` would still find it and go red — and no assertion gets weakened to make a fix look good. The dialog keeps being destroyed.
+
+That left the other end of the path. `close_window` called `window.destroy()`, which tears down the GTK window directly and skips the close sequence `tao` runs for a window carrying a webview. That is the one difference between the path that crashes and the ordinary close that `shutdown-check.js` exercises constantly without ever crashing. Save is not special: it lengthens the window in which the thing goes wrong, and load lengthens it further.
+
+The change is `window.close()` instead, with the gate's answer recorded in a `CLOSING` flag so the close request it raises is allowed through without asking again — no second dialog, no loop. `asr` and the video surface are shut down in `CloseRequested`, where every other close already does it, rather than in a private order of this path's own.
+
+A self-check of the diff then found the flag was never cleared. It does not bite today, because the app exits straight after, but a flag that says "this close is already decided" and stays standing would let a later close skip the gate in silence — the exact shape of the loss the gate exists to prevent. It is now consumed by the handler that reads it, so it waves through one request and never a second. That change touches the gate path, so the judge was run again on the binary being delivered rather than on the one it was written against.
+
+| judge                                             | first binary                     | delivered binary                 |
+| ------------------------------------------------- | -------------------------------- | -------------------------------- |
+| 60 save-branch probe runs, six concurrent streams | 0 SIGSEGV, 0 core dumps, 60 done | 0 SIGSEGV, 0 core dumps, 60 done |
+| sequential `pnpm e2e:close-gate`                  | 30 green, 0 red                  | 3 green, 0 red                   |
+| `pnpm e2e:shutdown`, same close path              | 5/5                              | 5/5                              |
+
+At the rate measured before the change — two in thirty on this exact battery — an unfixed defect survives sixty runs about one time in sixty. That is the strength of this evidence and it is worth stating plainly rather than calling the defect dead: **the crash did not occur in the battery built to make it occur**, on Linux, under Xvfb. Nothing here says anything about Windows or macOS.
