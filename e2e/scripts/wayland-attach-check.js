@@ -109,7 +109,12 @@ async function main() {
       },
       { timeout: 30000, message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel` },
     );
-    check("the app window appeared", toplevel !== null);
+    // waitFor throws rather than resolving falsy, so `toplevel !== null` here is guaranteed;
+    // map state is the first fact about this window that is not (see gate2 register, L3).
+    check(
+      "the app window is mapped, not just present in the tree",
+      mapState(toplevel.id) === "IsViewable",
+    );
 
     const surface = await waitFor(() => surfaceWindow(toplevel), {
       timeout: 30000,
@@ -129,21 +134,8 @@ async function main() {
       `the surface has no children: mpv took the Wayland display and drew past the wid.\n${rootTree()}`,
     );
 
-    // The picture is NOT asserted here, and that is deliberate.
-    //
-    // Under Xvfb with llvmpipe it showed 2 times in 10 while mpv was attached in all 10, and the
-    // same mpv driven from the command line in the same Xvfb rendered every time: the flakiness is
-    // the software rasteriser's, not the app's. Checked where it actually matters instead — the
-    // owner's own Wayland session, on real hardware, launched with the fixture as an argument:
-    // three runs out of three showed the frame, saturation 5.86 against 2.1 for the empty shell,
-    // with mpv's child window present each time (docs/reports/n2b-collaudo-reale.md, 2026-08-30).
-    //
-    // So this check asserts the attachment, which is the defect N2b was filed for. That it fails
-    // without the fix was measured, not assumed: with `gpu-context=x11egl` deleted and the binary
-    // rebuilt, the surface has no children and the check stops at that assertion. The same shape
-    // shows up in mpv on its own under this Xvfb — `--wid` with `gpu-context=auto` leaves the host
-    // window childless, with `x11egl` it gains one. That the surface then draws is covered by
-    // video-surface.spec.js, which measures pixels on a display where they can be trusted.
+    // The picture is deliberately NOT asserted here: it is flaky under Xvfb for reasons unrelated
+    // to this fix. See docs/reports/n2b-collaudo-reale.md for the real-hardware pixel evidence.
 
     execFileSync("python3", [closeWindowTool, toplevel.id], { stdio: "inherit", timeout: 15000 });
     await waitFor(() => exit !== null, { timeout: 15000, message: "the app to exit" });
