@@ -259,7 +259,7 @@ jobs:
       # end green while a check is red: the artefact is the evidence, this step is the verdict.
       - name: Collect the diagnostic logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-diagnostic-logs
           path: ci-logs/
