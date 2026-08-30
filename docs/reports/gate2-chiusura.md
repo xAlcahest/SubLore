@@ -79,3 +79,11 @@ By owner ruling the gate opens on blockers and serious, not on minor perfection:
 - **Option A, as written in the plan.** N1c first, T2 inherits a GTK-direct picker. T1's by-title lookup is re-validated against the new picker before T2 begins.
 - **Option B, as written in the plan.** T2 builds the four choosers on GTK directly and closes N1c in the same delivery.
 - **Option C, recommended.** N1c immediately after the gate opens, **before T1**. T1 builds the harness helper that identifies the chooser window by title, and that helper assumes an rfd/GTK3 toplevel. If the chooser changes after T1, the helper needs re-validating; if it changes before, T1 is built once against the final thing and T2 inherits it with no rework. Cost: one delivery before T1 starts. Benefit: no re-validation of T1, no doubling of T2.
+
+## One open observation, recorded rather than swept
+
+On 2026-08-31, the first run of the wdio suite after the toolchain was pinned to stable 1.93.0 — the first run against a completely rebuilt binary — reported **7 spec files passed, 1 failed**. Four consecutive runs since have been 8 of 8, and every script check passed in the same battery.
+
+**Which spec failed is not known**, and that is a gap in the battery command rather than in the suite: it extracted the summary line and not the failing name, so the one run that mattered left no record of itself. The suite's own output would have named it; the command threw it away.
+
+So: one unexplained failure in five runs, no cause, no reproduction, and no claim that it is understood. It is not presented as fixed and not presented as flakiness — it is presented as unexplained. If it returns, the first thing to do is capture the run's full output rather than its summary.
