@@ -1,5 +1,6 @@
 pub mod asr;
 pub mod crash;
+pub mod dialog;
 pub mod project;
 pub mod strings;
 pub mod subtitle;
@@ -11,9 +12,6 @@ pub use tauri_plugin_log::log;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
-use tauri_plugin_dialog::{
-    DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
-};
 use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
 
 use crash::force::ForcePoint;
@@ -202,47 +200,33 @@ fn unsaved_work(app_handle: &AppHandle) -> bool {
 
 /// Ask what to do with unsaved edits, then act on the answer.
 ///
-/// `show_with_result` returns immediately and calls back off the main loop, which is what keeps
-/// this clear of the deadlock `project::choose_path` documents. A save that succeeds marks the
-/// session clean and a discard drops it, so the close that follows those two answers finds nothing
-/// to ask about; a save that fails closes nothing and says why.
+/// The answer arrives on the main thread, off the close event that asked for it, which is what
+/// keeps this clear of the deadlock `project::choose_path` documents. A save that succeeds marks
+/// the session clean and a discard drops it, so the close that follows those two answers finds
+/// nothing to ask about; a save that fails closes nothing and says why.
 fn ask_before_closing(app: AppHandle, label: String) {
-    let mut dialog = app
-        .dialog()
-        .message(strings::CLOSE_UNSAVED_BODY)
-        .title(strings::CLOSE_UNSAVED_TITLE)
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::YesNoCancelCustom(
-            strings::CLOSE_SAVE.to_owned(),
-            strings::CLOSE_DISCARD.to_owned(),
-            strings::CLOSE_CANCEL.to_owned(),
-        ));
-    // Windows honours this and keeps the dialog over its owner. The GTK backend ignores it — rfd
-    // builds the dialog with a null parent — so on Linux the re-entrancy guard above is the only
-    // thing standing between a dialog lost behind the window and a second gate.
-    if let Some(window) = app.get_webview_window(&label) {
-        dialog = dialog.parent(&window);
-    }
-    // The plugin rewrites every button of a custom set to `Custom(label)` before this callback, so
-    // matching the labels covers the three answers and the catch-all covers everything else,
-    // including the window manager closing the dialog outright.
-    dialog.show_with_result(move |answer| {
+    let acted = app.clone();
+    let acted_label = label.clone();
+    let asked = dialog::ask_close(&app, &label, move |answer| {
         let close = match answer {
-            MessageDialogResult::Custom(ref text) if text == strings::CLOSE_SAVE => {
-                save_open_file(&app)
-            }
-            MessageDialogResult::Custom(ref text) if text == strings::CLOSE_DISCARD => {
-                discard_open_file(&app)
-            }
-            _ => false,
+            dialog::CloseAnswer::Save => save_open_file(&acted),
+            dialog::CloseAnswer::Discard => discard_open_file(&acted),
+            dialog::CloseAnswer::Cancel => false,
         };
         if close {
-            close_window(app.clone(), label.clone());
+            close_window(acted.clone(), acted_label.clone());
         } else {
             // Cancelled, or a save that failed: the window stays, so the next X must ask again.
             GATE_OPEN.store(false, Ordering::SeqCst);
         }
     });
+    if let Err(error) = asked {
+        // Nobody will be asked, so nobody can answer. Logged rather than shown, because reporting
+        // it would need the same main thread that just refused to take the question; the window
+        // stays and the next close tries again.
+        log::error!("close gate: the dialog could not be raised: {error:?}");
+        GATE_OPEN.store(false, Ordering::SeqCst);
+    }
 }
 
 /// Save the open file. A failed save keeps the window open: closing anyway would lose exactly the
@@ -271,11 +255,13 @@ fn save_open_file(app: &AppHandle) -> bool {
 /// Tell the user the save did not happen. Fire and forget: the window is staying open either way,
 /// and blocking here would be the deadlock `ask_before_closing` exists to avoid.
 fn report_save_failure(app: &AppHandle, error: &subtitle::error::SubtitleError) {
-    app.dialog()
-        .message(strings::close_save_failed(&error.to_string()))
-        .title(strings::CLOSE_SAVE_FAILED_TITLE)
-        .kind(MessageDialogKind::Error)
-        .show(|_| {});
+    if let Err(posting) = dialog::report_error(
+        app,
+        strings::CLOSE_SAVE_FAILED_TITLE,
+        strings::close_save_failed(&error.to_string()),
+    ) {
+        log::error!("close gate: could not report the failed save: {posting:?}");
+    }
 }
 
 /// Drop the session the user chose to abandon. A failed drop still closes: the user said the edits
@@ -325,11 +311,13 @@ fn close_window(app: AppHandle, label: String) {
 /// app is still holding their file.
 fn report_close_failure(app: &AppHandle, reason: &str) {
     GATE_OPEN.store(false, Ordering::SeqCst);
-    app.dialog()
-        .message(strings::close_failed(reason))
-        .title(strings::CLOSE_FAILED_TITLE)
-        .kind(MessageDialogKind::Error)
-        .show(|_| {});
+    if let Err(posting) = dialog::report_error(
+        app,
+        strings::CLOSE_FAILED_TITLE,
+        strings::close_failed(reason),
+    ) {
+        log::error!("close gate: could not report the failed close: {posting:?}");
+    }
 }
 
 /// Idempotent: every one of the events above may fire, and only the first does the work.
