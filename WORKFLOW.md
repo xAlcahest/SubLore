@@ -52,7 +52,7 @@ Reviews no longer run per delivery. They run in batches, at gates, and a gate is
 **The gates:**
 
 1. Now: N2, and everything merged since N1.
-2. After N2b and decision 1, immediately before the owner's manual checklist. **Register, owner ruling 2026-08-30:** every delivery merged under the gate regime from N2b onwards went in without a dedicated review, by choice of regime, so this gate's lenses cover all of them — the NVIDIA webview mitigation, the native GTK dialogs, the close path fix, and N2c when it lands. One lens is named in advance: **the close path and the single-use `CLOSING` flag**, which is code adjacent to data safety and deserves eyes that are not its author's.
+2. After N2c, immediately before the owner's manual checklist. Decision 1 is **not** in this gate: owner ruling 2026-08-30 moved it into M2.0 as T3, where the plan designed it and where its predecessors T1, T1b and T2 sit. The gate therefore covers the seven commits from `062f201` to `18fe5f3` plus N2c. **Register, owner ruling 2026-08-30:** every delivery merged under the gate regime from N2b onwards went in without a dedicated review, by choice of regime, so this gate's lenses cover all of them — the NVIDIA webview mitigation, the native GTK dialogs, the close path fix, and N2c when it lands. One lens is named in advance: **the close path and the single-use `CLOSING` flag**, which is code adjacent to data safety and deserves eyes that are not its author's.
 3. The end of every M2.x milestone.
 4. Before any merge that touches saving, subtitle formats, or the open-core boundary — whatever the regime, whatever the schedule. These three stay watched because a defect there costs the user's work, their file, or the licence line.
 
