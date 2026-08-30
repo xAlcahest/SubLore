@@ -1,0 +1,44 @@
+# One weekly pass per ecosystem, grouped, so a quiet week costs one pull request and not a dozen.
+# Every update arrives as a pull request, which both runners gate like any other change.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  # The whole Rust workspace shares one Cargo.lock, so one entry covers every crate. The compiler
+  # is not in here: rust-toolchain.toml is bumped by hand, in a commit of its own, by owner ruling.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+    groups:
+      cargo:
+        update-types: [minor, patch]
+    ignore:
+      # Pinned deliberately and verified against the DLL it links: see the libmpv step in ci.yml.
+      - dependency-name: libmpv2
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+    groups:
+      npm:
+        update-types: [minor, patch]
