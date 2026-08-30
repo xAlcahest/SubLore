@@ -23,6 +23,48 @@ const LOG_ROTATION: tauri_plugin_log::RotationStrategy =
     tauri_plugin_log::RotationStrategy::KeepSome(3);
 const LOG_MAX_BYTES: u128 = 2 * 1024 * 1024;
 
+/// Files named on the command line, for the frontend to open once it is up.
+#[derive(Default, serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupFiles {
+    pub video: Option<String>,
+    pub subtitle: Option<String>,
+}
+
+/// Sublore accepts paths as arguments: `sublore file.mkv file.srt`, in any order. Sorted by
+/// extension rather than by position so neither has to come first.
+///
+/// This is also the only way automation reaches the app on a real desktop: synthetic keystrokes go
+/// to whichever window holds the X focus, which under a compositor is not reliably ours
+/// (WORKFLOW.md, and docs/reports/n2b-collaudo-reale.md for what that cost).
+fn startup_files(args: impl Iterator<Item = String>) -> StartupFiles {
+    let mut files = StartupFiles::default();
+    // Only arguments that are actually files on disk. The driver chain and the packagers both pass
+    // their own arguments through, and treating a stray value as a path made the app try to open
+    // one at startup: every E2E spec that opens a file then failed.
+    for arg in args
+        .skip(1)
+        .filter(|a| !a.starts_with('-') && std::path::Path::new(a).is_file())
+    {
+        let lower = arg.to_lowercase();
+        if lower.ends_with(".srt")
+            || lower.ends_with(".vtt")
+            || lower.ends_with(".ass")
+            || lower.ends_with(".ssa")
+        {
+            files.subtitle.get_or_insert(arg);
+        } else {
+            files.video.get_or_insert(arg);
+        }
+    }
+    files
+}
+
+#[tauri::command]
+fn startup_files_command(state: tauri::State<'_, StartupFiles>) -> StartupFiles {
+    state.inner().clone()
+}
+
 /// Build and run the app. Startup errors propagate to `main` so a failed launch is reported.
 pub fn run() -> tauri::Result<()> {
     crash::install();
@@ -32,6 +74,7 @@ pub fn run() -> tauri::Result<()> {
         .plugin(log_plugin())
         .plugin(tauri_plugin_dialog::init())
         .manage(project::ProjectState::default())
+        .manage(startup_files(std::env::args()))
         .invoke_handler(tauri::generate_handler![
             asr::asr_models,
             asr::asr_model_download,
@@ -60,7 +103,8 @@ pub fn run() -> tauri::Result<()> {
             video::video_play,
             video::video_pause,
             video::video_seek,
-            video::video_set_region
+            video::video_set_region,
+            startup_files_command
         ])
         .setup(|app| {
             crash::attach(app);
