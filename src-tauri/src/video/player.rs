@@ -171,6 +171,48 @@ pub struct Player {
     core_destroyed: AtomicBool,
 }
 
+/// The context Sublore asks for when it hands mpv a `wid`, and the one a rejected override falls
+/// back to.
+#[cfg(target_os = "linux")]
+const GPU_CONTEXT_PIN: &str = "x11egl";
+
+/// The X11 context mpv is asked to use, and where that choice came from.
+///
+/// Pure so it can be tested without touching the process environment: `requested_gpu_context` is
+/// the one line that reads it.
+#[cfg(target_os = "linux")]
+fn gpu_context_from(
+    value: Option<&std::ffi::OsStr>,
+) -> (std::borrow::Cow<'static, str>, &'static str) {
+    const DEFAULT: &str = GPU_CONTEXT_PIN;
+    match value {
+        // An empty value falls through to the default, the same reading `SUBLORE_WEBKIT_WORKAROUNDS`
+        // settled in main.rs: two hatches with one prefix must not disagree about one input.
+        Some(raw) => match raw.to_str() {
+            Some(name) if !name.trim().is_empty() => (
+                std::borrow::Cow::Owned(name.trim().to_owned()),
+                "SUBLORE_MPV_GPU_CONTEXT",
+            ),
+            Some(_) => (
+                std::borrow::Cow::Borrowed(DEFAULT),
+                "default, the variable was empty",
+            ),
+            // Reported rather than shown as unset: a variable that is set and unreadable is a
+            // different fact from one nobody set (gate 2, the OsString lesson of `startup_files`).
+            None => (
+                std::borrow::Cow::Borrowed(DEFAULT),
+                "default, the variable was not valid Unicode",
+            ),
+        },
+        None => (std::borrow::Cow::Borrowed(DEFAULT), "default"),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn requested_gpu_context() -> (std::borrow::Cow<'static, str>, &'static str) {
+    gpu_context_from(std::env::var_os("SUBLORE_MPV_GPU_CONTEXT").as_deref())
+}
+
 impl Player {
     pub fn new(config: PlayerConfig, app: Option<AppHandle>) -> Result<Self, VideoError> {
         force_c_numeric_locale()?;
@@ -185,10 +227,28 @@ impl Player {
             }
             if let Some(wid) = config.wid {
                 init.set_option("wid", wid)?;
-                // `wid` is an X11 window id, and with a Wayland display in the environment mpv's
-                // `gpu-context=auto` picks Wayland and draws past it. See docs/reports/n2b-probe.md.
                 #[cfg(target_os = "linux")]
-                init.set_option("gpu-context", "x11egl")?;
+                {
+                    // `wid` is an X11 window id, and mpv's `gpu-context=auto` picks Wayland over it
+                    // when a Wayland display is in the environment. See docs/reports/n2b-probe.md.
+                    let (context, source) = requested_gpu_context();
+                    // Tried, not imposed, and twice: a name from the hatch that mpv rejects falls
+                    // back to the pin, and a pin mpv rejects leaves the user an application rather
+                    // than an error. See BACKLOG N2b and docs/reports/gate2b-fixes-review.md.
+                    if let Err(error) = init.set_option("gpu-context", context.as_ref()) {
+                        let can_fall_back = context.as_ref() != GPU_CONTEXT_PIN;
+                        crate::log::warn!(
+                            "video: mpv refused gpu-context={context} ({source}): {error}"
+                        );
+                        if !can_fall_back
+                            || init.set_option("gpu-context", GPU_CONTEXT_PIN).is_err()
+                        {
+                            crate::log::warn!(
+                                "video: no gpu-context pinned; if the video area stays black, this is why"
+                            );
+                        }
+                    }
+                }
             }
             Ok(())
         })
@@ -536,5 +596,47 @@ fn event_loop(mpv: &Mpv, shared: &Shared, stop: &AtomicBool) {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod gpu_context_tests {
+    use super::gpu_context_from;
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    #[test]
+    fn nothing_set_asks_for_the_pin() {
+        let (context, source) = gpu_context_from(None);
+        assert_eq!(context.as_ref(), "x11egl");
+        assert_eq!(source, "default");
+    }
+
+    #[test]
+    fn a_name_is_taken_as_written() {
+        let (context, source) = gpu_context_from(Some(OsStr::new(" x11 ")));
+        assert_eq!(context.as_ref(), "x11");
+        assert_eq!(source, "SUBLORE_MPV_GPU_CONTEXT");
+    }
+
+    /// The sibling hatch in `main.rs` reads an empty value as "not set". Two hatches under one
+    /// prefix must not disagree about one input (gate 2, `gate2b-fixes-review.md` finding 5).
+    #[test]
+    fn an_empty_value_reads_as_unset() {
+        for empty in ["", "   "] {
+            let (context, source) = gpu_context_from(Some(OsStr::new(empty)));
+            assert_eq!(context.as_ref(), "x11egl", "{empty:?}");
+            assert_eq!(source, "default, the variable was empty");
+        }
+    }
+
+    /// A value Rust cannot decode is a variable that *was* set, and reporting it as unset sends
+    /// whoever reads a "no picture" report looking in the wrong place.
+    #[test]
+    fn a_value_that_is_not_unicode_is_named_as_such_not_as_unset() {
+        let raw = OsStr::from_bytes(&[0x78, 0x31, 0x31, 0xff]);
+        let (context, source) = gpu_context_from(Some(raw));
+        assert_eq!(context.as_ref(), "x11egl");
+        assert_eq!(source, "default, the variable was not valid Unicode");
     }
 }
