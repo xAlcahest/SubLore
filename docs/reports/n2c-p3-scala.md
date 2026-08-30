@@ -25,15 +25,24 @@ Read from `:0` with `xrandr`, `xdpyinfo`, `xrdb` and the KDE output configuratio
 
 The consequence for the code either way: `physical()` in `surface/mod.rs:51` multiplies by a factor that on this display is 1, and `logical()` — the path Linux actually uses (`surface/linux.rs:63-64`) — passes the page's numbers through untouched. Neither can produce a 1.5.
 
-## Not yet measured: `devicePixelRatio` in the app's webview
+## Measured: `devicePixelRatio` is 1.5 and `scale_factor()` is 1.0
 
-This is the number that decides N2c's real criterion, and it needs the app running on that display. Two outcomes, agreed in advance so the result is not read backwards:
+The app was launched on `:0` with the video fixture as a command-line argument — launch and arguments only, no synthetic input — with a temporary command that logged both numbers side by side. The instrumentation was removed afterwards and the binary rebuilt, with the build's exit status checked.
 
-- **It reports 1.** Then the page's CSS pixel is one X pixel, no ratio is missing anywhere, and the misplaced rectangle is not a scale-conversion bug at all. The next question becomes how the rectangle is measured inside a page whose layout `Xft.dpi` has enlarged, and the fix is in the frontend's measurement, not in the surface.
-- **It reports 1.5.** Then the page speaks CSS pixels while the X window needs X pixels, the Linux path is missing exactly that multiplication, and the multiplier has to come from the frontend, because `window.scale_factor()` cannot supply it. N2c's unit test then pins a conversion driven by a value the backend receives rather than one it computes.
+```
+P3PROBE dpr=1.5  page=682x466  native=(scale_factor 1.0, inner_size 1024x700)
+```
 
-Either way the acceptance criterion written on 2026-08-30 — a unit test of the coordinate conversion at fractional factors — is only meaningful once this number is known, which is why the backlog entry now puts this probe first.
+682 x 1.5 = 1023 and 466 x 1.5 = 699, against a native inner size of 1024x700. Within rounding, **one CSS pixel in this page is 1.5 X pixels**, and `window.scale_factor()` reports 1.0 — the integer the `tao` source said it would be. The second outcome of the two written down in advance is the one that happened.
 
-## Method note
+A second, independent confirmation came from the window tree in the same run. The native surface sat at 512x120, which are the page's own numbers: at 1.5 it should have been 768x180. The rectangle reaching X is in CSS pixels.
 
-Everything above cost the machine nothing, which was the point: the N1b measurement was running sequentially and by owner ruling must not share the machine with parallel load. Launching the app on `:0` to read `devicePixelRatio` is allowed on the real display — launch and arguments only, no synthetic input — but it is load, so it waits.
+One number in that run is not explained and is recorded rather than smoothed over: twelve seconds after launch `xwininfo` measured the toplevel at 800x600, while the startup log recorded an inner size of 1024x700. The window was resized after the log was written; nothing here measures by what.
+
+## What this settles
+
+The frontend reports `getBoundingClientRect()` in CSS pixels (`VideoStage.tsx:26-33`). The Linux path takes those numbers unchanged (`surface/linux.rs:63-64` uses `logical()`), so the surface is placed at 1/1.5 of its position and size. That is the whole of the misplacement.
+
+The multiplier cannot come from the backend: `window.scale_factor()` is an integer and reports 1 on this display, so both `logical()` and `physical()` are wrong here — `physical()` would multiply by 1. It has to come from the page, which is the only party that knows the ratio.
+
+That makes N2c's fix a change to what crosses the IPC boundary, not an arithmetic correction behind it, and CLAUDE.md section 6 applies: the region contract is a public interface, so the Windows path moves in the same change or it double-scales — there `scale_factor()` does carry the ratio, and `physical()` multiplies by it today.
