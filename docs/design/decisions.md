@@ -6,6 +6,14 @@ All thirteen open questions raised in `post-v1-plan.md` under "Decisions due now
 
 ---
 
+---
+
+## 14. How the video frame reaches the screen — owner ruling 2026-08-30
+
+**Adopted as a working hypothesis, to be ratified formally at gate 2.** The X11 child window stays for v1.0, and M2.0's layer registry is built as permanent, not as a bridge to something else. The reasoning, the costs and the three conditions that would reverse it are in `x11-vs-render-api.md`, and those conditions stay written there as guards rather than being folded away here.
+
+**Probe P6, shaping the surface, is parked.** It is not spent now. It becomes current when M16 or decision 1 makes it so, and not before. No new front is opened on this.
+
 ## 1. Video occlusion: the native surface hides for HTML layers
 
 When a menu or a dialog opens over the video, the native surface hides, and it comes back when the layer closes. No native system menus, no separate popup windows.
