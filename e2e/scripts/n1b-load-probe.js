@@ -13,8 +13,10 @@
  * The criterion needs sixty save-branch runs in six concurrent streams; the caller drives that,
  * because load is the condition under test and this script must not decide it.
  *
- * Prints one JSON object: { answer, phase, exit, signal, pid }. The caller asks `coredumpctl`
- * about the pid afterwards; a probe that queried it itself would slow the run it is timing.
+ * Prints one JSON object: { answer, phase, exit, signal, killedRunning, pid }. The caller asks
+ * `coredumpctl` about the pid afterwards; a probe that queried it itself would slow the run it is
+ * timing. `killedRunning` is true when teardown had to SIGKILL a still-alive process group — such a
+ * run was cut off, not observed to completion, and a battery should not count it as "done".
  */
 import { execFileSync, spawn } from "node:child_process";
 import console from "node:console";
@@ -25,7 +27,8 @@ import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { appEnv } from "../lib/env.js";
-import { clickAt, doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
+import { doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
+import { clickDialogButton } from "../lib/gtk-dialog.js";
 import { closeWindowTool, repoRoot, requireAppBinary } from "../lib/paths.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { allWindows, findToplevel } from "../lib/x11.js";
@@ -40,20 +43,6 @@ const answer = process.argv[2];
 if (answer !== "save" && answer !== "discard") {
   console.error("usage: n1b-load-probe.js save|discard");
   process.exit(2);
-}
-
-/**
- * `dialog::ask_close` adds save, discard, cancel in that order, so cancel sits rightmost. The
- * numbers are an estimate for the same reason `close-gate-check.js` says they are, and a click that
- * misses shows up as a run that never leaves the `answer` phase.
- */
-function clickDialogButton(dialog, which) {
-  const slot = { save: 2, discard: 1 }[which];
-  const buttonWidth = 96;
-  const x = dialog.absX + dialog.width - 24 - buttonWidth / 2 - slot * (buttonWidth + 12);
-  const y = dialog.absY + dialog.height - 34;
-  focusWindow(dialog.id);
-  clickAt(x, y);
 }
 
 const dataHome = mkdtempSync(path.join(os.tmpdir(), `sublore-n1b-${answer}-`));
@@ -76,6 +65,7 @@ app.on("exit", (code, signal) => {
 });
 
 let phase = "start";
+let killedRunning = false;
 try {
   phase = "window";
   const toplevel = await waitFor(() => (exit === null ? findToplevel() : null), {
@@ -119,7 +109,11 @@ try {
   // The probe records; it does not judge. The phase it stopped in is the finding.
 } finally {
   try {
-    if (processGroupMembers(pgid).length > 0) {
+    // Recorded before the kill: a run still alive here was cut off before it could crash or exit
+    // on its own, which a battery must be able to tell apart from a genuine no-op (see gate2
+    // register, L10 — this teardown used to erase that distinction).
+    killedRunning = exit === null && processGroupMembers(pgid).length > 0;
+    if (killedRunning) {
       killGroup(pgid);
     }
   } catch {
@@ -133,6 +127,7 @@ console.log(
     phase,
     exit: exit === null ? null : exit.code,
     signal: exit === null ? null : exit.signal,
+    killedRunning,
     pid: pgid,
   }),
 );

@@ -5,7 +5,6 @@ import process from "node:process";
 
 import { asrDir, installStubSidecar, stubBinary } from "./lib/asr.js";
 import { appEnv } from "./lib/env.js";
-import { requireFfmpeg } from "./lib/pixels.js";
 import { driverPort, startDriver, stopDriver } from "./lib/driver.js";
 import { requireAppBinary, requireDisplay, requireTool, requireVideoFixture } from "./lib/paths.js";
 import { passedTests, recordPassedTest, resetTally } from "./lib/tally.js";
@@ -29,9 +28,9 @@ delete process.env.WAYLAND_DISPLAY;
 // SUBLORE_WHISPER_BIN cannot quietly change what asr.spec.js is asserting. See e2e/README.md.
 process.env.SUBLORE_E2E_ASR_DIR = asrDir();
 process.env.SUBLORE_WHISPER_BIN = stubBinary();
-// Every prerequisite is checked once, before any spec starts, so a missing tool is one clear
-// sentence instead of a timeout inside whichever spec happened to need it first.
-requireFfmpeg();
+// For the app, not the harness: no spec measures pixels, asr.spec.js runs a real extraction. At
+// load rather than in `onPrepare`, where a throw is logged and every spec runs regardless.
+requireTool("ffmpeg", "extract the audio the transcription spec transcribes");
 
 export const config = {
   runner: "local",

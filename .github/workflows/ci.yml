@@ -194,3 +194,26 @@ jobs:
 
       - name: Close gate test (unsaved edits are never dropped silently)
         run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate
+
+      - name: Late-edit gate test (an edit made while the answer is in flight is asked about again)
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate-late-edit
+
+      - name: Startup args test (a name the command line cannot carry costs that name, not the launch)
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:startup-args
+      - name: mpv context test (a gpu-context mpv refuses costs the request, not the app)
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:mpv-context
+
+      # The only automated check that catches N2c's fix being removed: every other job misses it
+      # because devicePixelRatio is 1 under Xvfb. At GDK_SCALE=2 the window is 2048x1400, larger
+      # than the screen, which this bare X server serves without clamping (verified locally).
+      - name: Scaled surface test (an integer display scale is applied exactly once)
+        run: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:scale
+
+      # Two behavioural checks are deliberately not steps here, and this is the record of that
+      # decision rather than an oversight (gate 2 register, `package.json:19`, `ci.yml:196`).
+      # `pnpm e2e:webview` needs /sys/module/nvidia for the branch it tests to be taken at all; on
+      # ubuntu-latest it would assert "not applied" and prove only that llvmpipe paints, which the
+      # smoke test above already covers. It runs on the owner's machine, per WORKFLOW.md §4c.
+      # `pnpm e2e:wayland` needs a real Wayland socket; without one mpv falls back to X11 and the
+      # check would be green for the wrong reason, so it refuses to run instead. Same owner-machine
+      # rule. Neither is silently skippable: both fail loudly when their prerequisite is absent.

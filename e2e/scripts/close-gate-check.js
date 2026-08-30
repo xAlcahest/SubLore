@@ -21,7 +21,7 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { clickAt, doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
+import { doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import {
   closeWindowTool,
   repoRoot,
@@ -32,8 +32,9 @@ import {
   windowWidth,
 } from "../lib/paths.js";
 import { appEnv } from "../lib/env.js";
+import { clickDialogButton } from "../lib/gtk-dialog.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
-import { allWindows, findToplevel, rootTree } from "../lib/x11.js";
+import { allWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
 
 /** Gutting an assertion has to be as red as failing one, so the checks count themselves. */
 const EXPECTED_CHECKS = 12;
@@ -107,25 +108,6 @@ async function waitForDialogGone(what) {
         `the wrong reason.\n${rootTree()}`,
     );
   });
-}
-
-/**
- * Click a dialog button by its label. GtkButtonBox sizes buttons to the widest label under the
- * runner's theme, so these numbers are an estimate; the caller proves the click landed by watching
- * the dialog disappear. Cancel is not clicked at all, see `dismissDialog`.
- */
-function clickDialogButton(dialog, which) {
-  // `dialog::ask_close` adds save, discard, cancel in that order, so Cancel sits rightmost.
-  const slots = { save: 2, discard: 1, cancel: 0 };
-  const slot = slots[which];
-  if (slot === undefined) {
-    throw new Error(`unknown dialog button ${which}`);
-  }
-  const buttonWidth = 96;
-  const x = dialog.absX + dialog.width - 24 - buttonWidth / 2 - slot * (buttonWidth + 12);
-  const y = dialog.absY + dialog.height - 34;
-  focusWindow(dialog.id);
-  clickAt(x, y);
 }
 
 /**
@@ -258,7 +240,12 @@ async function main() {
     requestClose(toplevel);
 
     const dialog = await waitForDialog(state);
-    check("the close request raised the dialog instead of closing", dialog !== null);
+    // waitForDialog throws rather than resolving falsy, so `dialog !== null` here is guaranteed;
+    // map state is the first fact about this window that is not (see gate2 register, L3).
+    check(
+      "the dialog is mapped, not just present in the tree",
+      mapState(dialog.id) === "IsViewable",
+    );
 
     dismissDialog(dialog);
     // The proof that the answer landed is `waitForDialogGone` throwing if it did not; a `check`
@@ -280,7 +267,10 @@ async function main() {
 
     requestClose(toplevel);
     const again = await waitForDialog(state);
-    check("a second close request raises the dialog again", again !== null);
+    check(
+      "the second dialog is mapped, not just present in the tree",
+      mapState(again.id) === "IsViewable",
+    );
 
     clickDialogButton(again, "discard");
     // The proof that the answer landed is `waitForDialogGone` throwing if it did not; a `check`
@@ -319,7 +309,10 @@ async function main() {
     requestClose(toplevel);
 
     const dialog = await waitForDialog(state);
-    check("the save branch reached the dialog", dialog !== null);
+    check(
+      "the save branch's dialog is mapped, not just present in the tree",
+      mapState(dialog.id) === "IsViewable",
+    );
 
     clickDialogButton(dialog, "save");
     // The proof that the answer landed is `waitForDialogGone` throwing if it did not; a `check`

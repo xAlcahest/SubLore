@@ -32,7 +32,7 @@ import {
   videoFixture,
 } from "../lib/paths.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
-import { allWindows, childWindows, rootTree } from "../lib/x11.js";
+import { allWindows, childWindows, mapState, rootTree } from "../lib/x11.js";
 
 /** Gutting an assertion has to be as red as failing one, so the checks count themselves. */
 const EXPECTED_CHECKS = 5;
@@ -95,6 +95,9 @@ async function measureAt(scale) {
       timeout: 30000,
       message: `the native surface at GDK_SCALE=${scale}\n${rootTree()}`,
     });
+    // Captured before the window closes: mapState needs a live window, and it is a fact
+    // `surfaceOf` does not establish (a child can be in the tree unmapped).
+    const surfaceMapState = mapState(surface.id);
 
     execFileSync("python3", [closeWindowTool, toplevel.id], { stdio: "ignore", timeout: 15000 });
     await waitFor(() => exit !== null, { timeout: 20000, message: "the app to exit" });
@@ -103,7 +106,7 @@ async function measureAt(scale) {
       message: `process group ${pgid} to be empty`,
     }).catch(() => processGroupMembers(pgid));
 
-    return { toplevel, surface, exit, survivors };
+    return { toplevel, surface, exit, survivors, surfaceMapState };
   } finally {
     try {
       if (processGroupMembers(pgid).length > 0) {
@@ -145,7 +148,13 @@ async function main() {
       `surface ${double.surface.width}x${double.surface.height}+${double.surface.relX}+${double.surface.relY}`,
   );
 
-  check("the app came up at both ratios", single.surface !== null && double.surface !== null);
+  // waitFor throws rather than resolving falsy, so `surface !== null` is guaranteed here; map
+  // state is the first fact about the surfaces that is not (see gate2 register, L3).
+  check(
+    "the surface was mapped at both ratios",
+    single.surfaceMapState === "IsViewable" && double.surfaceMapState === "IsViewable",
+    `map state was ${single.surfaceMapState} at ratio 1, ${double.surfaceMapState} at ratio 2`,
+  );
 
   // Without this the whole check could pass by comparing two identical runs, if GDK_SCALE were
   // ignored: the assertion below would then compare a rectangle with twice itself and fail, but it
