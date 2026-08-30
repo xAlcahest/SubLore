@@ -6,7 +6,7 @@ The owner's reading grid was fixed before the numbers existed: if the crash appe
 
 ## What was run
 
-A probe, not the check: `n1b-branch-probe.mjs` launches the app with a subtitle passed on the command line, dirties the first cue, asks for the close, answers with one button, and records what happened. It asserts nothing. Sixty runs, **sequentially**, one app at a time, no parallel load, alternating save and discard so that any drift in the machine over the half hour would fall on both branches rather than on one.
+A probe, not the check: `e2e/scripts/n1b-load-probe.js` launches the app with a subtitle passed on the command line, dirties the first cue, asks for the close, answers with one button, and records what happened. It asserts nothing. Sixty runs, **sequentially**, one app at a time, no parallel load, alternating save and discard so that any drift in the machine over the half hour would fall on both branches rather than on one.
 
 | branch  | runs | reached the end | non-zero exit | signal | core dump |
 | ------- | ---- | --------------- | ------------- | ------ | --------- |
@@ -34,6 +34,8 @@ Two variables separated the sequential battery above from the parallel one in `n
 | ------- | ---- | ------- | --------- |
 | save    | 30   | **2**   | 2         |
 | discard | 30   | 0       | 0         |
+
+**Correction, gate 2 (2026-08-30):** unlike the sequential battery above, this table carries no "reached the end" column. The probe's only signal for how far a run got is `phase`, and every catch in it is silent (`e2e/scripts/n1b-load-probe.js:118-119`), so a run that missed the dialog button under six-way X11 focus contention and timed out at `phase: "answer"` or `"exit"` would print zero SIGSEGV and zero core dump — indistinguishable here from a run that reached `"done"` and simply did not crash. Nothing committed to the repository can recompute that column for this battery: the code that ran the probe sixty times across six concurrent streams and collected these numbers was never committed (no script or `package.json` entry does it), so the raw per-run JSON this table was built from does not exist in the tree to re-check. The "2 in 30 on save, 0 in 30 on discard" split, and the "load is a condition of the defect, save is not special" conclusion built on it below, stand as measured but with this gap on the record rather than silently assumed closed. The later judgment table below, added the same day once the fix landed, does carry a "done" figure for both its batteries and is not affected by this gap.
 
 Both crashes carry the same stack as every one before them — `_gdk_x11_display_queue_events` inside `gtk_main_iteration_do` — with one GTK thread in the process and no `rfd` frame anywhere.
 
@@ -71,3 +73,15 @@ A self-check of the diff then found the flag was never cleared. It does not bite
 | `pnpm e2e:shutdown`, same close path              | 5/5                              | 5/5                              |
 
 At the rate measured before the change — two in thirty on this exact battery — an unfixed defect survives sixty runs about one time in sixty. That is the strength of this evidence and it is worth stating plainly rather than calling the defect dead: **the crash did not occur in the battery built to make it occur**, on Linux, under Xvfb. Nothing here says anything about Windows or macOS.
+
+## Correction, 2026-08-30, from gate 2's closure audit
+
+This report named the probe `n1b-branch-probe.mjs`, which is what it was called in a scratch
+directory while the batteries ran. **No file of that name has ever existed in the repository**: the
+script was committed as `e2e/scripts/n1b-load-probe.js`, and the name here has been corrected to it.
+
+The orchestration around it — sixty runs, six concurrent streams, one display number each, a CSV of
+outcome, exit status, signal and core presence — was a shell loop typed at the terminal and never
+committed. So the numbers in this report are reproducible only by rebuilding that loop from the
+description above. The probe itself is committed and is what N1b's closing criterion names; the
+driver is not, and saying so is the difference between a reproducible result and a remembered one.

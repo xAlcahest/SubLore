@@ -52,7 +52,7 @@ Reviews no longer run per delivery. They run in batches, at gates, and a gate is
 **The gates:**
 
 1. Now: N2, and everything merged since N1.
-2. After N2c, immediately before the owner's manual checklist. Decision 1 is **not** in this gate: owner ruling 2026-08-30 moved it into M2.0 as T3, where the plan designed it and where its predecessors T1, T1b and T2 sit. The gate therefore covers the seven commits from `062f201` to `18fe5f3` plus N2c. **Register, owner ruling 2026-08-30:** every delivery merged under the gate regime from N2b onwards went in without a dedicated review, by choice of regime, so this gate's lenses cover all of them — the NVIDIA webview mitigation, the native GTK dialogs, the close path fix, and N2c when it lands. One lens is named in advance: **the close path and the single-use `CLOSING` flag**, which is code adjacent to data safety and deserves eyes that are not its author's.
+2. After N2c, immediately before M2.0 starts. Decision 1 is **not** in this gate: owner ruling 2026-08-30 moved it into M2.0 as T3, where the plan designed it and where its predecessors T1, T1b and T2 sit. The gate therefore covers the seven commits from `062f201` to `18fe5f3` plus N2c, and its exit is what lets M2.0's T1 begin (`BACKLOG.md:74`). The owner's manual checklist does not follow directly: M2.0 through M2.6 sit between this gate and the nearest one, **Owner checklist M2** (`BACKLOG.md:163`). **Register, owner ruling 2026-08-30:** every delivery merged under the gate regime from N2b onwards went in without a dedicated review, by choice of regime, so this gate's lenses cover all of them — the NVIDIA webview mitigation, the native GTK dialogs, the close path fix, and N2c when it lands. One lens is named in advance: **the close path and the single-use `CLOSING` flag**, which is code adjacent to data safety and deserves eyes that are not its author's.
 3. The end of every M2.x milestone.
 4. Before any merge that touches saving, subtitle formats, or the open-core boundary — whatever the regime, whatever the schedule. These three stay watched because a defect there costs the user's work, their file, or the licence line.
 
@@ -77,8 +77,19 @@ This rule is paid for. Two delegations in one session returned "Concluso." as th
 - **Synthetic input belongs in an isolated server.** `xdotool` typing, clicks and key presses are allowed only inside an X server the harness owns and started itself (Xvfb). They are never used on the owner's real display: on a live compositor keystrokes go to whichever window holds the focus, and during the N2b check they landed in the owner's own window and typed a fixture path into it.
 - **On the real display, three things are allowed:** launching the app, passing it files as command-line arguments, and capturing its own window. Nothing else. `startup_files` in `src-tauri/src/lib.rs` exists so that a real-session check can reach a loaded document without touching the keyboard.
 - **Capture the window, not the screen.** Under rootless XWayland `x11grab` on the root window reads black whatever the app draws; `import -window <id>` reads the window directly and needs no raise and no focus.
+- **One display number per check, never reused in the same battery.** A second `xvfb-run -n N` on a number the previous check just used does not get a server, and the app then exits before its window exists. On 2026-08-30 this produced a false red on `close-gate-late-edit-check.js` — the check guarding a data-loss blocker — which then passed four times out of four on distinct displays and failed again the moment the reuse was reproduced deliberately. A battery that reuses numbers reports the harness, not the app.
 - **A discrimination experiment proves the rebuild happened before it measures.** When a test is meant to fail without a fix, removing the fix is only half the experiment: check the build's exit status explicitly and say so, never chain it behind a silent `&&`. On 2026-08-30 a failed build inside `pnpm e2e:build >/dev/null 2>&1 && echo ok` printed nothing, the check ran against the previous binary, and the experiment reported the exact opposite of the truth. An experiment that never ran is the worst defect available, because it arrives dressed as certainty.
 - **The E2E binary is built last.** `cargo test` and `cargo clippy --all-targets` rebuild `src-tauri/target/debug/sublore` as a plain cargo debug binary, which looks for the Vite dev server instead of the embedded assets, and `pnpm build` regenerates `dist` under a binary already built. Everything that compiles Rust or the frontend runs before `pnpm e2e:build`, never after. Twice now this ordering has made a green suite look red and cost a debugging session.
+
+## 4d. Markdown is committed as it changes (owner ruling 2026-08-30)
+
+Every edit to any markdown that changes something — a decision, a criterion, a rule, a report, a
+correction to a claim — is committed when it is made, without waiting for the work around it and
+without asking whether it is worth a commit. It is: a document that is right on one machine and
+wrong on the remote is worse than one that is wrong in both places, because it looks trustworthy.
+
+This is the one place the commit-preview rule does not apply. Code still gets its message shown and
+approved before it lands; markdown does not, because the delay is the defect.
 
 ## 5. Parallelism
 
