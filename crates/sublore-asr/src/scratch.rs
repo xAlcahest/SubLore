@@ -208,6 +208,20 @@ mod tests {
 
     /// Backdate a directory so a sweep sees it as abandoned, instead of waiting a day.
     fn set_modified(path: &std::path::Path, when: SystemTime) {
+        // A directory opens with `File::open` on Unix and not on Windows, where a handle to one
+        // needs backup semantics and the right to write attributes. Same fixture, two doors.
+        #[cfg(windows)]
+        let handle = {
+            use std::os::windows::fs::OpenOptionsExt;
+            const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            fs::OpenOptions::new()
+                .access_mode(FILE_WRITE_ATTRIBUTES)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+                .open(path)
+                .expect("the fixture directory should be openable")
+        };
+        #[cfg(not(windows))]
         let handle = fs::File::open(path).expect("the fixture directory should be openable");
         handle
             .set_times(fs::FileTimes::new().set_modified(when))
