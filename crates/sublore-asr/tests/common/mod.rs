@@ -319,8 +319,12 @@ fn serve(mut stream: TcpStream, body: &[u8], policy: &Policy, range: &AtomicU64)
     }
     let _ = stream.flush();
     // Drain whatever the client still had to say, so the close is not a reset it reports instead
-    // of the truncation under test.
+    // of the truncation under test. One 64-byte read was enough on Linux and not on Windows, which
+    // resets a connection closed with anything still unread and delivers that reset to the client's
+    // *next* request as os error 10053 — a resumed download failing for the previous attempt's
+    // teardown. Drain to the end, bounded by a timeout so a stalled client cannot hang the server.
     let _ = stream.shutdown(std::net::Shutdown::Write);
-    let mut sink = [0u8; 64];
-    let _ = stream.read(&mut sink);
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(200)));
+    let mut sink = [0u8; 1024];
+    while matches!(stream.read(&mut sink), Ok(read) if read > 0) {}
 }

@@ -146,6 +146,28 @@ jobs:
       - name: Test Rust
         run: cargo test --workspace --no-fail-fast
 
+      # STATUS_ENTRYPOINT_NOT_FOUND says a dependency is missing a symbol and never says which one.
+      # This names it: what the failing binary imports, against what the DLL beside it exports.
+      - name: Name the missing entry point (Windows, only when the tests failed)
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $tools = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64" | Select-Object -Last 1
+          $dumpbin = Join-Path $tools.FullName "dumpbin.exe"
+          $exe = Get-ChildItem target\debug\deps\video_playback-*.exe | Select-Object -First 1
+          if (-not $exe) { Write-Host "no video_playback binary to inspect"; exit 0 }
+          $exports = & $dumpbin /exports target\debug\libmpv-2.dll |
+            Select-String -Pattern '\s(mpv_\S+)$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+          $imports = & $dumpbin /imports $exe.FullName |
+            Select-String -Pattern '\s(mpv_\S+)$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+          Write-Host "$($exports.Count) mpv exports in the DLL, $($imports.Count) mpv imports in $($exe.Name)"
+          $missing = $imports | Where-Object { $exports -notcontains $_ }
+          if ($missing) { Write-Host "MISSING FROM THE DLL: $($missing -join ', ')" }
+          else { Write-Host "every mpv symbol the binary imports is exported by the DLL beside it" }
+          & $dumpbin /dependents $exe.FullName | Select-String -Pattern '\.dll'
+
   e2e:
     name: e2e smoke (ubuntu)
     runs-on: ubuntu-latest
