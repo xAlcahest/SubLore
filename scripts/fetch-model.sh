@@ -2,8 +2,8 @@
 # Fetch the whisper model the E2E harness runs the app against, into the same cache directory the
 # gated real-asr suite uses. See BACKLOG.md M3.2.
 #
-# Explicit and manual: nothing inside Sublore downloads on its own (CLAUDE.md §1), and the model is
-# never committed (CLAUDE.md §8). The two values below are ggml-tiny.en.bin's row in
+# Explicit and manual: nothing inside Sublore downloads on its own (CONTRIBUTING.md §1), and the model is
+# never committed (CONTRIBUTING.md §8). The two values below are ggml-tiny.en.bin's row in
 # crates/sublore-asr/src/model/catalog.rs; if that row ever changes, change them here too.
 set -e
 

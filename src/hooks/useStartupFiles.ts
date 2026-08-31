@@ -11,7 +11,7 @@ type StartupFiles = {
  *
  * `sublore episode.mkv episode.srt` opens both, in any order. Beyond convenience, this is how
  * automation reaches the app on a real desktop: synthetic keystrokes go to whichever window holds
- * the X focus, and under a compositor that is not reliably ours (WORKFLOW.md).
+ * the X focus, and under a compositor that is not reliably ours.
  */
 export function useStartupFiles(
   openVideo: (path: string) => Promise<unknown>,

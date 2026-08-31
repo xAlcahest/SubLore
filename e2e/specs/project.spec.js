@@ -193,7 +193,7 @@ describe("projects", () => {
     );
 
     expect(await textOf(".project__error")).toBe(null);
-    // Attaching records a path. CLAUDE.md §3.1: the user's file is not read for writing, not
+    // Attaching records a path. CONTRIBUTING.md §3.1: the user's file is not read for writing, not
     // copied, not moved, not touched.
     const after = statSync(userSubtitle);
     expect(after.size).toBe(before_.size);

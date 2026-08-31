@@ -2,7 +2,7 @@
 # Build the whisper.cpp sidecar binaries Sublore spawns. See BACKLOG.md M3.1.
 #
 # Two binaries come out of one pinned commit: whisper-cli (Vulkan) and whisper-cli-cpu.
-# The CPU one has no Vulkan loader dependency at all, which is what makes CLAUDE.md §2's
+# The CPU one has no Vulkan loader dependency at all, which is what makes CONTRIBUTING.md §2's
 # "CPU fallback always working" a property of the shipped files instead of the user's drivers.
 # Everything lands in .whisper/, which is git-ignored: no binary ever enters the repo.
 set -e

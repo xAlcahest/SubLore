@@ -1,10 +1,10 @@
 //! Transcription over IPC: list models, download one, start a run, cancel it. The command names,
-//! the event names and their payloads are a public interface (CLAUDE.md §6). See BACKLOG.md M3.4.
+//! the event names and their payloads are a public interface (CONTRIBUTING.md §6). See BACKLOG.md M3.4.
 //!
 //! Everything heavy lives in `sublore-asr`; this module is the thin layer that owns the app's
 //! directories, keeps the one in-flight run, and turns results into events. No transcription work
 //! happens on the main thread or on the async runtime's poll thread: every call into the sidecar
-//! goes through `spawn_blocking` (CLAUDE.md §7).
+//! goes through `spawn_blocking` (CONTRIBUTING.md §7).
 
 pub mod error;
 
@@ -268,7 +268,7 @@ pub fn sweep_scratch(app: &AppHandle) {
 pub async fn asr_models(app: AppHandle) -> Result<Vec<AsrModelStatus>, AsrError> {
     let dir = models_dir(&app)?;
     // A directory listing, so it never runs on the poll thread. It also never opens a socket:
-    // what Sublore knows about a model is the catalog plus what is on disk (CLAUDE.md §1).
+    // what Sublore knows about a model is the catalog plus what is on disk (CONTRIBUTING.md §1).
     blocking(move || Ok(statuses(&ModelStore::new(dir)))).await
 }
 

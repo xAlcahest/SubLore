@@ -6,7 +6,7 @@
  * N2b). Twice in gate 2 that pin was made conditional and then unconditional again, and each shape
  * broke a different machine: narrowed, it stopped protecting plain X11 sessions; unconditional and
  * propagating, an mpv built without `x11egl` failed `Player::new`, which failed Tauri's setup hook,
- * which meant **no window at all** rather than no video (`docs/reports/gate2b-fixes-review.md`).
+ * which meant **no window at all** rather than no video.
  *
  * This check drives the case with the one lever that reproduces it without a second mpv build: the
  * `SUBLORE_MPV_GPU_CONTEXT` override, set to a name no mpv accepts. Before the fix the app exits

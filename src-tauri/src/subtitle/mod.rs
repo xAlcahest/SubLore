@@ -1,7 +1,7 @@
 //! One open subtitle file and the commands that edit it. The session lives here, behind a mutex,
 //! because the document is the authority on its own bytes: the frontend holds a list of rows and a
 //! revision number, never a second model. The IPC names and payloads here are a public interface
-//! (CLAUDE.md section 6). See BACKLOG.md M2.3.
+//! (CONTRIBUTING.md section 6). See BACKLOG.md M2.3.
 
 pub mod error;
 
@@ -27,7 +27,7 @@ use error::{SubtitleError, SubtitleErrorCode};
 /// rather than an out-of-memory kill.
 pub const MAX_SUBTITLE_BYTES: u64 = 16 * 1024 * 1024;
 
-/// Backups live under Sublore's own data directory, never beside the user's file (CLAUDE.md §3.5).
+/// Backups live under Sublore's own data directory, never beside the user's file (CONTRIBUTING.md §3.5).
 const BACKUP_DIR: &str = "backups";
 
 /// The one open file, or none. A plain `Mutex`: every command body runs inside `spawn_blocking`,
@@ -286,7 +286,7 @@ pub async fn subtitle_save_as(
 // -------------------------------------------------------------------------------------------
 
 /// Read `path`, parse it, and make it the open file. Refused while the open file has unsaved
-/// edits: dropping the user's work is a decision only the user makes (CLAUDE.md §3).
+/// edits: dropping the user's work is a decision only the user makes (CONTRIBUTING.md §3).
 pub fn open_session(slot: &SessionSlot, path: &str) -> Result<SubtitleOpened, SubtitleError> {
     let mut guard = lock(slot)?;
     if guard.as_ref().is_some_and(EditSession::dirty) {
@@ -439,7 +439,7 @@ pub enum SessionState {
 
 /// Never blocks. The gate runs on the main loop, and this mutex is held for the whole of
 /// `read_document` and of `save_with_backup`, so waiting here would freeze the window mid-save
-/// (CLAUDE.md §7).
+/// (CONTRIBUTING.md §7).
 pub fn session_state(slot: &SessionSlot) -> SessionState {
     match slot.try_lock() {
         Ok(guard) => match guard.as_ref() {
@@ -463,7 +463,7 @@ pub fn session_state(slot: &SessionSlot) -> SessionState {
 ///
 /// A clean session writes nothing. The gate can open on a session that is merely busy, and an
 /// unasked-for write would change the mtime of a file the user only opened, and would overwrite
-/// whatever another program put there in the meantime (CLAUDE.md §3.1).
+/// whatever another program put there in the meantime (CONTRIBUTING.md §3.1).
 pub fn save_current(
     slot: &SessionSlot,
     backup_root: PathBuf,
@@ -529,7 +529,7 @@ pub fn summarize(path: &str, document: &SubtitleDocument) -> SubtitleSummary {
 // -------------------------------------------------------------------------------------------
 
 /// Reading, parsing and saving all block, so no command body runs on the async runtime's poll
-/// thread (CLAUDE.md §7).
+/// thread (CONTRIBUTING.md §7).
 async fn blocking<T, F>(work: F) -> Result<T, SubtitleError>
 where
     F: FnOnce() -> Result<T, SubtitleError> + Send + 'static,

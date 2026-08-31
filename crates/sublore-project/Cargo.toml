@@ -6,7 +6,7 @@ edition = "2021"
 license = "GPL-3.0-or-later"
 publish = false
 
-# The one dependency the core crates carry. CLAUDE.md §2 fixes SQLite as the storage engine, and
+# The one dependency the core crates carry. CONTRIBUTING.md §2 fixes SQLite as the storage engine, and
 # Rust cannot reach a C library without a binding; `bundled` compiles SQLite from source so no
 # platform needs a system library. See BACKLOG.md M4.1.
 [dependencies]

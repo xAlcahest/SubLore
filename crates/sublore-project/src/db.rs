@@ -203,7 +203,7 @@ pub(crate) fn unix_seconds(now: SystemTime) -> i64 {
 
 /// Take the database's path before anything opens it. `create_new` is one atomic step and fails if
 /// a file, a directory or a link is already there, so two creates racing one folder can never both
-/// go on to write, and the loser never has a database of anyone's to take back. See CLAUDE.md §3.
+/// go on to write, and the loser never has a database of anyone's to take back. See CONTRIBUTING.md §3.
 fn claim(database: &Path) -> Result<(), ProjectError> {
     match fs::OpenOptions::new()
         .write(true)

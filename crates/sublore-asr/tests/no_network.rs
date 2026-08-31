@@ -1,5 +1,5 @@
 //! M3.2's first acceptance criterion, stated as a test: no network request happens unless the
-//! user asks for a download (CLAUDE.md §1).
+//! user asks for a download (CONTRIBUTING.md §1).
 //!
 //! Two independent proofs. A fetcher that fails the test if it is ever called, driven through the
 //! whole model and transcription workflow; and a real listener that counts connections, so the

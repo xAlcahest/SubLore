@@ -1,7 +1,7 @@
 //! Behavioural tests for the two ways creating a project could cost a user data: two creates
 //! racing one folder, where the loser's cleanup took the winner's finished database with it, and a
 //! link standing where the database goes, which would put a project outside the folder the user
-//! chose. Both are CLAUDE.md §3; see BACKLOG.md M4.1 and M4.2.
+//! chose. Both are CONTRIBUTING.md §3; see BACKLOG.md M4.1 and M4.2.
 //!
 //! Real files in a scratch directory, in the style of `tests/deletion_safety.rs`.
 
@@ -84,7 +84,7 @@ fn creates_racing_one_folder_leave_exactly_one_project_and_keep_it() {
             "round {round}: one folder is one project, whatever the callers did: {outcomes:?}"
         );
         // The one that won is still on disk, and it is a whole project: the loser's cleanup taking
-        // it away is the data loss this test exists for. See CLAUDE.md §3.
+        // it away is the data loss this test exists for. See CONTRIBUTING.md §3.
         assert!(
             folder.join(DATABASE_NAME).is_file(),
             "round {round}: the project that was made must still be there"
@@ -197,7 +197,7 @@ mod links {
                 size_of(&target),
                 0,
                 "attempt {attempt}: a project was written into a file outside the folder the user \
-                 chose. See CLAUDE.md §3."
+                 chose. See CONTRIBUTING.md §3."
             );
         }
 

@@ -4,7 +4,7 @@
  * **This is a probe, not a check. It asserts nothing.** It records what happened so that batteries
  * of runs can say something the checks cannot: N1b's exit crash does not reproduce sequentially at
  * all, and under concurrent load it reproduces on the save branch and not on discard
- * (`docs/reports/n1b-sessanta-corse.md`). N1b's closing criterion is written in terms of this
+ * N1b's closing criterion is written in terms of this
  * script, which is why it lives here rather than in a scratch directory.
  *
  * Usage, one run:
@@ -52,7 +52,8 @@ copyFileSync(
   workFile,
 );
 
-// The subtitle arrives as a command-line argument rather than typed, per WORKFLOW.md 4c.
+// The subtitle arrives as a command-line argument rather than typed: synthetic keystrokes go to
+// whichever window holds the X focus, which on a real session is not necessarily this one.
 const app = spawn(requireAppBinary(), [workFile], {
   detached: true,
   stdio: ["ignore", "ignore", "ignore"],

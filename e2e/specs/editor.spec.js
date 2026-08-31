@@ -14,7 +14,7 @@ import { findToplevel } from "../lib/x11.js";
 /**
  * BACKLOG.md M2.3: "open the 2000-cue fixture, edit a cue's text, save, reopen, the edit is there
  * and the rest is byte-identical; undo restores it; scrolling and typing show no visible lag
- * (measured, budget CLAUDE §7: open under 1 s)".
+ * (measured, budget CONTRIBUTING.md §7: open under 1 s)".
  *
  * The four numbers below stand in for "no visible lag", which is not assertable. They are measured
  * inside the page with `performance.now()` from probes this spec installs, so no production code
@@ -36,7 +36,7 @@ const OPEN_BUDGET_MS = 1000;
  * a noisier runner while still failing on a regression worth knowing about. Wider than that and the
  * assertion stops being one.
  *
- * The absolute figures are logged, because the budget in CLAUDE.md section 7 is a real claim and the
+ * The absolute figures are logged, because the budget in CONTRIBUTING.md section 7 is a real claim and the
  * owner's checklist measures it on the release build.
  */
 /**

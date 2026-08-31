@@ -8,9 +8,6 @@ target/
 # Tauri generated files
 src-tauri/gen/schemas/
 
-# Agent workspace
-.omc/
-
 # Logs and editor noise
 *.log
 .idea/
@@ -21,7 +18,7 @@ src-tauri/gen/schemas/
 fixtures/video/*.mkv
 
 # The whisper.cpp source, both build trees and the two sidecar binaries. Built by
-# scripts/build-whisper.sh, never committed (CLAUDE.md §8).
+# scripts/build-whisper.sh, never committed.
 .whisper/
 
 # Speech fixtures are generated, never committed: no voice audio in the repo

@@ -65,7 +65,7 @@ pub enum Phase {
 
 #[derive(Clone, Debug)]
 pub struct TranscribeRequest {
-    /// The user's file. Opened for reading and nothing else, ever (CLAUDE.md §3.1).
+    /// The user's file. Opened for reading and nothing else, ever (CONTRIBUTING.md §3.1).
     pub media: PathBuf,
     /// A model the store has already checked.
     pub model: PathBuf,
@@ -281,7 +281,7 @@ fn validate(request: &TranscribeRequest) -> Result<(), AsrError> {
 ///
 /// The only path ffmpeg is given to write is inside the scratch directory. The media appears once,
 /// after `-i`, where it can only be read: no remux, no in-place conversion, nothing written beside
-/// the user's file (CLAUDE.md §3.1).
+/// the user's file (CONTRIBUTING.md §3.1).
 fn extract_audio(
     tools: &Tools,
     request: &TranscribeRequest,
@@ -559,7 +559,7 @@ fn drain(pipe: impl Read, stream: Stream, note: &(dyn Fn(Stream, &str) + Sync)) 
 /// clamped against later.
 ///
 /// Only the header is read: a 45-minute episode is 86 MB of samples, and none of them say
-/// anything the `data` chunk's length does not (CLAUDE.md §7).
+/// anything the `data` chunk's length does not (CONTRIBUTING.md §7).
 fn wav_duration_ms(path: &Path) -> Result<u32, AsrError> {
     let unreadable = |what: &str| {
         AsrError::new(

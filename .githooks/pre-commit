@@ -19,7 +19,7 @@ check() {
 	"$@" || fail "'$*' failed"
 }
 
-# Whisper binaries, models and generated speech never enter the repo (CLAUDE.md §8).
+# Whisper binaries, models and generated speech never enter the repo (CONTRIBUTING.md §8).
 # Checked before the slow tools run, so a mistake is caught in a second rather than a minute.
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
 for path in $staged; do
@@ -39,6 +39,14 @@ for path in $staged; do
 	fi
 done
 
-check pnpm format:check
+# Formatting is checked over what is being committed, not over the whole tree: a working
+# directory can hold files that are none of the repository's business, and the hook has no
+# business failing on them. CI still checks the whole tree, where only tracked files exist.
+formattable=$(printf '%s\n' $staged | grep -E '\.(js|mjs|cjs|jsx|ts|tsx|json|css|html|md|ya?ml)$' || true)
+if [ -n "$formattable" ]; then
+	echo "pre-commit: prettier --check on the staged files"
+	# shellcheck disable=SC2086
+	pnpm exec prettier --check $formattable || fail "prettier --check failed on a staged file"
+fi
 check pnpm lint
 check cargo fmt --check

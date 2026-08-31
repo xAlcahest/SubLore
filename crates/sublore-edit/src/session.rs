@@ -72,7 +72,7 @@ impl EditSession {
     }
 
     /// Plan, apply, verify, record. On any failure the session is exactly as it was: the document,
-    /// the list, the history and the revision all still describe the same bytes (CLAUDE.md §3).
+    /// the list, the history and the revision all still describe the same bytes (CONTRIBUTING.md §3).
     ///
     /// `run` says whether this edit continues the one before it; see [`Run`].
     pub fn apply(&mut self, edit: &Edit, run: Run, now: Instant) -> Result<CuePatch, EditError> {

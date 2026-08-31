@@ -21,7 +21,7 @@ pub enum EditErrorKind {
     /// The mutation does not apply here: split at an offset outside the text, merge past the last
     /// cue, insert into an ASS [Events] section that holds no event to copy a shape from.
     NotApplicable,
-    /// The edited bytes did not parse. A Sublore bug: refuse, never write (CLAUDE.md §3).
+    /// The edited bytes did not parse. A Sublore bug: refuse, never write (CONTRIBUTING.md §3).
     Reparse,
     /// The edited bytes parsed into a document the plan did not predict. Same rule.
     Unverified,

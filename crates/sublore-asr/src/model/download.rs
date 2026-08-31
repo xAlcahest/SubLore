@@ -2,7 +2,7 @@
 //!
 //! Reached only from the app's download command, which only the Download button invokes: this is
 //! the one place in the milestone where a socket may open, and it opens because the user asked
-//! (CLAUDE.md §1). The transport is behind a trait so the tests can drive the whole thing without
+//! (CONTRIBUTING.md §1). The transport is behind a trait so the tests can drive the whole thing without
 //! one, and so that a fetcher that must never be called can be handed in and fail the test if it is.
 
 use std::fs::{self, File, OpenOptions};

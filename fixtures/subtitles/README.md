@@ -33,7 +33,7 @@ test harness.
 - `.prettierignore` covers this tree for the same reason.
 - Write files that look like they came off a real disk: real dialogue, real timings, real mess. No
   `Lorem ipsum`, no `cue 1 / cue 2 / cue 3` unless the fixture is about numbering itself.
-- Every fixed bug gets a regression fixture here (CLAUDE.md §5.3).
+- Every fixed bug gets a regression fixture here (CONTRIBUTING.md §5.3).
 - A new tolerance needs a fixture and a BACKLOG entry before the parser learns it.
 
 ## Adding a fixture

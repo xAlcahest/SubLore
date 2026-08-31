@@ -42,7 +42,7 @@ pub const CLOSE_DISCARD_PLAIN: &str = "Discard";
 pub const CLOSE_CANCEL_PLAIN: &str = "Cancel";
 
 /// A save that fails on the way out leaves the window open. Saying so is the difference between
-/// a refusal the user understands and one that looks like a stuck button (CLAUDE.md §6).
+/// a refusal the user understands and one that looks like a stuck button (CONTRIBUTING.md §6).
 pub const CLOSE_FAILED_TITLE: &str = "Could not close";
 pub fn close_failed(reason: &str) -> String {
     format!(

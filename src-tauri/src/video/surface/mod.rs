@@ -12,15 +12,17 @@ mod platform;
 mod platform;
 
 #[cfg(not(any(target_os = "linux", windows)))]
-compile_error!("Sublore targets Windows and Linux; see CLAUDE.md section on platform policy.");
+compile_error!(
+    "Sublore targets Windows and Linux; see CONTRIBUTING.md section on platform policy."
+);
 
 /// A rectangle in native device pixels, resolved by the page before it crosses the IPC boundary.
 ///
 /// The ratio does not cross the IPC boundary: the page is the only party that knows the full one,
 /// since `window.scale_factor()` is an integer in `tao` and reports 1 on a fractionally scaled
-/// display, where the 1.5 arrives as page zoom instead (`docs/reports/n2c-p3-scala.md`). Each side
-/// still reads its own half locally, and the geometry is right only while the two agree: the page
-/// re-reports on every ratio change (`VideoStage.tsx`) so that they do.
+/// display, where the 1.5 arrives as page zoom instead. Each side still reads its own half
+/// locally, and the geometry is right only while the two agree: the page re-reports on every ratio
+/// change (`VideoStage.tsx`) so that they do.
 ///
 /// What each platform does with these numbers is its own business and stays behind this type.
 /// Win32 geometry is physical, so Windows takes them as they are. GDK multiplies child geometry by
@@ -131,8 +133,8 @@ mod tests {
     }
 
     /// The numbers a page produces at a fractional ratio reach the window API unchanged. 682 x 1.5
-    /// is 1023, which is what the owner's display actually measured (docs/reports/n2c-p3-scala.md);
-    /// nothing here may quietly scale it a second time.
+    /// is 1023, which is what the owner's display actually measured; nothing here may quietly
+    /// scale it a second time.
     #[test]
     fn a_fractionally_scaled_rectangle_passes_through() {
         assert_eq!(

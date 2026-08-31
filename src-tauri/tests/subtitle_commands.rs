@@ -266,7 +266,7 @@ fn overwriting_keeps_the_previous_file_and_never_writes_beside_the_source() {
         fs::read(&source).expect("source read")
     );
 
-    // CLAUDE.md §3.1: the file the user opened is read-only, and nothing lands in its folder.
+    // CONTRIBUTING.md §3.1: the file the user opened is read-only, and nothing lands in its folder.
     let source_dir = Path::new(&source).parent().expect("fixture directory");
     let stray: Vec<PathBuf> = fs::read_dir(source_dir)
         .expect("fixture directory listing")

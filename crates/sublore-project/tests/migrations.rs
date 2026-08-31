@@ -285,7 +285,7 @@ fn a_second_create_is_refused_and_the_first_project_is_untouched() {
 }
 
 // ---------------------------------------------------------------------------
-// Old database -> migrate -> verify (CLAUDE.md §2)
+// Old database -> migrate -> verify (CONTRIBUTING.md §2)
 // ---------------------------------------------------------------------------
 
 /// With CURRENT_VERSION at 1 the migrate half of this round trip is a no-op, and the test says so

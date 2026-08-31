@@ -6,7 +6,7 @@ import process from "node:process";
  * With `WAYLAND_DISPLAY` set, libmpv does not attach to the X11 surface it was handed: the surface
  * reports `IsViewable` with zero children, the stage keeps showing its placeholder, and every pixel
  * assertion measures the webview underneath while the transport happily reports playback. An N2
- * probe lost two runs to this before a screenshot gave it away (docs/reports/n2-probe.md).
+ * probe lost two runs to this before a screenshot gave it away.
  *
  * The first diagnosis blamed GTK and was wrong: `main.rs` already forces `GDK_BACKEND=x11` before
  * `gtk_init`, so GTK never had a choice to make. The component ignoring the `wid` is libmpv, which
@@ -21,7 +21,7 @@ export function appEnv(overrides = {}) {
     GDK_BACKEND: "x11",
     // Disarmed here because the workarounds key on the driver being loaded, which is true on a
     // developer machine even under Xvfb, where llvmpipe renders and input reaches React late
-    // enough to lose races (docs/reports/n2b-collaudo-reale.md). So every caller of `appEnv` tests
+    // enough to lose races. So every caller of `appEnv` tests
     // a configuration no user gets; the armed one is checked by `pnpm e2e:webview`.
     SUBLORE_WEBKIT_WORKAROUNDS: "0",
     ...overrides,

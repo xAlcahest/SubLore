@@ -105,7 +105,7 @@ impl ModelStore {
     ///
     /// The hash costs one sequential read of the file whisper is about to read anyway. Measured on
     /// a release build: 53 ms for ggml-tiny.en.bin, about 2 s for large-v3. It runs on a blocking
-    /// task, never on the main thread (CLAUDE.md §7).
+    /// task, never on the main thread (CONTRIBUTING.md §7).
     pub fn resolve(&self, id: &str) -> Result<PathBuf, AsrError> {
         let Some(spec) = catalog::find(id) else {
             return Err(AsrError::new(

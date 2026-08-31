@@ -41,8 +41,7 @@ struct StartupArgs {
 /// extension rather than by position so neither has to come first.
 ///
 /// This is also the only way automation reaches the app on a real desktop: synthetic keystrokes go
-/// to whichever window holds the X focus, which under a compositor is not reliably ours
-/// (WORKFLOW.md, and docs/reports/n2b-collaudo-reale.md for what that cost).
+/// to whichever window holds the X focus, which under a compositor is not reliably ours.
 ///
 /// `OsString`, not `String`: a Linux filename is a byte string, and `std::env::args()` panics on one
 /// that is not UTF-8, which killed the app before its window existed (gate 2, `lib.rs:75`).
@@ -177,7 +176,7 @@ pub fn run() -> tauri::Result<()> {
         } => {
             // Read for every close, an answered one included: the window stays alive and editable
             // until this event, so work committed after the answer has never been asked about
-            // (CLAUDE.md §3). See BACKLOG N1, N1b and gate 2, `lib.rs:138`.
+            // (CONTRIBUTING.md §3). See BACKLOG N1, N1b and gate 2, `lib.rs:138`.
             let session = session_now(app_handle);
             // Decided through a call that drops the guard before it returns: a guard built in the
             // scrutinee lives for every arm, and two of them re-enter the gate (gate 2b, `lib.rs:176`).
@@ -341,7 +340,7 @@ fn decide_close(
     let unsaved = session != subtitle::SessionState::Clean;
     match gate.as_ref() {
         // Unsaved edits are the user's to keep or drop, never ours to discard silently
-        // (CLAUDE.md §3). See BACKLOG N1.
+        // (CONTRIBUTING.md §3). See BACKLOG N1.
         None if unsaved => {
             *gate = Some(Gate::raised(label));
             CloseAction::Ask
@@ -488,7 +487,7 @@ fn stall_after_answer() {
 fn stall_after_answer() {}
 
 /// Save the open file. A failed save keeps the window open: closing anyway would lose exactly the
-/// work the user asked us to keep. The refusal is shown, not only logged (CLAUDE.md §6).
+/// work the user asked us to keep. The refusal is shown, not only logged (CONTRIBUTING.md §6).
 fn save_open_file(app: &AppHandle) -> Answered {
     let Some(state) = app.try_state::<subtitle::SubtitleState>() else {
         // Unreachable: no session state means nothing was dirty and the gate never opened. Keeping
