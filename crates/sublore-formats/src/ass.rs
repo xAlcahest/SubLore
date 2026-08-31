@@ -3,8 +3,8 @@
 //!
 //! Sections are opened by a `[Name]` line and each keeps its own `Format:` field list. Only
 //! `Dialogue:` and `Comment:` inside `[Events]` become cues; everything else travels through as
-//! metadata, unread and unchanged, which is what lets unknown sections, `[Fonts]` blobs and
-//! Aegisub's project garbage survive a save. See BACKLOG.md M1.3.
+//! metadata, unread and unchanged, which is what lets unknown sections and `[Fonts]` blobs survive
+//! a save. See BACKLOG.md M1.3.
 
 use crate::cue::{AssEvent, AssEventKind, Cue, CueDetail};
 use crate::document::{Segment, SegmentKind, SubtitleDocument, SubtitleFormat};
