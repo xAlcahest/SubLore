@@ -262,6 +262,12 @@ impl Drop for FakeServer {
 }
 
 fn serve(mut stream: TcpStream, body: &[u8], policy: &Policy, range: &AtomicU64) {
+    // The listener is non-blocking so the worker can notice `stop`. On Windows the accepted socket
+    // inherits that flag and on Linux it does not, so `read_line` below could answer `WouldBlock`,
+    // be read as EOF, and close the connection without a response. See BACKLOG.md M3.2.
+    stream
+        .set_nonblocking(false)
+        .expect("the accepted socket should go back to blocking");
     let mut reader = BufReader::new(stream.try_clone().expect("the socket should clone"));
     let mut from = 0usize;
     loop {
@@ -318,9 +324,11 @@ fn serve(mut stream: TcpStream, body: &[u8], policy: &Policy, range: &AtomicU64)
         let _ = stream.write_all(&vec![0xAAu8; extra]);
     }
     let _ = stream.flush();
-    // Drain whatever the client still had to say, so the close is not a reset it reports instead
-    // of the truncation under test.
+    // Send the FIN, then drain whatever the client still had to say, so the close is not a reset it
+    // reports instead of the truncation under test. Bounded by a timeout: with keep-alive the
+    // client has no reason to close first, so this waits out the bound on every connection.
     let _ = stream.shutdown(std::net::Shutdown::Write);
-    let mut sink = [0u8; 64];
-    let _ = stream.read(&mut sink);
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(200)));
+    let mut sink = [0u8; 1024];
+    while matches!(stream.read(&mut sink), Ok(read) if read > 0) {}
 }

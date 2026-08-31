@@ -300,15 +300,24 @@ fn only_the_exact_owned_names_are_removed() {
         .close()
         .expect("closes");
 
-    let lookalikes = [
+    let mut lookalikes = vec![
         write_bytes(
             &folder.join("project.sublore.bak"),
             b"a backup the user made\n",
         ),
         write_bytes(&folder.join("notproject.sublore"), b"someone else's file\n"),
         write_bytes(&folder.join("project.sublore-wal2"), b"not our journal\n"),
-        write_bytes(&folder.join("Project.Sublore"), b"different name\n"),
     ];
+    // `Project.Sublore` is a different file from `project.sublore` only where the filesystem says
+    // so. On Windows it is the same file, so writing it here would overwrite the project database
+    // and the deletion under test would fail on a fixture that cannot exist there. The case this
+    // guards cannot occur on that platform either, so nothing is lost by not asserting it.
+    if !cfg!(windows) {
+        lookalikes.push(write_bytes(
+            &folder.join("Project.Sublore"),
+            b"different name\n",
+        ));
+    }
     let before: Vec<(Vec<u8>, Option<SystemTime>)> =
         lookalikes.iter().map(|path| fingerprint(path)).collect();
 

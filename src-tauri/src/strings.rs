@@ -23,9 +23,18 @@ pub const CHOOSE_PROJECT_FILE: &str = "Choose a video or subtitle file";
 pub const CLOSE_UNSAVED_TITLE: &str = "Unsaved changes";
 pub const CLOSE_UNSAVED_BODY: &str =
     "The subtitle file has edits that are not on disk.\n\nSave them before closing?";
-pub const CLOSE_SAVE: &str = "Save";
-pub const CLOSE_DISCARD: &str = "Discard";
-pub const CLOSE_CANCEL: &str = "Cancel";
+/// The underscore marks the mnemonic letter: GTK shows "Save" and answers Alt+S. It is part of the
+/// translated string on purpose — which letter is free depends on the language — and it is what
+/// gives the dialog keyboard access, for a user whose hands are on the keyboard and for a harness
+/// that would otherwise have to guess where a button sits.
+pub const CLOSE_SAVE: &str = "_Save";
+pub const CLOSE_DISCARD: &str = "_Discard";
+pub const CLOSE_CANCEL: &str = "_Cancel";
+
+/// The same labels without the marker, for the platforms whose dialogs take plain text.
+pub const CLOSE_SAVE_PLAIN: &str = "Save";
+pub const CLOSE_DISCARD_PLAIN: &str = "Discard";
+pub const CLOSE_CANCEL_PLAIN: &str = "Cancel";
 
 /// A save that fails on the way out leaves the window open. Saying so is the difference between
 /// a refusal the user understands and one that looks like a stuck button (CLAUDE.md §6).

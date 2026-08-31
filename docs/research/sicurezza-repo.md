@@ -594,3 +594,30 @@ da leggere.
   GitHub, non e' stato riprodotto sperimentalmente su questo repo.
 - Ogni verdetto comportamentale su Windows: qui non se ne danno, e nessuna di queste misure e' stata
   esercitata su un runner Windows di Sublore.
+
+## I primi quattro alert, 2026-08-31
+
+Abilitati gli alert Dependabot, GitHub ne ha trovati quattro. Nessuno è raggiungibile da input
+dell'utente: sono tutti build-time o di test.
+
+| pacchetto              | gravità | da dove arriva                          | esito                                       |
+| ---------------------- | ------- | --------------------------------------- | ------------------------------------------- |
+| `serialize-javascript` | alta    | `mocha` via `@wdio/mocha-framework`     | **risolto** con un override pnpm a `^7.0.5` |
+| `extract-zip`          | alta    | `@puppeteer/browsers` via `@wdio/utils` | nessuna versione corretta esiste            |
+| `glib` (rust)          | media   | l'intero stack gtk-rs 0.18 di Tauri 2   | corretta in 0.20, non spostabile da sola    |
+
+`serialize-javascript` è passato da 6.0.2 a 7.1.1. È un major, quindi è stato verificato invece che
+assunto: eslint, prettier e la suite comportamentale completa, 8 spec su 8.
+
+`extract-zip` serve a `@puppeteer/browsers` per scompattare un browser che Sublore non scarica mai —
+i test guidano l'app tramite `tauri-driver` e `WebKitWebDriver`, entrambi installati dal sistema.
+L'advisory riguarda symlink dentro uno zip; qui non c'è nessuno zip. Non esiste una 2.0.2, quindi non
+c'è niente da aggiornare: resta aperto e questo paragrafo è il motivo.
+
+`glib` 0.18.5 lo pinnano `gtk`, `gdk`, `gio` e il resto del corredo che wry e tao usano. Salire a
+0.20 vuol dire spostare tutto lo stack gtk-rs, cioè aspettare che Tauri lo faccia. L'unsoundness è in
+`VariantStrIter`, che Sublore non usa: il codice GTK diretto è `dialog.rs`, che costruisce un
+`MessageDialog` e legge una `ResponseType`.
+
+Nessuno dei tre viene chiuso a mano nell'interfaccia: un alert chiuso senza fix è un alert che non
+torna a farsi vedere quando la situazione cambia.
