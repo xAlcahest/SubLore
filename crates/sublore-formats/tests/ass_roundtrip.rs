@@ -149,7 +149,7 @@ fn no_clean_fixture_parses_as_a_single_segment() {
 }
 
 #[test]
-fn the_aegisub_baseline_keeps_its_dialogues_and_timings() {
+fn a_plain_crlf_file_keeps_its_dialogues_and_timings() {
     let document = open("basic.ass");
     let cues = cue_list(&document);
 

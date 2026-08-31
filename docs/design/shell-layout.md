@@ -2,19 +2,19 @@
 
 Owner decision after running the app and rejecting the interface. M0–M4 each bolted a horizontal band with a path field and a button onto one column, because that is the cheapest way to give an E2E spec a stable selector; the result is the union of five test harnesses. This document is the target shape; `shell-mockup.html` is the picture.
 
-**Reference: Aegisub.** Its bones, not its finish. Read from source (`arch1t3cht/Aegisub`, BSD-3-Clause, GPL-compatible) — structure only, no code taken. Line references below are to that tree so any claim here can be checked.
+## The arrangement
 
-## The real Aegisub arrangement
-
-From `FrameMain::InitContents`, `src/frame_main.cpp:183-216`:
+Four regions, nested:
 
 ```
-TopSizer   (horizontal): [ videoBox ][ ToolsSizer ]
-ToolsSizer (vertical):   audioBox (proportion 0, natural height)
-                         editBox  (proportion 1, expands)
-MainSizer  (vertical):   TopSizer (proportion 0)
-                         subsGrid (proportion 1, takes everything left)
+top row      (horizontal): [ video ][ tools column ]
+tools column (vertical):   waveform   natural height
+                           edit box   expands into what is left
+window       (vertical):   top row    natural height
+                           grid       takes everything left
 ```
+
+The video is the one panel that trades width for height, since it holds an aspect ratio, so it is boxed into the corner of the top block where its size is bounded; the wide-and-short things, the waveform and the current line, take the width beside it. The grid comes last and gets everything that is left, because it is the panel the work happens in and the only one that keeps improving with more rows on screen.
 
 So:
 
@@ -32,37 +32,37 @@ toolbar
 
 The video sits on the left and spans the whole top block. Audio and the edit box are stacked to its right. **The edit box is not full width under both** — that was the error in the first draft of this document.
 
-Both panels hide independently when their provider is absent (`SetDisplayMode`, `frame_main.cpp:218-244`), so no video open means no video panel at all. Sublore takes that rule for the waveform and not, yet, for the video; "Panels with no provider, and the one exception" below says why. The audio panel is a `wxSashWindow` with a draggable bottom edge and a persisted height (`audio_box.cpp:47,101-103`).
+The layout rule is that a panel whose provider is absent takes no space: no audio loaded means no waveform panel, and no video open means no video panel at all. Sublore takes that rule for the waveform and not, yet, for the video; "Panels with no provider, and the one exception" below says why. The waveform panel has a draggable bottom edge and a height that persists between sessions, since how much waveform a translator wants on screen depends on the task and the layout cannot settle it once for everyone.
 
 ## Edit box, row by row
 
-From `SubsEditBox::SubsEditBox`, `src/subs_edit_box.cpp:106-231`:
+The current line, and nothing else:
 
-1. comment checkbox · style combo · edit-style button · actor · effect · character count
-2. layer · start · end · duration · left/right/vert margins
-3. B I U S · font · 4 colour buttons · new line · time/frame radio · **`Show Original` checkbox**
-4. `secondary_editor` (read-only, hidden by default) stacked **above** `edit_ctrl` (the text)
-5. revert · clear · clear text · **`insert original`** (hidden by default)
+1. start · end · duration · CPS
+2. the original, read-only
+3. the translation
 
-Rows 1–3 are ASS typesetting, which CLAUDE.md §1 rules out for v1. Rows 4–5 are the interesting part: Aegisub already solves source/target by stacking the original above the translation inside the edit box, toggled by `Show Original` and persisted in `Subtitle/Show Original`. Stacked, not side by side, because subtitle lines are wide and short and two narrow columns wrap badly.
+The original sits above the translation rather than beside it, because subtitle lines are wide and short: two narrow columns wrap them somewhere the line was never meant to break, and a translator judging length reads the wrong shape.
+
+Nothing else earns a row here. Style, actor, effect, layer, margins, font and colour buttons are ASS typesetting, which CLAUDE.md §1 rules out for v1; keeping room for them is how an edit box ends up three rows of chrome deep before it holds any text.
 
 ## Grid columns
 
-From `GetGridColumns`, `src/grid_column.cpp:466-481`, in order: `#` · folds · layer · start · end · **CPS** · style · actor · effect · left · right · vert · text.
+In order: `#` · start · end · **CPS** · original · translation.
 
-CPS (characters per second, `grid_column.cpp:342-351`) is a reading-speed check and is worth having. The ASS columns are not.
+CPS — characters per second, the line's length over its duration — earns its column: a line nobody can finish reading before it leaves the screen is a defect, and it is worth far more while the line is being written than at export time. The typesetting columns — layer, style, actor, effect and the three margins — are out for v1, and the second text column takes the width they would have eaten.
 
-## Video and audio panel furniture
+## Video and waveform panel furniture
 
-Video (`video_box.cpp:47-95`): visual-tools toolbar vertical along the left edge, then under the display a seek slider, then a row with the playback toolbar, current frame time and number, **time relative to the current line's start and end** (`VideoSubsPos`), and a zoom combo.
+Video: under the display a seek slider, then a row with the playback controls, the current time and frame number, a zoom control, and **the time relative to the current line's start and end**. That last readout is what timing is actually judged against — how far into the cue the picture is, how much of it is left — so it is the one number the panel cannot drop.
 
-Audio (`audio_box.cpp:79-106`): the display with horizontal-zoom, vertical-zoom and volume sliders down its right edge, and its own toolbar underneath. That toolbar (`default_toolbar.json`) is the real timing vocabulary: prev/next line, play selection, play line, play before/after/begin/end of selection, play to end, **lead in, lead out**, commit, go to, and the autocommit/autonext/autoscroll toggles.
+Waveform: the display with horizontal-zoom, vertical-zoom and volume sliders down its right edge, and its own toolbar underneath. That toolbar carries the timing vocabulary: prev/next line, play selection, play line, play before/after/begin/end of selection, play to end, **lead in, lead out**, commit, go to, and the autocommit/autonext/autoscroll toggles.
 
 That list is the specification for M2.5. Dragging boundaries is only part of it; the keyboard timing commands are what makes the workflow fast.
 
 ## Sublore's shape
 
-Same skeleton, with the typesetting rows dropped and our own things added:
+The arrangement above, with our own things added:
 
 ```
 menu bar     File · Edit · Subtitles · Timing · Video · Audio · Terms · View
@@ -88,24 +88,24 @@ Each lane owns a panel, so parallel work cannot collide in the layout. This repl
 
 ### Panels with no provider, and the one exception
 
-Aegisub removes a panel whose provider is absent (`SetDisplayMode`, `frame_main.cpp:218-244`). The waveform follows that rule here: no audio provider exists before M2.4, so there is no empty waveform panel to build.
+The waveform follows the no-provider-no-panel rule stated at the top, and follows it for free: no audio provider exists before M2.4, so there is no empty waveform panel to build.
 
 The video panel is the exception, and it is deliberate. `.stage__empty` — the "No video open." placeholder inside the panel — is what two specs poll to decide a video is ready: both wait for `document.querySelector(".stage__empty") === null` (`video.spec.js:73`, `asr.spec.js:160`). A panel that does not exist until a video loads makes that condition true from first paint, so both waits return immediately and stop asserting anything. That is an assertion weakened as a side effect of a layout rule, which is a §5.4 failure whether or not anyone notices it.
 
-So the video panel is always mounted and shows `.stage__empty` when there is no video, exactly as today. Adopting Aegisub's rule for it is a later task, and that task owes a positive readiness signal in exchange — mpv's child window present plus the transport enabled, which is the honest predicate `docs/reports/n2-probe.md` arrived at — before it takes the placeholder away.
+So the video panel is always mounted and shows `.stage__empty` when there is no video, exactly as today. Extending that rule to it is a later task, and that task owes a positive readiness signal in exchange — mpv's child window present plus the transport enabled, which is the honest predicate `docs/reports/n2-probe.md` arrived at — before it takes the placeholder away.
 
 The visibility rule below is unaffected: `videoPanelMounted` stays in the derived boolean, because unmounting still has to hide the surface and a later shape may unmount. It is simply always true for now.
 
-## What is ours, not Aegisub's
+## What is ours
 
-- The project rail. Aegisub works one file at a time; following the translator across a series is the product.
-- The translation column in the grid. Aegisub's translation assistant is a separate modal tool; for Sublore source-plus-target is the normal state, so it belongs in the grid where the whole episode is visible.
+- The project rail. One file at a time is not the job: a termbase and a memory only pay off across a series, so the rail that walks episodes is structural furniture, not a sidebar to bolt on later.
+- The translation column in the grid. Source-plus-target is the normal state here, not a mode entered through a dialog, so both texts are columns and the whole episode stays readable at once.
 - Row markers for QA: a term used against its approved rendering flags the row.
-- `Show Original` is not a toggle for us. It is always on.
+- The original is never hidden. There is no show-original toggle, in the edit box or in the grid, because a translator who cannot see the source is not translating.
 
 ## Finish
 
-Aegisub's density, not its wxWidgets chrome. Small type, tight rows, nothing wasted, everything reachable from menu and keyboard. Flat borders, no bevels, no system grey.
+Dense, and no chrome for its own sake. Small type, tight rows, nothing wasted, everything reachable from menu and keyboard. Flat borders, no bevels, no system grey.
 
 Dark first: subtitlers work against a lit video. Every colour is a token in one place, so a light theme is a value swap and not a rewrite. Because the chrome is CSS and not native widgets, it renders identically on Windows and Linux.
 
@@ -117,7 +117,7 @@ Dark first: subtitlers work against a lit video. Every colour is a token in one 
 
 ## Constraint carried over from M0.2
 
-`VideoStage` positions a native X11 surface from DOM coordinates and recomputes it on resize, never on scroll. The panel holding the video must never scroll: it resizes, or the video surface detaches from its frame. Note that Aegisub's sash-dragged audio panel resizes its siblings, which is a resize and therefore safe.
+`VideoStage` positions a native X11 surface from DOM coordinates and recomputes it on resize, never on scroll. The panel holding the video must never scroll: it resizes, or the video surface detaches from its frame. Note that dragging the waveform sash resizes its siblings, which is a resize and therefore safe.
 
 ## Layers over the video (decision 1)
 

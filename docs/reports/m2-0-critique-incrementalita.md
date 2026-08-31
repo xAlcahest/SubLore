@@ -250,9 +250,9 @@ della firma reale, non con una grep di conferma a metà lavoro.
 
 **Task:** T5a (ma la decisione manca in tutto il piano).
 
-**Difetto:** `shell-layout.md` adotta la regola di Aegisub, "no video open means no video panel at
-all", e §2.1 del piano deriva la visibilità da `videoLoaded && videoPanelMounted && layerCount === 0`,
-cioè presuppone che il pannello possa essere smontato. Nessun task consegna quella regola, e nessun
+**Difetto:** `shell-layout.md` adotta la regola "no video open means no video panel at all", e §2.1
+del piano deriva la visibilità da `videoLoaded && videoPanelMounted && layerCount === 0`, cioè
+presuppone che il pannello possa essere smontato. Nessun task consegna quella regola, e nessun
 AC di T5a la nomina. La mappa dei selettori intanto tiene `.stage__empty` "byte for byte".
 
 **Perché conta.** `.stage__empty` è il segnale di prontezza di due spec:

@@ -35,7 +35,7 @@ That is what the gate is for, and it is why per-task self-review does not replac
 
 **The M2.0 breakdown has not been read end to end.** 1124 lines, ten tasks, written by a delegated agent that passed two adversarial critiques and then died without its closing report. What was checked is the index, the owner-questions section, the task count and the left-open findings: the shape, not the content. The document states that it applied 12 blocking and 23 serious findings, and nobody has verified that statement. Reading it in full is a prerequisite for starting M2.0, and `BACKLOG.md` carries the same warning.
 
-The one owner question the preparation surfaced is answered and needs nothing: "video and waveform side by side" cannot be shown at M2.0 because no audio provider exists before M2.4, and Aegisub already solves it the way the plan proposed — a panel with no provider is absent rather than empty (`FrameMain::SetDisplayMode`, `frame_main.cpp:218-244`).
+The one owner question the preparation surfaced is answered and needs nothing: "video and waveform side by side" cannot be shown at M2.0 because no audio provider exists before M2.4, and the plan's own answer stands — a panel with no provider is absent rather than empty, because an empty placeholder is dead UI and CLAUDE.md §6 rules it out.
 
 ## Small debts carried forward
 
