@@ -43,7 +43,7 @@ fn hatch_report(hatch: Option<&OsStr>) -> Cow<'_, str> {
 
 /// WebKitGTK's DMABUF renderer cannot allocate a buffer on the NVIDIA proprietary driver and the
 /// window opens blank. Both variables are applied before the webview exists; neither takes effect
-/// afterwards. Measurements and driver version: docs/reports/n2b-collaudo-reale.md.
+/// afterwards.
 #[cfg(target_os = "linux")]
 fn mitigate_nvidia_webview() {
     // `var_os`, not `var`: a variable holding bytes that are not UTF-8 is set, and the line below

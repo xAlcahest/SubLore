@@ -3,16 +3,15 @@
  *
  * **This is a probe, not a check. It asserts nothing.** It prints one saturation reading for each
  * of two states — no video, and a fixture loaded via `startup_files` — so a human can judge whether
- * the picture actually painted on real hardware. `docs/reports/n2b-collaudo-reale.md` is the
- * durable record of what it found (2026-08-30): saturation ~5.9 loaded against ~2.1 empty, three
- * runs out of three. `wayland-attach-check.js` covers the same session's *attachment* as an
+ * the picture actually painted on real hardware. What it found on 2026-08-30: saturation ~5.9
+ * loaded against ~2.1 empty, three runs out of three. `wayland-attach-check.js` covers the same session's *attachment* as an
  * asserted check; this probe covers the *pixels*, which that check deliberately does not assert
  * (see its own comment on why).
  *
- * WORKFLOW.md 4c: on the real display only launching, passing argv, and capturing the app's own
- * window are allowed — this probe never types or clicks. The fixture goes in on argv through
+ * On the real display only launching, passing argv, and capturing the app's own window are
+ * allowed — this probe never types or clicks. The fixture goes in on argv through
  * `startup_files`, and the two states are two separate launches rather than one launch driven by
- * input. Capture is `import -window <id>`, 4c's stated method: it needs no raise and no focus,
+ * input. Capture is `import -window <id>`: it needs no raise and no focus,
  * unlike a full-desktop screenshot under this rootless-XWayland session (see the removed
  * `spectacle -f` approach in git history, and the incident it required work around: focus-following
  * `xdotool type` landed a fixture path in the owner's own window mid-run).

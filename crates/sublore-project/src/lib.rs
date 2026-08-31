@@ -2,7 +2,7 @@
 //! paths of the files attached to each episode.
 //!
 //! Paths only. This crate records *where* the user's media and subtitles are; it never copies,
-//! moves, rewrites or deletes them. See CLAUDE.md §3 and BACKLOG.md M4.
+//! moves, rewrites or deletes them. See CONTRIBUTING.md §3 and BACKLOG.md M4.
 
 pub mod db;
 pub mod delete;

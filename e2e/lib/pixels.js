@@ -5,7 +5,7 @@ import process from "node:process";
  * Is the native video surface showing a picture?
  *
  * The only honest answer is the pixels: the surface reports `IsViewable` while showing nothing at
- * all when mpv has not attached (docs/reports/n2-probe.md). Measured with ffmpeg rather than
+ * all when mpv has not attached. Measured with ffmpeg rather than
  * ImageMagick: ffmpeg is installed by the e2e CI job (.github/workflows/ci.yml) and is a build
  * dependency here, while `magick` exists only in ImageMagick 7 and the runner ships 6.
  *

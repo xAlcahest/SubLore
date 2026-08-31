@@ -14,7 +14,7 @@ import { findToplevel } from "../lib/x11.js";
 /**
  * BACKLOG.md M2.3: "open the 2000-cue fixture, edit a cue's text, save, reopen, the edit is there
  * and the rest is byte-identical; undo restores it; scrolling and typing show no visible lag
- * (measured, budget CLAUDE §7: open under 1 s)".
+ * (measured, budget CONTRIBUTING.md §7: open under 1 s)".
  *
  * The four numbers below stand in for "no visible lag", which is not assertable. They are measured
  * inside the page with `performance.now()` from probes this spec installs, so no production code
@@ -36,7 +36,7 @@ const OPEN_BUDGET_MS = 1000;
  * a noisier runner while still failing on a regression worth knowing about. Wider than that and the
  * assertion stops being one.
  *
- * The absolute figures are logged, because the budget in CLAUDE.md section 7 is a real claim and the
+ * The absolute figures are logged, because the budget in CONTRIBUTING.md section 7 is a real claim and the
  * owner's checklist measures it on the release build.
  */
 /**
@@ -292,6 +292,19 @@ describe("cue list editing", () => {
   });
 
   it("scrolls a viewport at a time without falling behind", async () => {
+    // The list has to be scrollable before the first step, not merely present. Assigning scrollTop
+    // to a container whose rows have not been laid out does nothing and is never retried, so the
+    // step burns its whole frame budget without moving: 120 frames on CI while the other nineteen
+    // took two each.
+    await waitFor(
+      () =>
+        browser.execute(() => {
+          const list = document.querySelector(".cuelist");
+          return list !== null && list.scrollHeight > list.clientHeight;
+        }),
+      { timeout: 20000, message: "the cue list to become scrollable" },
+    );
+
     await browser.execute((GIVE_UP) => {
       const list = document.querySelector(".cuelist");
       window.__subloreScroll = null;

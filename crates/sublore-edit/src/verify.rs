@@ -14,7 +14,7 @@ use crate::error::{EditError, EditErrorKind};
 use crate::plan::Expectation;
 
 /// Hold the re-parsed document to the plan. Anything unexpected is `Unverified`, and an
-/// `Unverified` edit is thrown away with the bytes it would have written. See CLAUDE.md §3.
+/// `Unverified` edit is thrown away with the bytes it would have written. See CONTRIBUTING.md §3.
 pub fn verify(
     before: &SubtitleDocument,
     after: &SubtitleDocument,

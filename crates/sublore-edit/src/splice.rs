@@ -97,7 +97,7 @@ pub fn apply(body: &str, splice: &Splice) -> Result<String, EditError> {
 
     let grown = body.len().saturating_add(splice.inserted.len());
     let mut out = String::with_capacity(grown.saturating_sub(splice.removed.len()));
-    // Three memcpys: the bytes outside the range are copied, never rebuilt. See CLAUDE.md §3.
+    // Three memcpys: the bytes outside the range are copied, never rebuilt. See CONTRIBUTING.md §3.
     out.push_str(body.get(..splice.at).unwrap_or(""));
     out.push_str(&splice.inserted);
     out.push_str(body.get(end..).unwrap_or(""));

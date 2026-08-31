@@ -1,7 +1,7 @@
 # sublore-io
 
 Durable file writes for Sublore: replace a file atomically, and keep a backup of what was there
-before. No dependencies, no subtitle knowledge, no UI strings. Implements CLAUDE.md §3 for
+before. No dependencies, no subtitle knowledge, no UI strings. Implements CONTRIBUTING.md §3 for
 BACKLOG.md M1.4.
 
 ## Replacing a file
@@ -61,7 +61,7 @@ times each (60 processes, ~5 s), and reads what the child left on disk.
 ## Accepted limitations
 
 - **An abort leaves its temp file behind.** Sweeping stale temp files would mean deleting files in
-  the user's directory on a heuristic, which CLAUDE.md §3 does not permit. The name is reserved and
+  the user's directory on a heuristic, which CONTRIBUTING.md §3 does not permit. The name is reserved and
   obvious. "Stale temp file cleanup" is in the parking lot, as an explicit user action.
 - **The directory fsync is unix only**; Windows cannot open a directory as a file.
 - **Windows attributes are not copied** onto the temp file: a read-only destination blocks the

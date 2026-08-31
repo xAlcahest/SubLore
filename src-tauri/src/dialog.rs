@@ -12,8 +12,8 @@
 //! loop may already be gone, which is the one case a GTK dialog on the main thread cannot serve.
 //!
 //! It is **not** the fix for N1b's exit crash. That crash survived this change, and a core from
-//! this binary shows the same crashing frame with no rfd thread in the process
-//! (`docs/reports/n1b-segfault-uscita.md`). Every other platform keeps the plugin.
+//! this binary shows the same crashing frame with no rfd thread in the process. Every other
+//! platform keeps the plugin.
 
 use std::sync::mpsc::{self, Sender};
 
@@ -74,7 +74,7 @@ impl<F: FnOnce(CloseAnswer)> Drop for Delivery<F> {
 /// Started before anything is asked, because it can fail: a thread the OS refuses has to fail the
 /// question, never strand an answer the user has already given (gate 2, `dialog.rs:77`). Acting on
 /// the answer takes a blocking lock and writes a file, which is the one thing the main loop must
-/// not do (CLAUDE.md §7), so it never runs on the thread that asks.
+/// not do (CONTRIBUTING.md §7), so it never runs on the thread that asks.
 ///
 /// Closing the channel without sending answers `Cancel`.
 fn answer_worker<F>(answer: F) -> std::io::Result<Sender<CloseAnswer>>

@@ -3,7 +3,7 @@
 //!
 //! It lives under the app's own data directory, never beside the user's media and never in the
 //! system temp directory, which on a shared Linux box is world-readable and would put the user's
-//! speech in it (CLAUDE.md §3.5). It is removed on every exit path by `Drop`.
+//! speech in it (CONTRIBUTING.md §3.5). It is removed on every exit path by `Drop`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -96,7 +96,7 @@ impl Drop for ScratchDir {
 /// cannot run its own `Drop`. Returns how many went.
 ///
 /// Touches only `PREFIX` directories directly under `root`, and never follows a symlink: a link
-/// planted in the scratch root cannot make this delete anything outside it (CLAUDE.md §3.5).
+/// planted in the scratch root cannot make this delete anything outside it (CONTRIBUTING.md §3.5).
 pub fn sweep(root: &Path, max_age: Duration) -> usize {
     let Ok(entries) = fs::read_dir(root) else {
         return 0;

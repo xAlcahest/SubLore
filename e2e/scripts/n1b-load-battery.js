@@ -4,7 +4,7 @@
  * BACKLOG N1b asks for sixty save-branch runs in six concurrent streams with no SIGSEGV and no core
  * dump. Load is the condition under test: the crash does not reproduce sequentially at all — sixty
  * sequential runs produced nothing — and under six concurrent streams it reproduced at 2 in 30 on
- * the save branch and 0 in 30 on discard (`docs/reports/n1b-sessanta-corse.md`).
+ * the save branch and 0 in 30 on discard.
  *
  * That orchestration was a shell loop typed at a terminal and never committed, which the gate 2
  * closure audit found and was right to: a criterion nobody can re-run is a story about a
@@ -15,7 +15,7 @@
  *
  * Each stream gets its own display numbers and never reuses one: a second `xvfb-run -n` on a number
  * just used gets no server, and the app then exits before its window exists, which reads as a crash
- * and is not one (WORKFLOW.md 4c).
+ * and is not one.
  *
  * Writes a CSV beside the summary so a run can be argued with afterwards rather than believed.
  */

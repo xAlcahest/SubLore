@@ -31,7 +31,7 @@ fn fixture(relative: &str) -> PathBuf {
 }
 
 /// A scratch directory that removes itself. Every file this suite opens is a copy inside it: the
-/// committed fixtures are read-only inputs (CLAUDE.md §3.1).
+/// committed fixtures are read-only inputs (CONTRIBUTING.md §3.1).
 struct Scratch {
     path: PathBuf,
 }

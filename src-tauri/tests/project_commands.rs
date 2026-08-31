@@ -162,7 +162,7 @@ fn attaching_records_a_path_and_leaves_the_user_s_file_and_folder_untouched() {
     assert_eq!(file.path, text(&media));
     assert_eq!(file.byte_length, Some(before.1));
 
-    // CLAUDE.md §3.1: source media is read-only. Bytes, size, modification time, and the folder
+    // CONTRIBUTING.md §3.1: source media is read-only. Bytes, size, modification time, and the folder
     // listing are all exactly what they were.
     assert_eq!(
         snapshot(&media),

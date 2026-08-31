@@ -9,15 +9,15 @@
  *
  * It runs twice, armed and disarmed, and prints both. On a machine where the mitigation fires the
  * pair is the discrimination: armed paints, disarmed is the flat window of
- * docs/reports/n2b-collaudo-reale.md. Only the armed run is asserted, because a disarmed run that
+ * Only the armed run is asserted, because a disarmed run that
  * paints is the correct outcome on hardware the workarounds are not for.
  *
  * Capture is `import -window <id>`, not a root grab: under rootless XWayland the X root holds no
- * desktop and `x11grab` reads black whatever the app draws (WORKFLOW.md 4c).
+ * desktop and `x11grab` reads black whatever the app draws.
  *
  * The time it prints is spawn to the first capture that is not flat, at 500 ms polling granularity.
  * It is not asserted on and one run is not a measurement: four runs on the same Xvfb spread from
- * 698 to 2102 ms in both configurations. It is a starting point for CLAUDE.md §7's cold start, not
+ * 698 to 2102 ms in both configurations. It is a starting point for CONTRIBUTING.md §7's cold start, not
  * an answer to it.
  *
  * Not in the CI job: `ubuntu-latest` has no NVIDIA module, so the branch under test cannot be taken
@@ -50,7 +50,7 @@ function check(label, ok, detail = "") {
 
 /**
  * A window whose luma is flat is a window showing nothing. Measured on the owner's hardware: the
- * blank webview reads 46..46, the interface 16..235 (docs/reports/n2b-collaudo-reale.md). Any
+ * blank webview reads 46..46, the interface 16..235. Any
  * boundary between 0 and 219 separates them; this one sits far from both.
  */
 const PAINTED_RANGE = 32;

@@ -1,6 +1,6 @@
 //! The project a user has open: create it, open it, add episodes, attach files by path, delete it.
 //! One project at a time, held behind a mutex because a SQLite connection is `Send` and not `Sync`.
-//! The IPC names and payloads here are a public interface (CLAUDE.md §6). See BACKLOG.md M4.4.
+//! The IPC names and payloads here are a public interface (CONTRIBUTING.md §6). See BACKLOG.md M4.4.
 //!
 //! Nothing in this module writes to a user's media or subtitle file. Attaching records a path.
 
@@ -149,7 +149,7 @@ pub async fn project_choose_path(
 }
 
 /// Every command's body runs here: SQLite calls and native dialogs both block, so neither ever
-/// runs on the async runtime's poll thread (CLAUDE.md §7).
+/// runs on the async runtime's poll thread (CONTRIBUTING.md §7).
 async fn blocking<T, F>(what: &'static str, work: F) -> Result<T, ProjectError>
 where
     F: FnOnce() -> Result<T, ProjectError> + Send + 'static,
@@ -192,7 +192,7 @@ pub fn add_episode(slot: &SharedProject, title: &str) -> Result<ProjectView, Pro
 }
 
 /// Record a file against an episode. The file is read for its size and nothing else: never opened
-/// for writing, never copied, never moved. See CLAUDE.md §3.1.
+/// for writing, never copied, never moved. See CONTRIBUTING.md §3.1.
 pub fn attach_file(
     slot: &SharedProject,
     episode_id: i64,

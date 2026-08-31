@@ -1,7 +1,7 @@
 //! Finding the programs a run spawns, once, before anything is started. See BACKLOG.md M3.1.
 //!
 //! Nothing here downloads, installs or repairs anything: a missing program is a sentence the user
-//! can act on, never a silent no-op and never a fetch they did not ask for (CLAUDE.md §1).
+//! can act on, never a silent no-op and never a fetch they did not ask for (CONTRIBUTING.md §1).
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -19,7 +19,7 @@ pub const FFMPEG_BIN_ENV: &str = "SUBLORE_FFMPEG_BIN";
 /// The Vulkan build. Optional: without it, a GPU request runs on the CPU and says so.
 const WHISPER_GPU: &str = "whisper-cli";
 /// The CPU-only build. Required, and the reason the fallback is a property of what we ship rather
-/// than of the user's driver stack (CLAUDE.md §2).
+/// than of the user's driver stack (CONTRIBUTING.md §2).
 const WHISPER_CPU: &str = "whisper-cli-cpu";
 const FFMPEG: &str = "ffmpeg";
 /// Where `scripts/build-whisper.sh` leaves its output, relative to the repo root.
@@ -35,7 +35,7 @@ pub struct Tools {
     pub whisper_cpu: PathBuf,
     pub ffmpeg: PathBuf,
     /// `app_data_dir()/scratch`. Every intermediate file lives under it and nowhere else: never
-    /// beside the user's media, never in the system temp dir (CLAUDE.md §3).
+    /// beside the user's media, never in the system temp dir (CONTRIBUTING.md §3).
     pub scratch_root: PathBuf,
 }
 

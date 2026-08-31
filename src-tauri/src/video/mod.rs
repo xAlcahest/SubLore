@@ -1,5 +1,5 @@
 //! The video player module: mpv lifecycle, the native surface, and the five IPC commands.
-//! The IPC names and payloads here are a public interface (CLAUDE.md section 6).
+//! The IPC names and payloads here are a public interface (CONTRIBUTING.md section 6).
 
 pub mod error;
 pub mod player;

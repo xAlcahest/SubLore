@@ -276,7 +276,7 @@ ignorano la sintassi. Due cose concrete. L'API di regrouping di
 Rust, ma il repo è archiviato dal 2026-05-30, quindi si legge e non si dipende. E
 [SubER](https://github.com/apptek/SubER) (Apache-2.0, IWSLT 2022) è la metrica che valuta insieme
 traduzione, segmentazione e timing su **file** di sottotitoli senza preallineare ipotesi e
-riferimento: è la base giusta per un test di accettazione automatico del tipo che CLAUDE.md §5
+riferimento: è la base giusta per un test di accettazione automatico del tipo che CONTRIBUTING.md §5
 richiede, perché misura "i tempi e i tagli sono giusti" e non solo "le parole sono giuste".
 Come riferimento di formato, NeMo Forced Aligner produce direttamente ASS con evidenziazione a
 livello di parola, che è utile da guardare per capire come deve stare su disco un ASS con timing di
@@ -288,7 +288,7 @@ parola.
 
 ### Prima di tutto: l'ASR non è il baricentro, e una raccomandazione che lo rende tale è sbagliata
 
-CLAUDE.md §1 lo dice: la trascrizione Whisper è una commodity che avvolgiamo, il prodotto è la
+CONTRIBUTING.md §1 lo dice: la trascrizione Whisper è una commodity che avvolgiamo, il prodotto è la
 memoria. Tutto quello che c'è sopra va letto con quella lente, e con quella lente la maggior parte
 delle opzioni scompare. Un secondo runtime ASR non è un pomeriggio: è un secondo binario da buildare
 per Linux e Windows, una seconda matrice Vulkan/CPU da provare, un secondo formato di modello da
@@ -340,7 +340,7 @@ discendono:
 
 - Disco e primo avvio. Ogni large sta fra 1,0 e 1,6 GB in ggml quantizzato. Un utente che lavora su
   tre lingue ne scarica tre. Serve una UI di download con progresso, ripresa, checksum e cancellazione
-  esplicita, e un comportamento sensato quando il modello non c'è ancora (CLAUDE.md §1: la rete si
+  esplicita, e un comportamento sensato quando il modello non c'è ancora (CONTRIBUTING.md §1: la rete si
   tocca solo per download modello opzionale).
 - Default per progetto, non globale. La lingua sorgente è una proprietà del progetto, e con essa lo
   script cinese (semplificato o tradizionale) e la variante (mandarino o cantonese). Sono impostazioni
@@ -410,6 +410,6 @@ sarebbe specifico del prodotto. Venti-trenta minuti per lingua: dialogo pulito, 
 sonora, recitazione urlata e sussurrata, una canzone inserto che sborda nel dialogo, una scena a voci
 sovrapposte, e per il coreano un set piccolo etichettato a mano che copra 하십시오체, 해요체, 해체 e
 반말 per misurare il registro. Trascritta a mano con timing di battuta, tenuta nel repo come fixture
-di regressione secondo CLAUDE.md §5.3, e valutata con CER, sWER, un diff di sola spaziatura per il
+di regressione secondo CONTRIBUTING.md §5.3, e valutata con CER, sWER, un diff di sola spaziatura per il
 coreano, e SubER per timing e segmentazione insieme. Con quella, "Belle contro large-v3" e
 "large-v3 contro Parakeet" diventano una misura di un pomeriggio invece che una discussione.

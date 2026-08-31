@@ -5,7 +5,7 @@
  * The dialog destroys itself the instant it is answered, so between "Save" and the close that
  * answer asks for the window is on screen, focused and editable. An edit committed inside that
  * interval was never asked about, and before this check the close carried it away in silence:
- * no dialog, no warning, no log line, and the work gone (CLAUDE.md §3).
+ * no dialog, no warning, no log line, and the work gone (CONTRIBUTING.md §3).
  *
  * AC, in the owner's terms: open a subtitle, edit a cue, close the window, click Save, and while
  * the save is still in flight edit again. The app must ask a second time instead of closing, and
@@ -133,7 +133,7 @@ async function secondGateOrExit(state) {
   );
 }
 
-/** The subtitle is passed as an argument, never typed: WORKFLOW.md §4c and `startup_files`. */
+/** The subtitle is passed as an argument, never typed: see `startup_files`. */
 function launch(dataHome, file) {
   const app = spawn(requireAppBinary(), [file], {
     detached: true,
@@ -315,7 +315,7 @@ async function main() {
     );
 
     // Not "the bytes changed": the point is that the late edit reached the disk and nothing else
-    // moved (CLAUDE.md §3).
+    // moved (CONTRIBUTING.md §3).
     const savedBlocks = readFileSync(workFile).toString("utf8").split("\n\n");
     const beforeBlocks = original.toString("utf8").split("\n\n");
     const differing = beforeBlocks

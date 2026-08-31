@@ -44,7 +44,7 @@ The current line, and nothing else:
 
 The original sits above the translation rather than beside it, because subtitle lines are wide and short: two narrow columns wrap them somewhere the line was never meant to break, and a translator judging length reads the wrong shape.
 
-Nothing else earns a row here. Style, actor, effect, layer, margins, font and colour buttons are ASS typesetting, which CLAUDE.md §1 rules out for v1; keeping room for them is how an edit box ends up three rows of chrome deep before it holds any text.
+Nothing else earns a row here. Style, actor, effect, layer, margins, font and colour buttons are ASS typesetting, which CONTRIBUTING.md §1 rules out for v1; keeping room for them is how an edit box ends up three rows of chrome deep before it holds any text.
 
 ## Grid columns
 
@@ -92,7 +92,7 @@ The waveform follows the no-provider-no-panel rule stated at the top, and follow
 
 The video panel is the exception, and it is deliberate. `.stage__empty` — the "No video open." placeholder inside the panel — is what two specs poll to decide a video is ready: both wait for `document.querySelector(".stage__empty") === null` (`video.spec.js:73`, `asr.spec.js:160`). A panel that does not exist until a video loads makes that condition true from first paint, so both waits return immediately and stop asserting anything. That is an assertion weakened as a side effect of a layout rule, which is a §5.4 failure whether or not anyone notices it.
 
-So the video panel is always mounted and shows `.stage__empty` when there is no video, exactly as today. Extending that rule to it is a later task, and that task owes a positive readiness signal in exchange — mpv's child window present plus the transport enabled, which is the honest predicate `docs/reports/n2-probe.md` arrived at — before it takes the placeholder away.
+So the video panel is always mounted and shows `.stage__empty` when there is no video, exactly as today. Extending that rule to it is a later task, and that task owes a positive readiness signal in exchange — mpv's child window present plus the transport enabled — before it takes the placeholder away.
 
 The visibility rule below is unaffected: `videoPanelMounted` stays in the derived boolean, because unmounting still has to hide the surface and a later shape may unmount. It is simply always true for now.
 
@@ -123,7 +123,7 @@ Dark first: subtitlers work against a lit video. Every colour is a token in one 
 
 The surface is an X11 child of the toplevel, so it stacks above the webview by construction, and `set_region` raises it again on every update (`surface/linux.rs:62-67`). Any HTML painted where the video is would be behind it. Decision 1: the surface hides while an HTML layer is open and comes back when the last one closes.
 
-The probe settled feasibility, so this section only has to say how it applies to the shape above. mpv remaps its output with the video playing and with it paused, no seek, no play, no forced redraw, and the paused case comes back with the same pixel spread it had before (`docs/reports/n2-probe.md`). Nothing is restarted to get the frame back, so the cost of an open menu is a blank rectangle for exactly as long as the menu is open.
+The probe settled feasibility, so this section only has to say how it applies to the shape above. mpv remaps its output with the video playing and with it paused, no seek, no play, no forced redraw, and the paused case comes back with the same pixel spread it had before, measured. Nothing is restarted to get the frame back, so the cost of an open menu is a blank rectangle for exactly as long as the menu is open.
 
 ### What counts as a layer
 
@@ -164,7 +164,7 @@ While the layer set is non-empty the shell holds the last measured rectangle and
 
 This does not weaken the M0.2 constraint above. The region is still computed on resize and never on scroll, by the same ResizeObserver and window resize listener in `VideoStage.tsx`; occlusion changes when the value is delivered, not when it is computed. The panel holding the video still must never scroll.
 
-If the visibility command fails, and it can, since the main thread hop has a timeout (`video/mod.rs`, `MAIN_THREAD_TIMEOUT`), the failure surfaces through the video error path already on screen, the shell keeps its own state, and the next transition re-asserts it. No silent retry loop and no swallowed error (CLAUDE.md §6).
+If the visibility command fails, and it can, since the main thread hop has a timeout (`video/mod.rs`, `MAIN_THREAD_TIMEOUT`), the failure surfaces through the video error path already on screen, the shell keeps its own state, and the next transition re-asserts it. No silent retry loop and no swallowed error (CONTRIBUTING.md §6).
 
 ### Driving a menu from the keyboard
 
@@ -182,7 +182,7 @@ Moving between titles with a dropdown open has the same shape as a menu item tha
 
 No Alt-mnemonic letters. They need a mnemonic assigned per title in every locale, which is i18n work out of proportion to a menu bar with four working titles.
 
-Menu titles, menu items, dialog titles and dialog buttons are user-facing copy and live in `src/i18n/en.ts` with everything else. None of them is written inline (CLAUDE.md §9).
+Menu titles, menu items, dialog titles and dialog buttons are user-facing copy and live in `src/i18n/en.ts` with everything else. None of them is written inline (CONTRIBUTING.md §9).
 
 ## Active line and selection (decision 5)
 
@@ -261,7 +261,7 @@ Decision 4 will put N child edits under one history entry. When it lands, the tr
 
 ## Effect on the E2E suite
 
-The DOM changes, so the 27 checks need their selectors re-pointed. Selectors are updated; assertions are not. No assertion is weakened, skipped, or retargeted to make a check pass (CLAUDE.md §5.4).
+The DOM changes, so the 27 checks need their selectors re-pointed. Selectors are updated; assertions are not. No assertion is weakened, skipped, or retargeted to make a check pass (CONTRIBUTING.md §5.4).
 
 ### The instruments those checks need, three of which do not exist
 
@@ -278,7 +278,7 @@ Occlusion, on top of what N2 proves about the surface itself:
 - with a video playing, open a File dropdown over the video rectangle: the dropdown is readable in the DOM and the surface is `IsUnMapped` (`mapState`, `e2e/lib/x11.js`). Close it: the surface is `IsViewable` again, over the rectangle the stage reports, which is the geometry comparison `video.spec.js` already makes.
 - open a dialog from the open dropdown and close the dialog: the surface is still hidden. Close the dropdown: it comes back. Two layers, one transition each way.
 - resize the window with a layer open: the surface stays `IsUnMapped` while it is open, and on close it lands on the new stage rectangle, not the old one.
-- the picture that comes back is alive, not a frozen or empty rectangle. The probe's measure, pixel spread over the surface rectangle across two samples, tells those apart, and the probe's precondition comes with it: refuse to measure unless mpv's child window is present, or the check measures the webview underneath and passes vacuously (`docs/reports/n2-probe.md`).
+- the picture that comes back is alive, not a frozen or empty rectangle. The probe's measure, pixel spread over the surface rectangle across two samples, tells those apart, and the probe's precondition comes with it: refuse to measure unless mpv's child window is present, or the check measures the webview underneath and passes vacuously.
 - N1's close gate raised over a playing video is readable and answerable. Native dialogs sit outside the layer rule, and that they stack above the surface is currently an argument about window managers, not a verified fact.
 
 Selection:
@@ -288,6 +288,6 @@ Selection:
 - undo of an edit made several hundred rows away brings that row on screen and makes it active.
 - a bulk operation acts on the selection and one undo puts every touched row back. The operation itself belongs to the milestone that needs it; what M2.0 owes is the state it acts on.
 
-One class of claim carries a caveat rather than a proof. "The video does not flash back on screen between the menu closing and the dialog opening" is a negative sampled over a few milliseconds, and a poll can always miss a flash. The design guarantee is real — the two layer ids swap inside one state update and the effect reads the derived boolean, so the intermediate never reaches the backend — but what a check can honestly say is "every sample across that window read `IsUnMapped`". The milestone status says it that way, with the sampling interval on it (CLAUDE.md §9).
+One class of claim carries a caveat rather than a proof. "The video does not flash back on screen between the menu closing and the dialog opening" is a negative sampled over a few milliseconds, and a poll can always miss a flash. The design guarantee is real — the two layer ids swap inside one state update and the effect reads the derived boolean, so the intermediate never reaches the backend — but what a check can honestly say is "every sample across that window read `IsUnMapped`". The milestone status says it that way, with the sampling interval on it (CONTRIBUTING.md §9).
 
 Where the budgets are measured. §7's open budget stays where it is measured today, `editor.spec.js` on the 2,000-cue fixture, and the two selection states must not move that number; the existing check that only the rows in view are rendered is the guard against a selection that renders the whole file. Occlusion adds one main-thread round trip per layer transition, so the menu check records the time from the click to the dropdown being painted and the frame-return check records the time from close to `IsViewable`. Neither has a §7 budget of its own; both are reported with the M2.0 status, with the platform on them.

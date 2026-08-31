@@ -29,7 +29,7 @@ const OBSERVE_TIME_POS: u64 = 1;
 const OBSERVE_PAUSE: u64 = 2;
 
 /// mpv defaults that would write files, read config, follow references or grab input are all
-/// turned off explicitly rather than assumed. See CLAUDE.md section 3 and the M0.2 design.
+/// turned off explicitly rather than assumed. See CONTRIBUTING.md section 3 and the M0.2 design.
 const SAFE_OPTIONS: &[(&str, &str)] = &[
     ("config", "no"),
     ("load-scripts", "no"),
@@ -230,11 +230,11 @@ impl Player {
                 #[cfg(target_os = "linux")]
                 {
                     // `wid` is an X11 window id, and mpv's `gpu-context=auto` picks Wayland over it
-                    // when a Wayland display is in the environment. See docs/reports/n2b-probe.md.
+                    // when a Wayland display is in the environment.
                     let (context, source) = requested_gpu_context();
                     // Tried, not imposed, and twice: a name from the hatch that mpv rejects falls
                     // back to the pin, and a pin mpv rejects leaves the user an application rather
-                    // than an error. See BACKLOG N2b and docs/reports/gate2b-fixes-review.md.
+                    // than an error. See BACKLOG N2b.
                     if let Err(error) = init.set_option("gpu-context", context.as_ref()) {
                         let can_fall_back = context.as_ref() != GPU_CONTEXT_PIN;
                         crate::log::warn!(
@@ -521,7 +521,7 @@ fn force_c_numeric_locale() -> Result<(), VideoError> {
 }
 
 /// Reject anything that is not an existing regular file before mpv sees it. This is what keeps a
-/// crafted path away from mpv's protocol handlers. See CLAUDE.md section 3.
+/// crafted path away from mpv's protocol handlers. See CONTRIBUTING.md section 3.
 fn validate_path(path: &str) -> Result<String, VideoError> {
     if path.trim().is_empty() {
         return Err(VideoError::invalid_path("empty path"));

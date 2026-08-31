@@ -1,7 +1,7 @@
 #!/bin/sh
 # Generate the speech fixture the real-binary ASR tests transcribe. See BACKLOG.md M3.1.
 #
-# Generated, never committed: no voice audio enters the repo, only the recipe (CLAUDE.md §8).
+# Generated, never committed: no voice audio enters the repo, only the recipe (CONTRIBUTING.md §8).
 # The text is deliberately ordinary English with words tiny.en gets right.
 set -e
 

@@ -2,7 +2,7 @@
 //!
 //! Splices rather than snapshots, because a splice can prove it still applies: `splice::apply`
 //! refuses unless the bytes it recorded are the bytes that are there, so a stale entry is an error
-//! message and never a wrong write (CLAUDE.md §3). Snapshots cannot fail, which means they can
+//! message and never a wrong write (CONTRIBUTING.md §3). Snapshots cannot fail, which means they can
 //! silently restore the wrong thing.
 //!
 //! The stack knows nothing about subtitles: it holds byte replacements and the label they were

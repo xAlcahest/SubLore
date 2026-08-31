@@ -1,6 +1,6 @@
 //! whisper's `-ojf` JSON to a word list. See BACKLOG.md M3.1.
 //!
-//! The token offsets whisper reports are already the word-level timestamps CLAUDE.md §2 asks for;
+//! The token offsets whisper reports are already the word-level timestamps CONTRIBUTING.md §2 asks for;
 //! `-dtw` was measured against them and disagreed by hundreds of milliseconds, so it is not used.
 //! Tokens are sub-word pieces: a leading space is what starts a new word, and that rule plus the
 //! special-token filter is the whole conversion.

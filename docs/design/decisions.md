@@ -32,7 +32,7 @@ Build the re-show path immediately, with a behavioural test that hides and re-sh
 
 ## 3. Windows E2E moves into the Windows activation milestone
 
-The E2E input and window-inspection backend for Windows is not scattered work: it belongs to the Windows activation milestone, which is now mandatory before any sale or public release (CLAUDE.md platform policy). The `check` job keeps compiling Windows on every push.
+The E2E input and window-inspection backend for Windows is not scattered work: it belongs to the Windows activation milestone, which is now mandatory before any sale or public release (CONTRIBUTING.md platform policy). The `check` job keeps compiling Windows on every push.
 
 **Why.** The suite drives the app with `xdotool` over XTEST and inspects windows with `xwininfo` (`e2e/lib/input.js:6-9`); neither exists on Windows. Doing this piecemeal inside feature milestones would spread half-finished platform work across all of them. Collected in one milestone it is finite, and the release gate makes it impossible to forget.
 
@@ -56,19 +56,19 @@ The cursor (single active line) and the selection (a set: single, shift for a ra
 
 The matcher and the ASS override-tag scanner go in an open-core crate. M5 consumes it. The closed module keeps only persistence (TM and termbase storage) and QA policy. Search and QA share fixtures.
 
-**Why.** CLAUDE.md §4 requires the open core to be fully useful alone and forbids pro branches in the open repo. The comparison both features need is identical: find a source term in a line while ignoring override tags. Two engines would mean the free product cannot search and the two disagree on what counts as a match.
+**Why.** CONTRIBUTING.md §4 requires the open core to be fully useful alone and forbids pro branches in the open repo. The comparison both features need is identical: find a source term in a line while ignoring override tags. Two engines would mean the free product cannot search and the two disagree on what counts as a match.
 
 ## 7. Subtitles on video: the translation, with a toggle
 
 The video shows the translation document, with a toggle to show the source instead. The preview is fed from a shadow copy in the working folder. **Never save the user's file to produce a preview.**
 
-**Why.** Subtitles are off by configuration today (`player.rs:41`) and nothing calls `sub-add`. With two documents open, something has to say which one is on screen, and answering that after M2.6 means reopening the finished two-document model. The shadow copy exists to remove the temptation of reloading the saved file, which would overwrite the user's file on every keystroke and eat the backup ring (CLAUDE.md §3).
+**Why.** Subtitles are off by configuration today (`player.rs:41`) and nothing calls `sub-add`. With two documents open, something has to say which one is on screen, and answering that after M2.6 means reopening the finished two-document model. The shadow copy exists to remove the temptation of reloading the saved file, which would overwrite the user's file on every keystroke and eat the backup ring (CONTRIBUTING.md §3).
 
 ## 8. Autosave: its own store, untouchable backups
 
 Autosave gets a separate store, a naming convention the backup pruner cannot see, and its own retention policy. Recovery is offered when the app reopens after a crash. Overwrite backups of user files are never touched by a timer.
 
-**Why.** The backup cap is ten (`backup.rs:21`) and pruning keys off the source filename (`backup.rs:208-216`), so an autosave timer sharing that store would delete the user's real safety copies in ten ticks. That is a data-safety regression against CLAUDE.md §3.3, and the kind of bug this project exists not to have.
+**Why.** The backup cap is ten (`backup.rs:21`) and pruning keys off the source filename (`backup.rs:208-216`), so an autosave timer sharing that store would delete the user's real safety copies in ten ticks. That is a data-safety regression against CONTRIBUTING.md §3.3, and the kind of bug this project exists not to have.
 
 ## 9. Close gate: active defect, fixed first
 
@@ -132,7 +132,7 @@ whisper.cpp's built-in Silero VAD is **not** the route for this domain. Cue-boun
 
 `main.rs` looks for `/sys/module/nvidia`, which answers "is the module loaded", not "is NVIDIA drawing". **The broad signal is kept.**
 
-**Why.** The asymmetry decides it. A false positive costs the slower rendering path, which is an annoyance. A false negative costs a blank window, which is a dead product at launch. `SUBLORE_WEBKIT_WORKAROUNDS` exists in both directions for whoever is on the wrong side of the guess. Reopened only on a real report from a hybrid laptop, not on the theory of one. The sysfs measurements that would argue the other way are in `docs/reports/gate2-fix-env.md`.
+**Why.** The asymmetry decides it. A false positive costs the slower rendering path, which is an annoyance. A false negative costs a blank window, which is a dead product at launch. `SUBLORE_WEBKIT_WORKAROUNDS` exists in both directions for whoever is on the wrong side of the guess. Reopened only on a real report from a hybrid laptop, not on the theory of one.
 
 ## 19. The code answers before the owner does — owner ruling 2026-08-31
 

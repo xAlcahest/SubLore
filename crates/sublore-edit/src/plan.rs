@@ -1176,7 +1176,7 @@ fn plan_merge(document: &SubtitleDocument, index: usize) -> Result<Planned, Edit
     let segments = document.segments();
 
     // Merging two cues may only swallow the blank lines between them. A VTT NOTE or an ASS comment
-    // line in the gap belongs to no cue and must not disappear with them. See CLAUDE.md §3.
+    // line in the gap belongs to no cue and must not disappear with them. See CONTRIBUTING.md §3.
     for position in first.segment_index.saturating_add(1)..second.segment_index {
         let Some(segment) = segments.get(position) else {
             break;

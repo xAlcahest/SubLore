@@ -166,7 +166,7 @@ impl SubtitleDocument {
     /// the last segment.
     ///
     /// The boundary rule is part of the guarantee: a segment cut inside a multi-byte character
-    /// cannot be sliced, and [`Self::to_bytes`] would drop it silently. See CLAUDE.md §3.
+    /// cannot be sliced, and [`Self::to_bytes`] would drop it silently. See CONTRIBUTING.md §3.
     pub fn check_coverage(&self) -> Result<(), CoverageViolation> {
         let body = self.source.body();
         let total = body.len();

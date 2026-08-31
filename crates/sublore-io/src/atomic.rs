@@ -2,7 +2,7 @@
 //!
 //! There is no cross-filesystem fallback and there must never be one: the temp file lives in the
 //! destination's own directory, so a rename across devices cannot happen, and a copy-based
-//! fallback would not be atomic (CLAUDE.md §3.2). An unwritable directory is an error the user
+//! fallback would not be atomic (CONTRIBUTING.md §3.2). An unwritable directory is an error the user
 //! can act on, never a degraded write path.
 
 use std::fs::{self, File, OpenOptions};

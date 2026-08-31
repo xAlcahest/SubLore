@@ -1,7 +1,7 @@
 //! The project a user has open, its episodes, and the files attached to them. See BACKLOG.md M4.2.
 //!
 //! Nothing here writes to a user's file. `attach_file` reads one metadata entry and stores a path;
-//! `detach_file` and `delete_episode` run SQL and are incapable of anything else. CLAUDE.md §3.1.
+//! `detach_file` and `delete_episode` run SQL and are incapable of anything else. CONTRIBUTING.md §3.1.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -91,7 +91,7 @@ pub fn episodes(project: &Project) -> Result<Vec<Episode>, ProjectError> {
 }
 
 /// Record `path` against `episode_id`. Reads the file's metadata and nothing else: it is never
-/// opened for writing, never copied, never moved. See CLAUDE.md §3.1.
+/// opened for writing, never copied, never moved. See CONTRIBUTING.md §3.1.
 pub fn attach_file(
     project: &mut Project,
     episode_id: i64,
@@ -260,7 +260,7 @@ fn validate_path(path: &Path) -> Result<&str, ProjectError> {
     })
 }
 
-/// The only filesystem call in the attach path, and it is a read. See CLAUDE.md §3.1.
+/// The only filesystem call in the attach path, and it is a read. See CONTRIBUTING.md §3.1.
 fn read_metadata(path: &Path) -> Result<fs::Metadata, ProjectError> {
     let metadata = fs::metadata(path)
         .map_err(|error| ProjectError::from_io(&error, path, ProjectErrorKind::FileNotFound))?;

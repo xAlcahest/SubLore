@@ -40,7 +40,7 @@ pub fn parse(format: SubtitleFormat, bytes: &[u8]) -> Result<SubtitleDocument, P
 
 /// Segments that do not tile the body are a parser bug, never a bad file, and serializing them
 /// would write bytes the file never had. A plain check, not a debug assertion: release builds are
-/// the ones that save the user's work (CLAUDE.md §3). See BACKLOG.md M1.1.
+/// the ones that save the user's work (CONTRIBUTING.md §3). See BACKLOG.md M1.1.
 fn ensure_tiled(document: SubtitleDocument) -> Result<SubtitleDocument, ParseError> {
     let violation = match document.check_coverage() {
         Ok(()) => return Ok(document),

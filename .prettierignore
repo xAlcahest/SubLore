@@ -9,8 +9,7 @@ src-tauri/icons/
 fixtures/subtitles/
 
 # Owner-maintained governance docs: tooling must not rewrite them.
-CLAUDE.md
-WORKFLOW.md
+CONTRIBUTING.md
 BACKLOG.md
 
 # The whisper.cpp checkout and its build trees: not ours to format. See BACKLOG.md M3.1.

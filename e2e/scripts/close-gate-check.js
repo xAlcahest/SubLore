@@ -124,7 +124,7 @@ function dismissDialog(dialog) {
   pressKey("Escape");
 }
 
-/** The subtitle is passed as an argument, never typed: see WORKFLOW.md 4c and `startup_files`. */
+/** The subtitle is passed as an argument, never typed: see `startup_files`. */
 function launch(dataHome, file) {
   const app = spawn(requireAppBinary(), [file], {
     detached: true,
@@ -359,7 +359,7 @@ async function main() {
     );
 
     // Not "the bytes changed": a truncated or corrupted file passes that. The saved file has to be
-    // the original with the edit in it and nothing else moved (CLAUDE.md §3).
+    // the original with the edit in it and nothing else moved (CONTRIBUTING.md §3).
     const saved = readFileSync(saveFile).toString("utf8");
     const before = original.toString("utf8");
     const savedBlocks = saved.split("\n\n");

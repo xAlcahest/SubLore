@@ -3,13 +3,13 @@
  * N2: the native video surface can be hidden and shown again (BACKLOG NOW block, decision 2).
  *
  * What is asserted here is the surface coming back mapped with mpv still attached to it — not the
- * pixels. A surface can report `IsViewable` while showing nothing (docs/reports/n2-probe.md), so
+ * pixels. A surface can report `IsViewable` while showing nothing, so
  * mpv's own child window is carried alongside the map state as the second half of the signal.
  *
  * The pixels are deliberately left out: under Xvfb with llvmpipe the frame is presented unreliably,
  * measured at 2 appearances in 10 with mpv attached every time, which made this suite intermittent
  * for a reason unrelated to the code. That the surface draws is verified on real hardware instead,
- * where three runs out of three showed the frame (docs/reports/n2b-collaudo-reale.md).
+ * where three runs out of three showed the frame.
  *
  * Driven through the product's own path: `VideoStage` observes `.stage__surface` and reports its
  * rectangle, so collapsing that element sends an empty region (hide) and restoring it sends a real
@@ -149,7 +149,7 @@ describe("video surface hide and show", () => {
     // 10 times — so waiting for it made this suite intermittent for a reason that has nothing to
     // do with the code under test. mpv's child window is the dependable signal on this display,
     // and that the surface then draws is verified on real hardware, where three runs out of three
-    // showed the frame (docs/reports/n2b-collaudo-reale.md, 2026-08-30).
+    // showed the frame, measured on 2026-08-30.
     if (childWindows(surface.id).length === 0) {
       throw new Error(`mpv did not attach inside the surface.\n${rootTree()}`);
     }

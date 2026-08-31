@@ -112,7 +112,7 @@ traduzione questo è un incastro diretto.
 
 ## 4. Cosa Sublore può spedire, e quanto costa
 
-CLAUDE.md dice che la trascrizione è una commodity che avvolgiamo e che il prodotto è la memoria
+CONTRIBUTING.md dice che la trascrizione è una commodity che avvolgiamo e che il prodotto è la memoria
 terminologica. Questa ricerca lo conferma dall'esterno: non c'è nessun modello anime che valga
 abbastanza da spostare il baricentro del progetto sull'ASR, e una raccomandazione che lo facesse
 sarebbe la raccomandazione sbagliata. Nell'ordine:
@@ -124,7 +124,7 @@ sarebbe la raccomandazione sbagliata. Nell'ordine:
    `min-silence-duration`, `speech-pad` e `max-speech-duration` contro fixture di episodio reali,
    misurando l'errore sui confini di cue e non solo il CER. È l'unico intervento con un numero pulito
    alle spalle (2,7 punti di WER nel paper Jam-ALT contro 0,15 della separazione), non aggiunge
-   dipendenze, e produce criteri di accettazione osservabili come li vuole la sezione 5 di CLAUDE.md.
+   dipendenze, e produce criteri di accettazione osservabili come li vuole la sezione 5 di CONTRIBUTING.md.
    Costo: ore, su Linux, dentro il sidecar esistente.
 3. **La terminologia sta nel termbase, non nel prompt.** Non costruire nessuna via che passi
    `initial_prompt` o hotwords per forzare i nomi dei personaggi: la letteratura dice che non funziona

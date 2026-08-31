@@ -163,7 +163,7 @@ describe("transcription", () => {
       { timeout: 30000, message: "the fixture to load and enable Transcribe" },
     );
 
-    // CLAUDE.md §3.1: the user's media is read only. Snapshot what is beside it, and its own
+    // CONTRIBUTING.md §3.1: the user's media is read only. Snapshot what is beside it, and its own
     // metadata, and compare after the run.
     const videoDir = path.join(repoRoot, "fixtures", "video");
     const before = { listing: readdirSync(videoDir).sort(), stat: statSync(fixture) };
@@ -219,7 +219,7 @@ describe("transcription", () => {
     expect(percent).toBeGreaterThan(0);
 
     // The run is on a blocking task, so the window and the IPC layer are still answering: pausing
-    // and playing the video is a round trip through both while whisper is going (CLAUDE.md §7).
+    // and playing the video is a round trip through both while whisper is going (CONTRIBUTING.md §7).
     const playLabel = await textOf(".controls__button");
     await clickElement(toplevel, ".controls__button");
     await waitFor(async () => (await textOf(".controls__button")) !== playLabel, {

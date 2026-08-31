@@ -12,7 +12,7 @@
  * app cannot be blamed for: with the NVIDIA workarounds applied — and they are, since this check
  * passes the environment through untouched — input reaches React in 373 ms instead of 186 ms, and
  * a click on Open that follows the keystrokes immediately finds an empty field. The argument path
- * opens the same file through the same command and leaves nothing to race (WORKFLOW.md 4c).
+ * opens the same file through the same command and leaves nothing to race.
  *
  * Needs a real Wayland socket, so it runs on a machine with a Wayland session and is not part of
  * the headless Linux CI job. Without the socket it fails saying so rather than passing on nothing:
@@ -135,7 +135,7 @@ async function main() {
     );
 
     // The picture is deliberately NOT asserted here: it is flaky under Xvfb for reasons unrelated
-    // to this fix. See docs/reports/n2b-collaudo-reale.md for the real-hardware pixel evidence.
+    // to this fix, measured on real hardware as colour bars on three launches out of three.
 
     execFileSync("python3", [closeWindowTool, toplevel.id], { stdio: "inherit", timeout: 15000 });
     await waitFor(() => exit !== null, { timeout: 15000, message: "the app to exit" });

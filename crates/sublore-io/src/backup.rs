@@ -2,7 +2,7 @@
 //!
 //! Layout: `{root}/{sanitized name}-{hash of the resolved path}/{name}.{stamp}[-{n}].bak`. The
 //! root is Sublore's own directory, never the user's folder: dropping `.bak` files next to the
-//! user's media is exactly the unrequested writing CLAUDE.md §3.5 forbids, and it fails on
+//! user's media is exactly the unrequested writing CONTRIBUTING.md §3.5 forbids, and it fails on
 //! read-only locations. At M4 the root becomes the project folder, which is a call-site change.
 //!
 //! Pruning is the only automatic deletion in this crate. It runs at the moment a new backup is

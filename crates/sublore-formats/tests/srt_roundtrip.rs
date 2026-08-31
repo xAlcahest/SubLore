@@ -266,7 +266,7 @@ fn files_with_no_cues_still_round_trip() {
 #[test]
 fn large_file_parses_quickly() {
     // A deliberately loose bound in a debug build: it catches accidental O(n^2), it does not measure
-    // the CLAUDE.md §7 budget, which is a release number the owner measures in the app.
+    // the CONTRIBUTING.md §7 budget, which is a release number the owner measures in the app.
     let path = common::dirs("srt").clean.join("large-2000.srt");
     let bytes = std::fs::read(&path).expect("the large fixture is readable");
 

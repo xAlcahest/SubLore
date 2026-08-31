@@ -28,9 +28,8 @@ export default function VideoStage({ hasVideo, onRegionChange }: VideoStageProps
     const report = () => {
       frame = 0;
       // Resolved here, in native pixels, because this is the only place the ratio is known: the
-      // backend's `scale_factor()` is an integer and reports 1 on a fractionally scaled display
-      // (docs/reports/n2c-p3-scala.md). Sending the ratio alongside would put the same fact in two
-      // places that have to agree.
+      // backend's `scale_factor()` is an integer and reports 1 on a fractionally scaled display.
+      // Sending the ratio alongside would put the same fact in two places that have to agree.
       const rect = element.getBoundingClientRect();
       const ratio = window.devicePixelRatio;
       // Edges first, then the size from them, so a rectangle never gains or loses a pixel to

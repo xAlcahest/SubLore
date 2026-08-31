@@ -30,7 +30,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 /// How long the hook waits for the dialog to be dismissed before exiting anyway.
 const DIALOG_TIMEOUT: Duration = Duration::from_secs(120);
 /// Past this the report is rotated to `crash.log.1`. The only automatic deletion in the app, and it
-/// only ever touches Sublore's own file. See CLAUDE.md section 3.
+/// only ever touches Sublore's own file. See CONTRIBUTING.md section 3.
 pub const MAX_REPORT_BYTES: u64 = 256 * 1024;
 const REPORT_FILE: &str = "crash.log";
 const FALLBACK_REPORT_FILE: &str = "sublore-crash.log";
