@@ -221,58 +221,35 @@ jobs:
       - name: Build the app
         run: pnpm e2e:build
 
-      # The screen is sized explicitly: a root window smaller than the 1024x700 app window fails the
-      # fixture, and the xvfb-run default differs per distribution.
       - name: Smoke test (window title, video surface)
         continue-on-error: true
-        run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e 2>&1 | tee ci-logs/smoke.log
+        run: .github/scripts/e2e-check.sh smoke e2e
 
       - name: Shutdown test (clean exit, no survivors)
         continue-on-error: true
-        run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:shutdown 2>&1 | tee ci-logs/shutdown.log
+        run: .github/scripts/e2e-check.sh shutdown e2e:shutdown
 
       - name: Close gate test (unsaved edits are never dropped silently)
         continue-on-error: true
-        run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate 2>&1 | tee ci-logs/close-gate.log
+        run: .github/scripts/e2e-check.sh close-gate e2e:close-gate
 
       - name: Late-edit gate test (an edit made while the answer is in flight is asked about again)
         continue-on-error: true
-        run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate-late-edit 2>&1 | tee ci-logs/late-edit.log
+        run: .github/scripts/e2e-check.sh late-edit e2e:close-gate-late-edit
 
       - name: Startup args test (a name the command line cannot carry costs that name, not the launch)
         continue-on-error: true
-        run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:startup-args 2>&1 | tee ci-logs/startup-args.log
+        run: .github/scripts/e2e-check.sh startup-args e2e:startup-args
       - name: mpv context test (a gpu-context mpv refuses costs the request, not the app)
         continue-on-error: true
-        run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:mpv-context 2>&1 | tee ci-logs/mpv-context.log
+        run: .github/scripts/e2e-check.sh mpv-context e2e:mpv-context
 
       # The only automated check that catches N2c's fix being removed: every other job misses it
       # because devicePixelRatio is 1 under Xvfb. At GDK_SCALE=2 the window is 2048x1400, larger
       # than the screen, which this bare X server serves without clamping (verified locally).
       - name: Scaled surface test (an integer display scale is applied exactly once)
         continue-on-error: true
-        run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:scale 2>&1 | tee ci-logs/scale.log
+        run: .github/scripts/e2e-check.sh scale e2e:scale
 
       # Two behavioural checks are deliberately not steps here, and this is the record of that
       # decision rather than an oversight (gate 2 register, `package.json:19`, `ci.yml:196`).
@@ -293,28 +270,11 @@ jobs:
           path: ci-logs/
           if-no-files-found: warn
 
-      # A verdict that can pass a red run is worse than no verdict: the first shape of this step
-      # matched "7 passed, 8 total" inside "Spec Files: 1 failed, 7 passed, 8 total" and would have
-      # called that green. Success is now one explicit shape per kind of check, and a summary line
-      # that mentions a failure is a failure whatever else it says.
-      - name: Verdict (red if any check failed)
+      # A verdict built on the shape of somebody else's output is a verdict that guesses. The
+      # previous one read log text, so it could not tell a check that failed from one that never
+      # ran, and a WebdriverIO run that executed no specs read as green. Exit codes say both.
+      - name: Verdict (red unless every check ran and returned zero)
         if: always()
-        run: |
-          failed=""
-          for log in ci-logs/*.log; do
-            name=$(basename "$log" .log)
-            if grep -qE "Spec Files:" "$log"; then
-              # wdio: its summary names the failures. "0 failed" never appears, so the absence of
-              # the word is the only success there is.
-              grep -E "Spec Files:" "$log" | grep -q "failed" && failed="$failed $name"
-            elif grep -qE "check passed \([0-9]+/[0-9]+ checks\)" "$log"; then
-              : # a counted script check that reported its own total
-            else
-              failed="$failed $name"
-            fi
-          done
-          if [ -n "$failed" ]; then
-            echo "failing checks:$failed"
-            exit 1
+        run: .github/scripts/e2e-verdict.sh
           fi
           echo "every check reported success"

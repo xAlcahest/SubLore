@@ -195,7 +195,7 @@ campo W3C `text`. Regge oggi solo perché ubuntu-latest è ancora 24.04 con un d
 tollerante. Quando ubuntu-latest passa a 26.04, chiunque si appoggi a `setValue` diventa rosso in
 blocco.
 
-### 3.2 Il passo Verdict può dichiarare verde una run rossa
+### 3.2 Il passo Verdict non sa dire se un check ha girato
 
 Questo è il problema più grave del documento, non è stato riportato da nessuno, ed è quello con la
 correzione più economica.
@@ -206,18 +206,23 @@ correzione più economica.
 grep -qE "check passed \(|Spec Files:.* 0 failed|[0-9]+ passed, [0-9]+ total" "$log" || failed=...
 ```
 
-La terza alternativa non è ancorata al fallimento. Testato:
+**Correzione del 2026-08-31, dopo la prima stesura.** La versione originale di questo paragrafo
+sosteneva che la terza alternativa dichiara verde una run wdio rossa, e lo mostrava con
+`Spec Files: 1 failed, 7 passed, 8 total`. Quella riga è sintetica: wdio stampa `passed` prima di
+`failed`, cioè `7 passed, 1 failed, 8 total`, dove `passed, ` è seguito da `1 failed` e non da
+`8 total`, quindi la regex non combacia. Il 2026-08-31 uno spec si è rotto davvero in CI (run 33378863875) e il verdetto è andato rosso come doveva. **Il difetto affermato qui non era
+raggiungibile, ed è stato affermato senza provarlo contro un log vero.**
 
-```
-$ printf 'Spec Files:\t 1 failed, 7 passed, 8 total (100% completed) in 00:01:23\n' > fake.log
-$ grep -qE "check passed \(|Spec Files:.* 0 failed|[0-9]+ passed, [0-9]+ total" fake.log && echo GREEN
-GREEN
-```
+Quello che resta, riprodotto contro i quattro set di log reali scaricati dagli artefatti:
 
-Una run WebdriverIO con uno spec file rosso su otto contiene la sottostringa `7 passed, 8 total`, la
-terza alternativa matcha, e il check viene contato come passato. Oggi non si vede perché smoke è
-verde e i due rossi sono script Node che non stampano quel formato. Il giorno in cui uno spec smoke
-si rompe, il gate lo nasconde.
+- Un log che non è né un riassunto wdio né un check contato ma contiene `3 passed, 5 total`, per
+  esempio l'output di un altro strumento, passa. Reale ma marginale.
+- **Un check che non ha mai girato non lascia nessun log, e il ciclo non ha niente su cui fallire.**
+  Se il passo close-gate non parte, il verdetto guarda sei log verdi e dice verde. Questo è il buco
+  serio, e nessuna versione basata sul testo lo chiude.
+- Una run wdio che non ha eseguito nessuno spec stampa `0 passed, 0 total` e passa. `wdio.conf.js`
+  ha già la guardia `EXPECTED_TESTS`, ma il passo è `continue-on-error`, quindi il suo codice di
+  uscita viene inghiottito e il verdetto legge solo il testo.
 
 Insieme a `continue-on-error: true` su tutti e sette i passi, questo è precisamente la
 configurazione che le regole del progetto chiamano peggiore di nessun check. Il `continue-on-error`
@@ -225,9 +230,11 @@ in sé è difendibile qui, perché una run diagnostica che raccoglie tutti i fal
 fermarsi al primo è utile e il verdetto finale è il vero gate. Ma è difendibile **solo finché il
 verdetto è solido**, e adesso non lo è.
 
-Correzione: togliere la terza alternativa e richiedere un marcatore positivo esplicito per formato
-(`Spec Files:.* 0 failed` per WDIO, `check passed \(` per gli script), più un controllo che il
-numero di log presenti sia quello atteso, così un passo che non è mai partito non passa per assenza.
+Correzione, applicata in questo stesso branch: smettere di leggere il testo. Ogni check gira
+attraverso `.github/scripts/e2e-check.sh`, che scrive il proprio codice di uscita in
+`ci-logs/<nome>.exit`, e `.github/scripts/e2e-verdict.sh` pretende l'insieme atteso di check con
+uno zero per ciascuno. Un nome atteso che non ha riportato è rosso, un nome che ha riportato e non è
+nell'elenco è rosso, così un passo e l'elenco non possono divergere in silenzio.
 
 ### 3.3 I due fallimenti reali non sono quelli che ci aspettavamo
 
