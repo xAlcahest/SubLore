@@ -31,9 +31,9 @@ import {
   windowHeight,
   windowWidth,
 } from "../lib/paths.js";
-import { EDIT_COMMITTED, SUBTITLE_OPENED, waitForLog } from "../lib/applog.js";
+import { SUBTITLE_OPENED, waitForEditedLength, waitForLog } from "../lib/applog.js";
 import { appEnv } from "../lib/env.js";
-import { clickDialogButton } from "../lib/gtk-dialog.js";
+import { answerDialog } from "../lib/gtk-dialog.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { allWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
 
@@ -46,6 +46,9 @@ const FIRST_CUE_TEXT = { x: 750, y: 540 };
 
 /** The close dialog's window name. Frozen contract with src-tauri/src/strings.rs. */
 const DIALOG_TITLE = "Unsaved changes";
+/** The fixture's first cue before anything touches it: 'The harbour was empty when we got there.' */
+const UNEDITED_FIRST_CUE_CHARS = 40;
+
 /** The text committed into cue 1, which the save branch then looks for in the file. */
 const EDIT_MARK = "SUBLORE_N1";
 
@@ -175,15 +178,19 @@ async function openAndDirty(toplevel, dataHome) {
     // Enter commits the inline edit into the document. Without it only the frontend knows about
     // the change and the backend session is still clean, which is a different case.
     pressKey("Return");
-    try {
-      await waitForLog(dataHome, EDIT_COMMITTED, {
-        timeout: 4000,
-        what: "an edit to be committed",
-      });
+    // Not "an edit happened" but "the text changed": a field committed unchanged bumps the
+    // revision and dirties the session while leaving the document identical, which is what CI kept
+    // producing and what the earlier version of this wait accepted.
+    if (await waitForEditedLength(dataHome, UNEDITED_FIRST_CUE_CHARS)) {
       return;
-    } catch (error) {
+    }
+    {
       if (attempt >= 6) {
-        throw new Error(`the edit never landed in ${attempt} attempts.\n${error.message}`);
+        throw new Error(
+          `the edit never changed the first cue in ${attempt} attempts. The app's log is the ` +
+            `evidence: look for "edit committed ... now N chars" with N still ` +
+            `${UNEDITED_FIRST_CUE_CHARS}.`,
+        );
       }
       // Escape first: a half-open inline editor would take the next attempt's keystrokes and the
       // mark would end up in the document twice.
@@ -292,7 +299,7 @@ async function main() {
       mapState(again.id) === "IsViewable",
     );
 
-    clickDialogButton(again, "discard");
+    answerDialog(again, "discard");
     // The proof that the answer landed is `waitForDialogGone` throwing if it did not; a `check`
     // here would only inflate the counter.
     await waitForDialogGone("discard");
@@ -334,7 +341,7 @@ async function main() {
       mapState(dialog.id) === "IsViewable",
     );
 
-    clickDialogButton(dialog, "save");
+    answerDialog(dialog, "save");
     // The proof that the answer landed is `waitForDialogGone` throwing if it did not; a `check`
     // here would only inflate the counter.
     await waitForDialogGone("save");

@@ -136,9 +136,20 @@ where
         dialog.set_title(crate::strings::CLOSE_UNSAVED_TITLE);
         // Added left to right, so Cancel sits rightmost, where rfd put it and where
         // e2e/scripts/close-gate-check.js looks for it.
-        dialog.add_button(crate::strings::CLOSE_SAVE, gtk::ResponseType::Yes);
-        dialog.add_button(crate::strings::CLOSE_DISCARD, gtk::ResponseType::No);
-        dialog.add_button(crate::strings::CLOSE_CANCEL, gtk::ResponseType::Cancel);
+        // Mnemonics, so the dialog can be answered from the keyboard: Alt+S, Alt+D, and Escape for
+        // cancel, which GTK gives for free. A button reachable only by aiming a pointer at it is a
+        // button some users cannot press, and one the harness had to locate by arithmetic.
+        for (label, response) in [
+            (crate::strings::CLOSE_SAVE, gtk::ResponseType::Yes),
+            (crate::strings::CLOSE_DISCARD, gtk::ResponseType::No),
+            (crate::strings::CLOSE_CANCEL, gtk::ResponseType::Cancel),
+        ] {
+            // `add_button` hands back a Widget; the underline is a Button property, and GTK3
+            // leaves it off unless it is asked for.
+            if let Ok(button) = dialog.add_button(label, response).downcast::<gtk::Button>() {
+                button.set_use_underline(true);
+            }
+        }
 
         // `connect_response` takes an `Fn` and the dialog can answer more than once, while only the
         // first answer may be acted on, because acting on it destroys the window.
@@ -182,9 +193,9 @@ where
         .title(crate::strings::CLOSE_UNSAVED_TITLE)
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::YesNoCancelCustom(
-            crate::strings::CLOSE_SAVE.to_owned(),
-            crate::strings::CLOSE_DISCARD.to_owned(),
-            crate::strings::CLOSE_CANCEL.to_owned(),
+            crate::strings::CLOSE_SAVE_PLAIN.to_owned(),
+            crate::strings::CLOSE_DISCARD_PLAIN.to_owned(),
+            crate::strings::CLOSE_CANCEL_PLAIN.to_owned(),
         ));
     match app.get_webview_window(label) {
         Some(window) => dialog = dialog.parent(&window),
@@ -197,10 +208,12 @@ where
     // including the window manager closing the dialog outright.
     dialog.show_with_result(move |result| {
         let answered = match result {
-            MessageDialogResult::Custom(ref text) if text == crate::strings::CLOSE_SAVE => {
+            MessageDialogResult::Custom(ref text) if text == crate::strings::CLOSE_SAVE_PLAIN => {
                 CloseAnswer::Save
             }
-            MessageDialogResult::Custom(ref text) if text == crate::strings::CLOSE_DISCARD => {
+            MessageDialogResult::Custom(ref text)
+                if text == crate::strings::CLOSE_DISCARD_PLAIN =>
+            {
                 CloseAnswer::Discard
             }
             _ => CloseAnswer::Cancel,

@@ -1,22 +1,27 @@
 /**
- * Click a native GTK close-gate dialog button by label. GtkButtonBox sizes buttons to the widest
- * label under the runner's theme, so these numbers are an estimate; each caller proves the click
- * landed by watching the dialog disappear (close-gate-check.js) or by recording the phase it
- * reached (n1b-load-probe.js). Shared so the two callers can't drift apart (gate2 register, L3).
+ * Answer the native close-gate dialog from the keyboard.
+ *
+ * This used to aim a pointer at a button whose position it computed from a fixed 96-pixel width,
+ * because GtkButtonBox sizes buttons to the widest label under whatever theme is installed. That
+ * arithmetic is right on the machine it was measured on and wrong elsewhere: on GitHub's runner the
+ * click landed beside the Save button, the dialog stayed open, no save ran, and the failure
+ * surfaced as "the file on disk did not change" — a save defect that did not exist (gate 2, run
+ * 33366855143).
+ *
+ * `dialog::ask_close` now gives its buttons mnemonics, so each answer has a keystroke that does not
+ * depend on a theme, a font, a screen size or a window manager. Escape is GTK's own answer for
+ * cancel and needs no mnemonic.
  */
-import { clickAt, focusWindow } from "./input.js";
+import { focusWindow, pressKey } from "./input.js";
 
-/** `dialog::ask_close` adds save, discard, cancel in that order, so cancel sits rightmost. */
-const SLOTS = { save: 2, discard: 1, cancel: 0 };
-const BUTTON_WIDTH = 96;
+/** Frozen contract with `src-tauri/src/strings.rs`: the letter after the underscore in each label. */
+const KEYS = { save: "alt+s", discard: "alt+d", cancel: "Escape" };
 
-export function clickDialogButton(dialog, which) {
-  const slot = SLOTS[which];
-  if (slot === undefined) {
-    throw new Error(`unknown dialog button ${which}`);
+export function answerDialog(dialog, which) {
+  const key = KEYS[which];
+  if (key === undefined) {
+    throw new Error(`unknown dialog answer ${which}`);
   }
-  const x = dialog.absX + dialog.width - 24 - BUTTON_WIDTH / 2 - slot * (BUTTON_WIDTH + 12);
-  const y = dialog.absY + dialog.height - 34;
   focusWindow(dialog.id);
-  clickAt(x, y);
+  pressKey(key);
 }

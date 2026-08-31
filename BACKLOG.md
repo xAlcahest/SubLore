@@ -233,6 +233,9 @@ Today the `check` job builds on ubuntu and windows (`.github/workflows/ci.yml:18
   - AC: the full behavioural suite runs on Windows in CI and is green, with the same spec files and the same assertions as on Linux. A failure on either platform turns CI red.
 - [ ] **MW.2 Platform hardening.** Work through what only Windows can show: the native video surface z-order (`video/surface/windows.rs` reasserts `HWND_TOP`), path and encoding handling, the crash dialog, the installer.
   - AC: the M0.2, M0.4, N1, N2 and M2.0 criteria are re-run on Windows and pass there, including the occlusion behaviour of decision 1.
+- [ ] **MW.4 The dependency graph on a machine without a GPU driver.** `libmpv-2.dll` imports `vulkan-1.dll` statically, not through `GetProcAddress`, so the loader has to resolve it before `main` runs even though Sublore never asks mpv for Vulkan. A Windows machine whose only display adapter is the Microsoft Basic one may have no Vulkan loader at all, and the app would die at startup with no message. Filed 2026-08-31 from the CI diagnosis in `docs/reports/windows-entrypoint.md`; the runner turned out to have a complete loader, so this is untested rather than known-broken.
+  - AC: on a Windows install with no GPU vendor driver, Sublore starts, opens a subtitle and plays a video, or says what is missing in a sentence the user can act on. A silent death at load is a failure.
+
 - [ ] **MW.3 Owner checklist on Windows.** Every owner checklist in this file, run by the owner on a Windows machine from an installed build.
   - AC: the owner signs off. Until then no build ships to anyone.
 
