@@ -91,10 +91,29 @@ async function measureAt(scale) {
       },
       { timeout: 30000, message: `the "Sublore" toplevel at GDK_SCALE=${scale}` },
     );
-    const surface = await waitFor(() => surfaceOf(toplevel), {
-      timeout: 30000,
-      message: `the native surface at GDK_SCALE=${scale}\n${rootTree()}`,
-    });
+    // The first mapped geometry is not the settled one: the page lays out, the surface is sized
+    // from the page's rectangle, and reading between the two gives an intermediate height. On CI
+    // that read 163 where the settled value was 181 and the ratio-2 comparison failed on a layout
+    // that was still moving. Wait for two identical reads instead.
+    let previous = null;
+    const surface = await waitFor(
+      () => {
+        const now = surfaceOf(toplevel);
+        const settled =
+          now !== null &&
+          previous !== null &&
+          now.width === previous.width &&
+          now.height === previous.height &&
+          now.relX === previous.relX &&
+          now.relY === previous.relY;
+        previous = now;
+        return settled ? now : null;
+      },
+      {
+        timeout: 30000,
+        message: `a settled native surface at GDK_SCALE=${scale}\n${rootTree()}`,
+      },
+    );
     // Captured before the window closes: mapState needs a live window, and it is a fact
     // `surfaceOf` does not establish (a child can be in the tree unmapped).
     const surfaceMapState = mapState(surface.id);

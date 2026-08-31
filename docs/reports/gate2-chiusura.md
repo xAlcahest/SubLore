@@ -133,20 +133,30 @@ I numeri: `mean 171.4 ms, max 3130.0 ms` contro un'allowance di 32 ms. Tolto il 
 dell'owner. Il runner non è lento a disegnare: si è fermato una volta, per tre secondi, e la media
 era ostaggio di quella pausa.
 
-Cosa è cambiato nel test, detto esplicitamente perché è il confine del §5.4:
+Cosa è cambiato nel test, detto esplicitamente perché è il confine del §5.4.
 
-- **Mediana al posto della media** per il budget centrale. La media su venti campioni su una VM
-  condivisa la decide lo stallo peggiore; la mediana risponde alla domanda che dà il nome al test.
-- **Penultimo al posto del massimo** per il caso peggiore. Uno stallo su venti è la macchina, due
-  sono il codice. Il massimo viene loggato, non asserito, così una regressione vera resta visibile
-  nella corsa che la trova.
-- **Un passo che non ha mai mosso la lista adesso fallisce.** L'asserzione precedente diceva di
-  fare questo e non lo faceva: controllava che il tempo fosse positivo, e un passo che esaurisce i
-  400 tentativi di `settle` ha un tempo positivo come tutti gli altri. Questa parte è più severa di
-  prima, non meno.
-- **Il log stampa tutti e venti i tempi**, perché la corsa che conta non lasci di nuovo solo un
-  riassunto.
+Il primo tentativo teneva i millisecondi e cambiava statistica: mediana invece di media, penultimo
+invece di massimo. Ha retto in locale e in CI ha mostrato la cosa vera: un passo su venti si fermava
+per 3128 ms e non muoveva la lista, sempre quel numero perché sono 400 poll di `setTimeout(0)` da
+7.8 ms. Il polling non stava misurando l'attesa, la stava causando: ogni giro interrogava il DOM e su
+un renderer software affamava il re-render che aspettava.
+
+Il test adesso aspetta un frame con `requestAnimationFrame`, che gira dopo il layout e non costa
+niente al browser, **e il budget è contato in frame, non in millisecondi**. I millisecondi avevano
+bisogno di una scala e ogni scala provata era l'asse sbagliato: un numero fisso è un numero su una
+macchina sola, e una baseline aritmetica dice che il runner è il 33% più lento mentre i suoi passi di
+scroll sono dieci volte più lenti, perché a differire è il renderer, non l'aritmetica. I frame sono
+l'unità in cui la promessa è fatta davvero: le righe sono a schermo entro un frame o due, oppure la
+lista sta restando indietro, e quella frase vuol dire la stessa cosa su ogni macchina e a ogni
+frequenza di aggiornamento.
+
+- Mediana 4 frame, penultimo 10. In locale ogni passo costa 1 o 2 frame.
+- **Un passo che non ha mai mosso la lista adesso fallisce.** L'asserzione precedente diceva di fare
+  questo e non lo faceva: controllava che il tempo fosse positivo, e un passo che rinuncia ha un
+  tempo positivo come tutti gli altri. Questa parte è più severa di prima, non meno.
+- Il log stampa tutti e venti i passi nell'ordine in cui sono avvenuti, con frame, millisecondi e un
+  punto esclamativo se non hanno mosso niente. La versione precedente li stampava ordinati, che è
+  come aver buttato via l'informazione che serviva.
 
 Che non sia un indebolimento è stato provato, non affermato: rimossa la virtualizzazione in
-`CueList.tsx` (`first = 0`, `last = count`), il test fallisce ancora. Rimessa, passa tre volte su
-tre con mediana 8–16 ms contro un'allowance di 24.
+`CueList.tsx` (`first = 0`, `last = count`), il test fallisce ancora. Rimessa, passa tre volte su tre.

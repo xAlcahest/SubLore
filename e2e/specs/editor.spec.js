@@ -39,8 +39,20 @@ const OPEN_BUDGET_MS = 1000;
  * The absolute figures are logged, because the budget in CLAUDE.md section 7 is a real claim and the
  * owner's checklist measures it on the release build.
  */
-const SCROLL_TYPICAL_PER_BASELINE = 8;
-const SCROLL_WORST_PER_BASELINE = 20;
+/**
+ * A scroll step's budget, in frames rather than milliseconds.
+ *
+ * Milliseconds needed a scale, and every scale tried was the wrong axis. A fixed number is a number
+ * about one machine. A CPU-arithmetic baseline says a CI runner is 33% slower than this one while
+ * its scroll steps are ten times slower, because what differs is the renderer, not the arithmetic.
+ * Frames are the unit the claim is actually made in: the rows are on screen within a frame or two,
+ * or the list is falling behind, and that sentence means the same thing on every machine and at
+ * every refresh rate.
+ */
+const SCROLL_TYPICAL_FRAMES = 4;
+const SCROLL_WORST_FRAMES = 10;
+/** A step that has not rendered new rows after this many frames has stopped, not slowed. */
+const SCROLL_GIVE_UP_FRAMES = 120;
 const TYPING_P95_MS = 50;
 const TYPING_MAX_MS = 150;
 const ROUND_TRIP_MS = 200;
@@ -280,7 +292,7 @@ describe("cue list editing", () => {
   });
 
   it("scrolls a viewport at a time without falling behind", async () => {
-    await browser.execute(() => {
+    await browser.execute((GIVE_UP) => {
       const list = document.querySelector(".cuelist");
       window.__subloreScroll = null;
       if (list === null) {
@@ -302,74 +314,52 @@ describe("cue list editing", () => {
         const before = firstRendered();
         const started = performance.now();
         list.scrollTop = list.scrollTop + step;
-        const settle = (attempts) => {
+        const settle = (frames) => {
           const moved = firstRendered() !== before;
-          if (moved || attempts > 400) {
+          if (moved || frames >= GIVE_UP) {
             // Forced layout, so the browser cannot defer the work past the measurement.
             document.querySelector(".cuelist__row")?.getBoundingClientRect();
-            // `moved` is recorded, not inferred from the time: a step that gave up still took a
-            // positive number of milliseconds, so a duration cannot tell "slow" from "stopped".
-            times.push({ ms: performance.now() - started, moved });
+            // `moved` is recorded, not inferred: a step that gave up burned frames like any other,
+            // so a count cannot tell "slow" from "stopped" on its own.
+            times.push({ frames, ms: performance.now() - started, moved });
             done += 1;
             window.setTimeout(runStep, 0);
             return;
           }
-          window.setTimeout(() => settle(attempts + 1), 0);
+          // A frame, not a timer. `setTimeout(0)` polls between frames and every poll queries the
+          // DOM, which on a software renderer starves the re-render it is waiting for: one step in
+          // twenty took 3128 ms on CI and never moved, always that same number because it is 400
+          // polls. rAF runs after layout, so waiting costs the browser nothing.
+          window.requestAnimationFrame(() => settle(frames + 1));
         };
         settle(0);
       };
       runStep();
-    });
+    }, SCROLL_GIVE_UP_FRAMES);
 
     const times = await waitFor(() => browser.execute(() => window.__subloreScroll), {
       timeout: 30000,
       message: "twenty scroll steps to finish",
     });
-    // A fixed lump of arithmetic, timed on this machine: the scale the allowance is expressed in.
-    // A forced layout was tried first and is useless here — it costs 0.05 ms, far too little to
-    // measure a React re-render against. What differs between this machine and a CI runner is CPU
-    // speed, and this measures exactly that. Nine samples, median taken, so one scheduling hiccup
-    // cannot set the scale.
-    const baseline = await browser.execute(() => {
-      const samples = [];
-      for (let sample = 0; sample < 9; sample += 1) {
-        const started = performance.now();
-        let sink = 0;
-        for (let i = 0; i < 3_000_000; i += 1) {
-          sink += i % 7;
-        }
-        samples.push(performance.now() - started + sink * 0);
-      }
-      samples.sort((a, b) => a - b);
-      return samples[Math.floor(samples.length / 2)];
-    });
-
-    const durations = times.map((step) => step.ms).sort((a, b) => a - b);
-    // The median, not the mean. On 2026-08-31 a CI runner stalled for 3130 ms in one step out of
-    // twenty; the other nineteen averaged 15.7 ms, which is what this machine does. The mean was
-    // 171 ms and the run went red over a three-second pause the code had no part in. The median
-    // answers what this test is named for — is a scroll step fast — and one stall cannot move it.
-    const typical = durations[Math.floor(durations.length / 2)];
-    // One stall in twenty is the shared machine; two is the code. The worst is logged, not asserted,
-    // so a real regression is still visible in the run that found it.
-    const worst = durations[durations.length - 1];
-    const secondWorst = durations[durations.length - 2];
+    const frames = times.map((step) => step.frames).sort((a, b) => a - b);
+    // The median, not the mean: on a shared runner one step can stall for reasons the code has no
+    // part in, and a mean of twenty is that one stall's hostage. One outlier in twenty is the
+    // machine, two are the code, so the second-worst is what the ceiling is asserted against and
+    // the worst is logged so a real regression is still visible in the run that found it.
+    const typical = frames[Math.floor(frames.length / 2)];
+    const secondWorst = frames[frames.length - 2];
     console.log(
-      `M2.3 scroll step: median ${typical.toFixed(1)} ms, second-worst ${secondWorst.toFixed(1)} ms, ` +
-        `worst ${worst.toFixed(1)} ms over ${durations.length} steps; this machine's arithmetic ` +
-        `baseline ${baseline.toFixed(3)} ms, so the allowance is ` +
-        `${(baseline * SCROLL_TYPICAL_PER_BASELINE).toFixed(1)} ms median and ` +
-        `${(baseline * SCROLL_WORST_PER_BASELINE).toFixed(1)} ms second-worst. ` +
-        `All steps: ${durations.map((ms) => ms.toFixed(0)).join(" ")}`,
+      `M2.3 scroll step: median ${typical} frames, second-worst ${secondWorst}, worst ` +
+        `${frames[frames.length - 1]}, allowance ${SCROLL_TYPICAL_FRAMES} and ` +
+        `${SCROLL_WORST_FRAMES}. Steps in order: ` +
+        `${times.map((step) => `${step.frames}f/${step.ms.toFixed(0)}ms${step.moved ? "" : "!"}`).join(" ")}`,
     );
-    // React re-render plus layout, not compositor frames: a scroll step is timed from the
-    // scrollTop assignment to the first paint-ready state that shows different rows.
     expect(times.length).toBe(20);
     // Every step rendered different rows before `settle` gave up. This is the claim in the test's
     // name: a list that stops moving fails here whatever its timings say.
     expect(times.filter((step) => !step.moved)).toEqual([]);
-    expect(typical).toBeLessThan(baseline * SCROLL_TYPICAL_PER_BASELINE);
-    expect(secondWorst).toBeLessThan(baseline * SCROLL_WORST_PER_BASELINE);
+    expect(typical).toBeLessThanOrEqual(SCROLL_TYPICAL_FRAMES);
+    expect(secondWorst).toBeLessThanOrEqual(SCROLL_WORST_FRAMES);
   });
 
   it("types into a cue without the list re-rendering behind every keystroke", async () => {
