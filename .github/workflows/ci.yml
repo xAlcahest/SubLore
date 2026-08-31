@@ -147,55 +147,10 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
       # STATUS_ENTRYPOINT_NOT_FOUND says a dependency is missing a symbol and never says which one.
-      # The first version of this checked only the mpv symbols the executable imports and found
-      # nothing wrong, which ruled out the obvious answer and left the real one unnamed. This walks
-      # the whole graph: the executable and libmpv itself, every imported DLL, resolved where the
-      # loader would find it, with each imported name checked against that file's exports.
       - name: Name the missing entry point (Windows, only when the tests failed)
         if: failure() && runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vs = & $vswhere -latest -products * -property installationPath
-          $tools = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64" | Select-Object -Last 1
-          $dumpbin = Join-Path $tools.FullName "dumpbin.exe"
-          Write-Host "OS: $((Get-CimInstance Win32_OperatingSystem).Caption) build $([System.Environment]::OSVersion.Version)"
-
-          function Resolve-Dll($name, $near) {
-            foreach ($dir in @($near, "$env:SystemRoot\System32", "$env:SystemRoot\SysWOW64")) {
-              $candidate = Join-Path $dir $name
-              if (Test-Path $candidate) { return $candidate }
-            }
-            return $null
-          }
-
-          function Exported($path) {
-            (& $dumpbin /exports $path | Select-String -Pattern '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)' |
-              ForEach-Object { $_.Matches[0].Groups[1].Value })
-          }
-
-          $subject = @()
-          $exe = Get-ChildItem target\debug\deps\video_playback-*.exe | Select-Object -First 1
-          if ($exe) { $subject += $exe.FullName }
-          if (Test-Path target\debug\libmpv-2.dll) { $subject += (Resolve-Path target\debug\libmpv-2.dll).Path }
-
-          foreach ($binary in $subject) {
-            Write-Host "`n=== imports of $(Split-Path $binary -Leaf) ==="
-            $current = $null
-            $wanted = @{}
-            foreach ($line in (& $dumpbin /imports $binary)) {
-              if ($line -match '^\s{4}(\S+\.dll)\s*$') { $current = $matches[1]; $wanted[$current] = @() }
-              elseif ($current -and $line -match '^\s+[0-9A-F]+\s+(\S+)\s*$') { $wanted[$current] += $matches[1] }
-            }
-            foreach ($dll in $wanted.Keys) {
-              $path = Resolve-Dll $dll (Split-Path $binary -Parent)
-              if (-not $path) { Write-Host "  $dll : NOT FOUND by the loader's search order"; continue }
-              $have = Exported $path
-              $missing = $wanted[$dll] | Where-Object { $have -notcontains $_ }
-              if ($missing) { Write-Host "  $dll ($path): MISSING $($missing -join ', ')" }
-              else { Write-Host "  $dll : $($wanted[$dll].Count) imports, all present" }
-            }
-          }
+        run: .github/scripts/windows-entrypoint.ps1
 
   e2e:
     name: e2e smoke (ubuntu)
