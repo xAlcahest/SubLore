@@ -7,9 +7,9 @@
 //! modal and transient for the window it asks about, which rfd cannot be because it builds with a
 //! null parent.
 //!
-//! It removes that thread from the close gate only, not from the process: `project::choose_path`
-//! and `crash::show_dialog` still raise plugin dialogs, so any session that reaches one still has
-//! rfd's GTK thread in it. That is BACKLOG N1c, and it is not fixed here.
+//! `project::choose_path` now builds its file chooser the same way, for the same reason (BACKLOG
+//! N1c). `crash::show_dialog` still raises a plugin dialog, deliberately: it runs when the main
+//! loop may already be gone, which is the one case a GTK dialog on the main thread cannot serve.
 //!
 //! It is **not** the fix for N1b's exit crash. That crash survived this change, and a core from
 //! this binary shows the same crashing frame with no rfd thread in the process

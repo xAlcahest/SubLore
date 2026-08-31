@@ -21,6 +21,7 @@
     "e2e:scale": "node e2e/scripts/scaled-surface-check.js",
     "e2e:webview": "node e2e/scripts/webview-paint-check.js",
     "e2e:mpv-context": "node e2e/scripts/mpv-context-check.js",
+    "e2e:picker-thread": "node e2e/scripts/picker-thread-check.js",
     "e2e:n1b-battery": "node e2e/scripts/n1b-load-battery.js"
   },
   "pnpm": {
