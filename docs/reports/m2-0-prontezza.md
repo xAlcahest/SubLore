@@ -310,9 +310,9 @@ Grep over the file: the string appears at line 303, where it is defined, and at 
 fallback. On no criterion. Since the same paragraph promises that anything so tagged "is stated as
 unautomated in the M2.0 status (CLAUDE.md §9)", the absence of the tag means **the M2.0 status will
 present the whole shell as machine-verified when its appearance was never checked by anything**: T5a's
-colour tokens and dark-first palette, the Aegisub arrangement being recognisable rather than merely
-satisfying five rect inequalities (delivery at :635-637), T6's rail matching the mockup (:791-793),
-and the menu bar reading as a menu bar.
+colour tokens and dark-first palette, the arrangement being recognisable as the one the plan
+specifies rather than merely satisfying five rect inequalities (delivery at :635-637), T6's rail
+matching the mockup (:791-793), and the menu bar reading as a menu bar.
 
 **Correction.** Tag the appearance halves: at minimum one `[owner checklist]` criterion on T5a and
 one on T6, and list them in the M2.0 status as unautomated.
@@ -582,7 +582,7 @@ exactly what CLAUDE.md §9 asks for.
 - **Whether the plan's own claim to have applied 12 blocking and 23 serious findings is true** was not
   audited. The two critique reports it names exist; the correspondence between their findings and the
   document's current text was not re-walked, and gate 1's status already records this debt.
-- **Appearance.** No lens can say whether the shell reads as Aegisub's arrangement, whether the dark palette
-  is right, or whether the rail matches the mockup. That is S8's point and it stays a person's job.
+- **Appearance.** No lens can say whether the shell reads as the arrangement the plan specifies, whether the
+  dark palette is right, or whether the rail matches the mockup. That is S8's point and it stays a person's job.
 - **Windows.** Nothing in this report is a Windows claim. The E2E harness drives X11 only, and the milestone's
   behavioural verdicts will be Linux verdicts until the Windows activation milestone lands.

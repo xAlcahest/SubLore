@@ -113,8 +113,8 @@ So the workspace three go in **T5b** and the rail two go in **T6**.
 M2.0 rebuilds the shell. It does not grow the product. Explicitly **not** in M2.0, and an
 implementer who finds themselves writing one of these has drifted:
 
-- The waveform panel. No audio provider exists, so per Aegisub's own rule (`SetDisplayMode`,
-  quoted in the layout doc) the panel is simply absent until M2.4 brings its provider.
+- The waveform panel. No audio provider exists, and the layout doc's rule is that a panel with no
+  provider is absent rather than empty, so nothing is built here until M2.4 brings the provider.
 - The CPS column and the translation column in the grid. M2.5 and M2.6 own those.
 - Editable time fields in the current-line band. M2.0 shows the active line's times; M2.5 makes
   them edit the document.
@@ -140,7 +140,8 @@ implementer who finds themselves writing one of these has drifted:
   milestone. (prontezza S17, :424)
 
 Carried in from the ACs and kept: opening goes through the system dialog from menu and toolbar;
-panels sit in Aegisub's arrangement; the transcription band is off the screen until asked for;
+panels sit in the arrangement `shell-layout.md` specifies, with rail, video and top-right column
+across the top and the grid underneath; the transcription band is off the screen until asked for;
 1024x700 and 1920x1080 are both clean; the video panel never scrolls; occlusion (decision 1);
 active line separate from selection (decision 5); the 33 checks pass with assertions unchanged.
 (prontezza B2, :80. `BACKLOG.md`'s M2.0 AC still says 27 at `:136`; correcting it is outside this
@@ -445,7 +446,7 @@ stated as unautomated in the M2.0 status (CLAUDE.md §9).
 **The `[owner checklist]` tag is used, not merely defined.** Revision 2 defined it here and put it
 on no criterion, which would have let the M2.0 status present the whole shell as machine-verified
 when its appearance had been checked by nothing: no automation can say whether the arrangement
-reads as Aegisub's rather than merely satisfying five rect inequalities, whether the dark palette
+reads as one tool rather than merely satisfying five rect inequalities, whether the dark palette
 is right, or whether the rail matches the mockup. T5a and T6 each carry an appearance criterion
 tagged `[owner checklist]`, and both are listed as unautomated in the M2.0 status. (prontezza S8,
 :307)
@@ -895,11 +896,11 @@ adds a delete gesture, and that task must bring it. Recorded as untested, not as
 
 ### T5a — The frame
 
-**Delivery.** The Aegisub arrangement, with everything that exists today re-parented into it and
-nothing removed yet: project rail on the left; a top band with the video panel on the left and the
-top-right column beside it; the cue grid across the whole width underneath; a status line at the
-bottom. The colour tokens and the dark-first palette land here, in one place, because this task
-rewrites `App.css` anyway.
+**Delivery.** The arrangement `shell-layout.md` specifies, with everything that exists today
+re-parented into it and nothing removed yet: project rail on the left; a top band with the video
+panel on the left and the top-right column beside it; the cue grid across the whole width
+underneath; a status line at the bottom. The colour tokens and the dark-first palette land here,
+in one place, because this task rewrites `App.css` anyway.
 
 The **two** remaining bars — `VideoOpenBar` and `SubtitleBar`; the transcription band went in T3 —
 are parked unchanged, with their class names intact, in one strip above the top band. They look
@@ -965,10 +966,13 @@ N2c (`c7261a5`) for the unit the geometry criteria compare in. (prontezza S3, :2
   **T5b's**, not T5a's: at T5a there is no toolbar — the two bars are parked unchanged and the
   toolbar arrives in T5b — so that named control moves to T5b's copy of this criterion.
   `[new: video.spec.js]` (prontezza S12, :358)
-- **The arrangement is recognisable as Aegisub's**, and the dark-first palette reads as intended,
-  in the built app at both window sizes. No automation can answer either: the rect inequalities
-  above can all hold over a layout nobody would call Aegisub's. `[owner checklist]` (prontezza S8,
-  :307)
+- **The shell matches the mockup**, setting aside everything `docs/design/shell-mockup.html`
+  marks for a later milestone: the rail, video, top-right column, grid and status line sit where
+  and in the proportions it draws them, with the top-right column given wholly to the current-line
+  band, because the waveform the mockup stacks above that band arrives at M2.4. The dark-first
+  palette reads as intended too, in the built app at both window sizes. No automation can answer
+  either: the rect inequalities above can all hold over a layout that looks nothing like the
+  picture. `[owner checklist]` (prontezza S8, :307)
 - With a video playing, scroll the wheel at four points: over the video panel, over the toolbar
   strip, over the status line, and inside the grid scrolled to row 1500; then scroll the rail to
   its last episode. The surface's X11 geometry is byte-identical before and after all five, and
@@ -1492,11 +1496,11 @@ is exactly the big-bang this ordering exists to avoid.
 One thing, and it is an acceptance criterion the shape cannot fully meet.
 
 **"Video and waveform panels sit side by side" cannot be shown at M2.0.** No audio provider exists
-before M2.4, and the layout doc adopts Aegisub's rule that a panel with no provider is absent
-rather than empty. _Recommendation:_ M2.0 delivers the top-right column with the current-line band
-in it, and that half of the AC closes at M2.4 when the waveform panel arrives above the band. The
-alternative, an empty placeholder panel, is dead UI that CLAUDE.md §6 rules out. Affects T5a's
-first criterion, which asserts the arrangement as three panels and not four.
+before M2.4, and the layout doc's rule is that a panel with no provider is absent rather than
+empty. _Recommendation:_ M2.0 delivers the top-right column with the current-line band in it, and
+that half of the AC closes at M2.4 when the waveform panel arrives above the band. The alternative,
+an empty placeholder panel, is dead UI that CLAUDE.md §6 rules out. Affects T5a's first criterion,
+which asserts the arrangement as three panels and not four.
 
 Two questions the first draft put to the owner are now decided in the plan, because the
 constraints already answered them and asking would have cost a round trip:

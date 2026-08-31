@@ -45,7 +45,7 @@ Reviews no longer run per delivery. They run in batches, at gates, and a gate is
 
 **Between gates:** each task closes with its own behavioural tests, a green full battery, and the self-check of §2.5. Then it merges into main and the next task starts. Speed comes from here.
 
-**At a gate:** new code stops. One large multi-lens review workflow runs over every delivery since the previous gate, diff by diff, in the shape of the Aegisub scan — many lenses in parallel, each with its own hunt list, each writing its report to a file and then terminating. The standing lenses are: what the corrections themselves broke, data-loss paths, assertions that cannot fail, and platform claims that were only checked on one machine. The orchestrator adds a lens for every point it declares suspect, and saying "nothing looks suspect" is not an available answer.
+**At a gate:** new code stops. One large multi-lens review workflow runs over every delivery since the previous gate, diff by diff, many lenses in parallel, each with its own hunt list, each writing its report to a file and then terminating. The standing lenses are: what the corrections themselves broke, data-loss paths, assertions that cannot fail, and platform claims that were only checked on one machine. The orchestrator adds a lens for every point it declares suspect, and saying "nothing looks suspect" is not an available answer.
 
 **Every finding is fixed before the gate opens.** Not triaged, not deferred with a note: fixed, or explicitly ruled on by the owner. The gate opening is what lets new code start again.
 
@@ -101,10 +101,9 @@ and its code describe each other, push them in the same round.
 
 ## 4e. Questions about editor behaviour (owner ruling 2026-08-31)
 
-Before asking the owner how the editor should behave, and before deciding it alone, two readings
-happen in this order: **Sublore's own code**, because the answer is often already there and written
-down, and then **Aegisub's source**, because it is the reference this project measures itself
-against (`decisions.md` 19). Only what neither settles is a question worth the owner's time.
+Before asking the owner how the editor should behave, and before deciding it alone, read
+**Sublore's own code**, because the answer is often already there and written down (`decisions.md`
+19). Only what it does not settle is a question worth the owner's time.
 
 This exists because it was broken: a decision was put to the owner that `session.rs:80` had already
 made, with a test named after it. A question asked from a log instead of from the code costs the

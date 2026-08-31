@@ -28,7 +28,7 @@ The plan is unusually disciplined about _frozen assertions_ and unusually loose 
 criteria. §6 forbids weakening an existing check and §3 pins every selector, but the 49 acceptance
 criteria in §4 are backed by 17 new checks, and the ones left over are disproportionately the
 data-safety negatives ("nothing is written", "the file is untouched") and the milestone's own
-headline claims (the Aegisub arrangement, 1920x1080). Three of those criteria cannot be observed
+headline claims (the shell arrangement, 1920x1080). Three of those criteria cannot be observed
 with anything in `e2e/`, and one of them cannot be observed on the CI screen at all. That is the
 thread running through the blockers below: not sloppy wording, but criteria written without
 checking that an instrument exists.
@@ -104,7 +104,7 @@ reads as covered and no instrument exists.
 
 **Defect.** `e2e/scripts/close-gate-check.js` drives the app by absolute coordinates with no DOM:
 `SUBTITLE_PATH_FIELD = {x: 506, y: 73}`, `SUBTITLE_OPEN_BUTTON = {x: 676, y: 73}`,
-`FIRST_CUE_TEXT = {x: 750, y: 540}` (lines 43-45). T5a re-parents everything into the Aegisub
+`FIRST_CUE_TEXT = {x: 750, y: 540}` (lines 43-45). T5a re-parents everything into the new
 frame — grid to the bottom under a top band, rail on the left — and parks the three bars in a new
 strip _above_ the top band, which moves both the y of the parked bars and the position of every
 grid row. Every one of those three points is stale after T5a. The plan assigns the recompute to
