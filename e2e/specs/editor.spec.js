@@ -292,6 +292,19 @@ describe("cue list editing", () => {
   });
 
   it("scrolls a viewport at a time without falling behind", async () => {
+    // The list has to be scrollable before the first step, not merely present. Assigning scrollTop
+    // to a container whose rows have not been laid out does nothing and is never retried, so the
+    // step burns its whole frame budget without moving: 120 frames on CI while the other nineteen
+    // took two each.
+    await waitFor(
+      () =>
+        browser.execute(() => {
+          const list = document.querySelector(".cuelist");
+          return list !== null && list.scrollHeight > list.clientHeight;
+        }),
+      { timeout: 20000, message: "the cue list to become scrollable" },
+    );
+
     await browser.execute((GIVE_UP) => {
       const list = document.querySelector(".cuelist");
       window.__subloreScroll = null;
