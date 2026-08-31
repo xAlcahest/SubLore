@@ -17,6 +17,11 @@ pub fn crash_body(report_path: &str) -> String {
 /// Titles for the two native file dialogs the project panel opens.
 pub const CHOOSE_PROJECT_FOLDER: &str = "Choose a project folder";
 pub const CHOOSE_PROJECT_FILE: &str = "Choose a video or subtitle file";
+/// The chooser's own buttons on Linux, where Sublore builds it rather than the plugin (N1c). The
+/// underscore marks the mnemonic, as in the close gate below; "Open" is what GTK's own file chooser
+/// calls the accept button in both modes, and Alt+S is taken by the chooser's search.
+pub const CHOOSE_ACCEPT: &str = "_Open";
+pub const CHOOSE_CANCEL: &str = "_Cancel";
 
 /// The close gate. Native, not webview: the answer decides whether the window survives, and the
 /// video surface sits above the webview until decision 1 lands (BACKLOG N1).

@@ -15,7 +15,6 @@ use sublore_project::delete::delete_project;
 use sublore_project::model::FileRole;
 use sublore_project::records::{self, Project};
 use tauri::{AppHandle, State};
-use tauri_plugin_dialog::DialogExt;
 
 use crate::log;
 use crate::strings;
@@ -240,41 +239,184 @@ pub fn delete(slot: &SharedProject) -> Result<ProjectDeletedView, ProjectError> 
     })
 }
 
-/// Ask the user for a folder or a file through the native dialog. `None` means they cancelled.
-pub fn choose_path(app: &AppHandle, kind: &str) -> Result<Option<String>, ProjectError> {
-    // `blocking_pick_*` posts to the main loop and waits for it, so calling it on the main thread
-    // deadlocks the app. `blocking` above is what keeps this on a worker.
-    let picked = match kind {
-        "folder" => app
-            .dialog()
-            .file()
-            .set_title(strings::CHOOSE_PROJECT_FOLDER)
-            .blocking_pick_folder(),
-        "file" => app
-            .dialog()
-            .file()
-            .set_title(strings::CHOOSE_PROJECT_FILE)
-            .blocking_pick_file(),
-        _ => {
-            return Err(ProjectError::new(
+/// What the picker was asked for. Parsed once, so no platform branch matches on a string.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Choice {
+    Folder,
+    File,
+}
+
+impl Choice {
+    /// The frontend sends one of two literals, so an unknown one is a bug in it, not a user error.
+    fn parse(kind: &str) -> Result<Self, ProjectError> {
+        match kind {
+            "folder" => Ok(Self::Folder),
+            "file" => Ok(Self::File),
+            _ => Err(ProjectError::new(
                 ProjectErrorCode::CommandFailed,
                 format!("unknown dialog kind {kind:?}"),
-            ))
+            )),
         }
-    };
+    }
 
-    let Some(path) = picked.and_then(|file| file.simplified().into_path().ok()) else {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Folder => strings::CHOOSE_PROJECT_FOLDER,
+            Self::File => strings::CHOOSE_PROJECT_FILE,
+        }
+    }
+
+    /// The word the log uses, which is also the literal the frontend sent.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Folder => "folder",
+            Self::File => "file",
+        }
+    }
+}
+
+/// Ask the user for a folder or a file through the native dialog. `None` means they cancelled.
+pub fn choose_path(app: &AppHandle, kind: &str) -> Result<Option<String>, ProjectError> {
+    let choice = Choice::parse(kind)?;
+    let Some(path) = pick(app, choice)? else {
+        // Every outcome is said out loud: nothing else outside the webview can see one, and the
+        // check for BACKLOG N1c is built on these two lines.
+        log::info!("project: the {} choice was cancelled", choice.as_str());
         return Ok(None);
     };
     // Lossy here would hand back a path that does not open. The user gets a sentence instead.
-    path.to_str()
-        .map(|text| Some(text.to_owned()))
-        .ok_or_else(|| {
-            ProjectError::new(
-                ProjectErrorCode::PathNotUtf8,
-                format!("the chosen path is not valid UTF-8: {}", path.display()),
-            )
-        })
+    let Some(text) = path.to_str() else {
+        return Err(ProjectError::new(
+            ProjectErrorCode::PathNotUtf8,
+            format!("the chosen path is not valid UTF-8: {}", path.display()),
+        ));
+    };
+    log::info!("project: chose a {}: {text}", choice.as_str());
+    Ok(Some(text.to_owned()))
+}
+
+/// Raise the chooser on the main thread and wait here for what it answers.
+///
+/// GTK directly rather than through tauri-plugin-dialog, for the reason `dialog.rs` gives: the
+/// plugin's rfd backend starts a second thread and iterates GTK on it for the rest of the process's
+/// life (BACKLOG N1c). This runs on the worker `blocking` put the command on, never on the main
+/// thread, which the wait below would deadlock.
+#[cfg(target_os = "linux")]
+fn pick(app: &AppHandle, choice: Choice) -> Result<Option<PathBuf>, ProjectError> {
+    use gtk::prelude::*;
+    use tauri::Manager;
+
+    // On the main thread the post below runs inline and the wait at the end would then stop the
+    // loop that has to answer it. A sentence beats a hung app.
+    if gtk::is_initialized_main_thread() {
+        return Err(ProjectError::new(
+            ProjectErrorCode::CommandFailed,
+            "the file chooser cannot be opened from the main thread".to_owned(),
+        ));
+    }
+
+    let (send, receive) = std::sync::mpsc::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        // Transient and modal, which the plugin's chooser could not be: rfd builds with a null
+        // parent, so it could end up behind the window that asked (BACKLOG N1).
+        let parent = handle
+            .get_webview_window("main")
+            .and_then(|window| window.gtk_window().ok());
+        if parent.is_none() {
+            log::warn!("project: no GTK parent for the chooser, it cannot be transient");
+        }
+        let action = match choice {
+            Choice::Folder => gtk::FileChooserAction::SelectFolder,
+            Choice::File => gtk::FileChooserAction::Open,
+        };
+        let dialog = gtk::FileChooserDialog::new(Some(choice.title()), parent.as_ref(), action);
+        dialog.set_modal(true);
+        // A window that closes under its chooser takes the chooser with it, and the guard below
+        // turns that into a cancellation instead of leaving one on screen with nobody to answer.
+        dialog.set_destroy_with_parent(true);
+        // Mnemonics for the reason `ask_close` has them: a button reachable only by aiming a
+        // pointer at it is one some users cannot press, and one a harness has to locate by
+        // arithmetic. Alt+O, because Alt+S is the chooser's own search.
+        for (label, response) in [
+            (strings::CHOOSE_CANCEL, gtk::ResponseType::Cancel),
+            (strings::CHOOSE_ACCEPT, gtk::ResponseType::Accept),
+        ] {
+            // `add_button` hands back a Widget; the underline is a Button property, and GTK3
+            // leaves it off unless it is asked for.
+            if let Ok(button) = dialog.add_button(label, response).downcast::<gtk::Button>() {
+                button.set_use_underline(true);
+            }
+        }
+        // What activating a row in the list answers, so the chooser can be finished with Return.
+        dialog.set_default_response(gtk::ResponseType::Accept);
+
+        // `connect_response` takes an `Fn` and GTK can answer more than once — a button press
+        // followed by the window manager closing the dialog — while only the first answer counts.
+        let send = std::cell::RefCell::new(Some(send));
+        dialog.connect_response(move |dialog, response| {
+            let Some(send) = send.borrow_mut().take() else {
+                return;
+            };
+            // Read before destroying: the path lives in the widget being torn down.
+            let picked = match response {
+                gtk::ResponseType::Accept => dialog.filename(),
+                _ => None,
+            };
+            // Destroyed rather than hidden, so a cancelled chooser leaves nothing on screen.
+            unsafe { dialog.destroy() };
+            if send.send(picked).is_err() {
+                log::error!("project: nobody was left waiting for the chosen path");
+            }
+        });
+        // `show`, not `show_all`: a file chooser keeps internal widgets hidden on purpose.
+        dialog.show();
+    })
+    .map_err(|error| {
+        ProjectError::new(
+            ProjectErrorCode::CommandFailed,
+            format!("the file chooser could not be raised: {error}"),
+        )
+    })?;
+
+    Ok(answer(&receive))
+}
+
+/// What the chooser answered, or a cancellation when it went away without answering.
+///
+/// A closed channel is a chooser destroyed with its parent, or a task dropped by a main loop on the
+/// way out. Cancelled is the answer that strands nobody: the caller returns, the panel stops being
+/// busy, and the user can ask again. Its own function so a test can close the channel on it.
+#[cfg(target_os = "linux")]
+fn answer(receive: &std::sync::mpsc::Receiver<Option<PathBuf>>) -> Option<PathBuf> {
+    receive.recv().unwrap_or_else(|_| {
+        log::warn!("project: the chooser went away without an answer, taking it as cancelled");
+        None
+    })
+}
+
+/// Every other platform keeps the plugin, exactly as `dialog::ask_close` does. Its `blocking_pick_*`
+/// posts to the main loop and waits for it, which is why this may never run on the main thread.
+#[cfg(not(target_os = "linux"))]
+fn pick(app: &AppHandle, choice: Choice) -> Result<Option<PathBuf>, ProjectError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let dialog = app.dialog().file().set_title(choice.title());
+    let picked = match choice {
+        Choice::Folder => dialog.blocking_pick_folder(),
+        Choice::File => dialog.blocking_pick_file(),
+    };
+    let Some(file) = picked else {
+        return Ok(None);
+    };
+    // A URL that will not convert is a failure, not a cancellation: reading it as one would drop
+    // the choice the user made without a word anywhere.
+    file.simplified().into_path().map(Some).map_err(|error| {
+        ProjectError::new(
+            ProjectErrorCode::CommandFailed,
+            format!("the chosen path could not be read: {error}"),
+        )
+    })
 }
 
 /// Everything the frontend draws, read back after every change. A handful of rows, and returning
@@ -384,8 +526,9 @@ fn text(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_title, folder_path, UNTITLED};
+    use super::{default_title, folder_path, Choice, UNTITLED};
     use crate::project::error::ProjectErrorCode;
+    use crate::strings;
     use std::path::Path;
 
     #[test]
@@ -409,6 +552,47 @@ mod tests {
             let error = folder_path(folder).expect_err("an empty folder path is refused");
             assert_eq!(error.code, ProjectErrorCode::InvalidPath, "{folder:?}");
         }
+    }
+
+    #[test]
+    fn each_dialog_kind_asks_for_its_own_thing_under_its_own_title() {
+        let folder = Choice::parse("folder").expect("the frontend's folder literal");
+        let file = Choice::parse("file").expect("the frontend's file literal");
+        assert_eq!(folder.title(), strings::CHOOSE_PROJECT_FOLDER);
+        assert_eq!(file.title(), strings::CHOOSE_PROJECT_FILE);
+        assert_eq!(folder.as_str(), "folder");
+        assert_eq!(file.as_str(), "file");
+    }
+
+    #[test]
+    fn a_dialog_kind_the_frontend_never_sends_is_refused_before_anything_opens() {
+        for kind in ["", "Folder", "directory", "file ", "media"] {
+            let error = Choice::parse(kind).expect_err("an unknown dialog kind is refused");
+            assert_eq!(error.code, ProjectErrorCode::CommandFailed, "{kind:?}");
+        }
+    }
+
+    /// The guard between "the window closed under the chooser" and a project panel that stays busy
+    /// for the rest of the session. `dialog.rs` carries the same pair for the close gate.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_chooser_that_goes_away_without_answering_is_a_cancellation() {
+        let (send, receive) = std::sync::mpsc::channel::<Option<std::path::PathBuf>>();
+        // The chooser destroyed with its parent, or its task dropped by a main loop on the way out.
+        drop(send);
+
+        assert_eq!(super::answer(&receive), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_path_the_chooser_answered_is_the_one_the_caller_is_handed() {
+        let chosen = std::path::PathBuf::from("/tmp/a folder the user picked");
+        let (send, receive) = std::sync::mpsc::channel();
+        send.send(Some(chosen.clone()))
+            .expect("the caller is listening");
+
+        assert_eq!(super::answer(&receive), Some(chosen));
     }
 
     #[test]
