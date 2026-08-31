@@ -358,11 +358,15 @@ pub fn apply_edit(
         .apply(&edit, Run::New, Instant::now())
         .map_err(SubtitleError::from_edit)?;
     // One line per committed edit, not per keystroke: the editor sends a field when it is finished.
-    // It is the only outside evidence that an edit landed, which the harness had to assume before.
+    // It is the only outside evidence that an edit landed. The text length is here and the text is
+    // not: a length is enough to tell a real edit from a field committed unchanged, and a subtitle
+    // line is the user's own writing.
     crate::log::info!(
-        "subtitle: edit committed, revision {}, {}",
+        "subtitle: edit committed, revision {}, {}, cue {} now {} chars",
         session.revision(),
-        if session.dirty() { "dirty" } else { "clean" }
+        if session.dirty() { "dirty" } else { "clean" },
+        patch.from,
+        patch.cues.first().map_or(0, |cue| cue.text.chars().count())
     );
     Ok(describe(session, patch))
 }
@@ -413,6 +417,13 @@ fn save_locked(
     let outcome = save_with_backup(session.path(), &bytes, &BackupStore::new(backup_root))
         .map_err(SubtitleError::from_io)?;
     session.mark_saved();
+    // What was written and where, because "the save succeeded" and "the file on disk changed" are
+    // different claims and CI has already shown them disagreeing (gate 2, run 33363671401).
+    crate::log::info!(
+        "subtitle: saved {} — {} bytes",
+        session.path().display(),
+        bytes.len()
+    );
     Ok(saved(outcome))
 }
 
