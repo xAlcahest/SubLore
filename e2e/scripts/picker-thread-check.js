@@ -214,6 +214,22 @@ function gtkThreads(pid, samples = 3) {
   return { main, others };
 }
 
+/**
+ * Everything the walk found, for the message when the detector saw nothing it recognises.
+ *
+ * Without it a control failure says only "nothing anywhere", which is the same sentence for a tool
+ * that could not attach, a stripped library, and a main loop parked in a frame this does not know.
+ */
+function describeWalk(pid) {
+  try {
+    return [...walkThreads(pid)]
+      .map(([tid, frames]) => `TID ${tid}: ${frames.slice(0, 6).join(" <- ") || "(no frames)"}`)
+      .join("\n");
+  } catch (error) {
+    return `the walk itself failed: ${error.message}`;
+  }
+}
+
 /** The offending threads, named with their frames: the caller below sits under the GTK symbol. */
 function describeThreads(others) {
   return [...others]
@@ -398,12 +414,18 @@ async function main() {
 
     // Before any picker: the detector finds the one thread that is supposed to be there, and finds
     // no other. Without this a broken detector reports a clean process and the run reads as green.
-    const before = gtkThreads(pid);
+    // Waited for rather than sampled once: the window exists before the main loop settles into
+    // gtk_main_iteration_do, and on a slower machine the first sample lands before it does.
+    const before = await waitFor(() => (gtkThreads(pid).main ? gtkThreads(pid) : null), {
+      timeout: 30000,
+      interval: 1000,
+      message: `a gtk_main_iteration frame on TID ${pid}`,
+    }).catch(() => gtkThreads(pid));
     check(
       "eu-stack sees the main thread iterating GTK, so it can see a thread that does",
       before.main,
-      `no gtk_main_iteration frame on TID ${pid}: the walk found nothing anywhere, which is what a ` +
-        `detector that cannot look also reports`,
+      `no gtk_main_iteration frame on TID ${pid} in 30s: the walk found nothing anywhere, which is ` +
+        `what a detector that cannot look also reports. The walk saw:\n${describeWalk(pid)}`,
     );
     check(
       "no thread but the main one iterates GTK before a picker is opened",
