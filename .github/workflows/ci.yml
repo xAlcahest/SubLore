@@ -172,6 +172,7 @@ jobs:
           sudo apt-get install -y \
             build-essential \
             curl \
+            elfutils \
             ffmpeg \
             file \
             libayatana-appindicator3-dev \
@@ -244,6 +245,18 @@ jobs:
         continue-on-error: true
         run: .github/scripts/e2e-check.sh mpv-context e2e:mpv-context
 
+      # eu-stack has to ptrace the app, and it is the app's sibling under Node, which Ubuntu's Yama
+      # default forbids. The check refuses to run rather than report a clean process without this.
+      # continue-on-error, like the checks: a sysctl that fails must cost this check its own red
+      # mark through its own message, not skip the steps that come after it.
+      - name: Allow eu-stack to read the app's threads
+        continue-on-error: true
+        run: sudo sysctl -w kernel.yama.ptrace_scope=0
+
+      - name: Picker thread test (choosing a path starts no second GTK thread)
+        continue-on-error: true
+        run: .github/scripts/e2e-check.sh picker-thread e2e:picker-thread
+
       # The only automated check that catches N2c's fix being removed: every other job misses it
       # because devicePixelRatio is 1 under Xvfb. At GDK_SCALE=2 the window is 2048x1400, larger
       # than the screen, which this bare X server serves without clamping (verified locally).
@@ -276,5 +289,3 @@ jobs:
       - name: Verdict (red unless every check ran and returned zero)
         if: always()
         run: .github/scripts/e2e-verdict.sh
-          fi
-          echo "every check reported success"

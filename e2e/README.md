@@ -88,6 +88,7 @@ xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate  # the unsaved-edits
 xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate-late-edit  # an edit made while the answer is in flight
 xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:startup-args  # names the command line cannot carry
 xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:scale       # an integer display scale
+xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:picker-thread  # the picker starts no second GTK thread
 ```
 
 Two more have prerequisites no headless runner has, so they are run by hand and are not CI steps:
@@ -106,6 +107,9 @@ Prerequisites, all of them dev tools rather than repo dependencies:
 - `tauri-driver` — `cargo install tauri-driver --version 2.0.6 --locked`
 - `WebKitWebDriver` — Fedora: `webkit2gtk4.1`. Debian/Ubuntu: `webkit2gtk-driver`.
 - `xwininfo` (`x11-utils`), `xdotool`, `Xvfb` (`xvfb`), python-xlib (`python3-xlib`)
+- `eu-stack` (`elfutils`), for `e2e:picker-thread` only. It ptraces the app, so that check also
+  needs `kernel.yama.ptrace_scope=0`: it is a sibling of the app, not an ancestor. The check says so
+  and refuses to run rather than report a process it could not read.
 
 Environment knobs:
 
@@ -205,10 +209,16 @@ test proves the relaunch happened rather than assuming it, by asserting that the
 project open before it reopens the folder. `lib/x11.js`'s `findToplevel` throws when two windows
 match, so a leftover instance from the old session fails the run instead of poisoning it.
 
-**The harness must never click `.project__choose-folder` or `.project__choose-file`.** Those open a
-native dialog, and under Xvfb there is nobody to answer it: the run would hang until the suite timed
-out. Every path the spec supplies goes through the text field beside the button, which is how
-`VideoOpenBar` and `SubtitleBar` are driven too.
+**No WebdriverIO spec may click `.project__choose-folder` or `.project__choose-file`.** Those open a
+native dialog, and the suite has nobody to answer it: the run would hang until it timed out. Every
+path the spec supplies goes through the text field beside the button, which is how `VideoOpenBar`
+and `SubtitleBar` are driven too.
+
+One script does click them, and it is the only one that may: `scripts/picker-thread-check.js`
+(`pnpm e2e:picker-thread`, BACKLOG N1c). It answers the GTK chooser from the keyboard — Alt+Home to
+leave GTK's Recent list, where the accept button is insensitive and the location entry's Return
+therefore reaches nothing, then Ctrl+L, the path, and Return — and proves the answer by what it
+caused, never by the dialog closing.
 
 `project.spec.js` writes only under `$SUBLORE_E2E_DATA_HOME/project`, and the subtitle it attaches is
 a **copy** of `fixtures/subtitles/srt/clean/basic-lf.srt` placed in a separate user directory. That
