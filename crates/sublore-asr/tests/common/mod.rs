@@ -300,10 +300,15 @@ fn serve(mut stream: TcpStream, body: &[u8], policy: &Policy, range: &AtomicU64)
     match (policy.overrun, policy.lie_about_length) {
         // No Content-Length at all: the body ends when the connection does, which is how a stream
         // can run past what the catalog says.
-        (Some(_), _) => head.push_str("Connection: close\r\n"),
+        (Some(_), _) => {}
         (None, Some(length)) => head.push_str(&format!("Content-Length: {length}\r\n")),
         (None, None) => head.push_str(&format!("Content-Length: {}\r\n", slice.len())),
     }
+    // Always, not only for the overrun case. With Content-Length and keep-alive the client has no
+    // reason to close, so the server closes first, and Windows turns a close with anything still
+    // unread into a reset the client reports as os error 10053. Every test here serves one request
+    // per connection and asserts on `accepts()`, so nothing depends on reuse.
+    head.push_str("Connection: close\r\n");
     head.push_str("Accept-Ranges: bytes\r\n\r\n");
     if stream.write_all(head.as_bytes()).is_err() {
         return;
@@ -318,13 +323,12 @@ fn serve(mut stream: TcpStream, body: &[u8], policy: &Policy, range: &AtomicU64)
         let _ = stream.write_all(&vec![0xAAu8; extra]);
     }
     let _ = stream.flush();
-    // Drain whatever the client still had to say, so the close is not a reset it reports instead
-    // of the truncation under test. One 64-byte read was enough on Linux and not on Windows, which
-    // resets a connection closed with anything still unread and delivers that reset to the client's
-    // *next* request as os error 10053 — a resumed download failing for the previous attempt's
-    // teardown. Drain to the end, bounded by a timeout so a stalled client cannot hang the server.
+    // Send the FIN, then wait for the client's, so the socket is never closed with data still in
+    // its receive buffer: that is what Windows answers with a reset, delivered to the client as os
+    // error 10053. `Connection: close` above is the half that makes the client close at all; a
+    // 200 ms bound was not enough for it on a loaded runner and let this fail once in three runs.
     let _ = stream.shutdown(std::net::Shutdown::Write);
-    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(200)));
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
     let mut sink = [0u8; 1024];
     while matches!(stream.read(&mut sink), Ok(read) if read > 0) {}
 }
