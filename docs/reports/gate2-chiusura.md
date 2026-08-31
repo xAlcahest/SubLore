@@ -87,3 +87,37 @@ On 2026-08-31, the first run of the wdio suite after the toolchain was pinned to
 **Which spec failed is not known**, and that is a gap in the battery command rather than in the suite: it extracted the summary line and not the failing name, so the one run that mattered left no record of itself. The suite's own output would have named it; the command threw it away.
 
 So: one unexplained failure in five runs, no cause, no reproduction, and no claim that it is understood. It is not presented as fixed and not presented as flakiness — it is presented as unexplained. If it returns, the first thing to do is capture the run's full output rather than its summary.
+
+## Coda: la CI, 2026-08-31
+
+Il cancello si era chiuso con la suite verde in locale e la CI rossa, che è la combinazione che questo
+documento esiste per non lasciar passare. Ora sono verdi entrambe, e per motivi diversi da quelli che
+sembravano.
+
+| job                  | prima                                       | ora                                 |
+| -------------------- | ------------------------------------------- | ----------------------------------- |
+| `check (ubuntu)`     | verde                                       | verde                               |
+| `check (windows)`    | 3 target morti al caricamento, `0xc0000139` | **verde**, 515 test                 |
+| `e2e smoke (ubuntu)` | rosso su un save che non c'era              | verde, 8/8 spec e ogni script pieno |
+
+Windows: i binari di test di cargo non ricevevano il manifest che `tauri_build` dà all'applicazione,
+quindi `comctl32` si risolveva sulla 5.82 di `System32`, che non esporta `TaskDialogIndirect`. Due
+ipotesi prima di questa erano coerenti e sbagliate; sono in `docs/reports/windows-entrypoint.md`
+insieme al motivo per cui il confronto delle tabelle statiche non poteva rispondere.
+
+Linux: verificato scaricando l'artefatto dei log, non guardando le spunte. Gli step e2e hanno
+`continue-on-error`, quindi si presentano verdi anche quando il comando è fallito, ed è esattamente
+così che il 2026-08-30 ho riportato all'owner "sono passati tutti" mentre non era vero.
+
+## Coda: una regola scritta qui e rotta il giorno dopo
+
+WORKFLOW §4c dice dal 2026-08-30 che l'input sintetico va solo dentro un server X che l'harness
+possiede. Il 2026-08-31 ho lanciato `pnpm e2e:close-gate` senza `xvfb-run` e xdotool ha digitato nella
+sessione reale dell'owner. Nessuno se n'è accorto: il check è fallito, e il fallimento sembrava un
+difetto del prodotto.
+
+`e2e/lib/input.js` adesso chiede a `$DISPLAY` se c'è un window manager prima di ogni `xdotool`, e si
+rifiuta se c'è. Provato in tutte e due le direzioni: rifiuta sul display reale, passa sotto Xvfb.
+
+La lezione non è "stai più attento". È che una regola che vive solo in un documento viene rotta da chi
+l'ha scritta, e la prima volta che serve a qualcosa è quando ha i denti.
