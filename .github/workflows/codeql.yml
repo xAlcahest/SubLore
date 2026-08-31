@@ -1,0 +1,83 @@
+name: CodeQL
+
+# Weekly as well as on every change: a query pack that gains a rule finds old code with it, and a
+# repository that only scans on push never learns what the new rule would have said.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+          # Rust is analysed from a real build, so this leg needs everything `cargo build` needs.
+          - language: rust
+            build-mode: autobuild
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Same list as the check job in ci.yml, minus ffmpeg: nothing here generates the fixture.
+      - name: Install Linux system dependencies
+        if: matrix.language == 'rust'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libmpv-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            wget
+
+      - name: Set up pnpm
+        if: matrix.language == 'rust'
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        if: matrix.language == 'rust'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # `tauri_build::build()` embeds the frontend, so the Rust build fails without dist/.
+      - name: Build the frontend
+        if: matrix.language == 'rust'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
