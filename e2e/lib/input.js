@@ -28,6 +28,12 @@ export function focusWindow(id, timeoutMs = 5000) {
     if (state === "IsViewable") {
       break;
     }
+    if (state === "IsGone") {
+      throw new Error(
+        `window ${id} was destroyed before it could be focused. Whatever asked for this focus is ` +
+          `holding an id that outlived its window.`,
+      );
+    }
     if (Date.now() >= deadline) {
       throw new Error(
         `window ${id} never became viewable in ${timeoutMs}ms (it is ${state}), so X would answer ` +

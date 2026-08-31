@@ -27,7 +27,7 @@ import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { clickDialogButton } from "../lib/gtk-dialog.js";
+import { answerDialog } from "../lib/gtk-dialog.js";
 import { doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import {
   closeWindowTool,
@@ -269,7 +269,7 @@ async function main() {
     const first = await waitForDialog(state, "asking about the first edit");
     check("the gate is mapped, not just present in the tree", mapState(first.id) === "IsViewable");
 
-    clickDialogButton(first, "save");
+    answerDialog(first, "save");
     await waitForDialogGone("save");
 
     // The interval under test: the dialog is gone, the save is in flight, the window is live.
@@ -299,7 +299,7 @@ async function main() {
       mapState(outcome.dialog.id) === "IsViewable",
     );
 
-    clickDialogButton(outcome.dialog, "save");
+    answerDialog(outcome.dialog, "save");
     await waitForDialogGone("the second save");
 
     const survivors = await reap(state, "the app to exit after the second save");

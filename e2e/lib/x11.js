@@ -58,7 +58,20 @@ export function childWindows(id) {
 
 /** `IsViewable`, `IsUnMapped` or `IsUnviewable`. An unmapped surface is not on screen. */
 export function mapState(id) {
-  const match = /Map State:\s*(\S+)/.exec(xwininfo(["-id", id]));
+  let described;
+  try {
+    described = xwininfo(["-id", id]);
+  } catch (error) {
+    // A window can be destroyed between being listed and being asked about, and X answers that with
+    // `BadDrawable` on a request whose id no longer exists. That is a fact about the window, not a
+    // failure of the harness, and reporting it as one cost a CI run its diagnosis (gate 2, run
+    // 33366855143). Anything else is a real error and still throws.
+    if (/No such window|BadDrawable/i.test(`${error.message}${error.stderr ?? ""}`)) {
+      return "IsGone";
+    }
+    throw error;
+  }
+  const match = /Map State:\s*(\S+)/.exec(described);
   if (match === null) {
     throw new Error(`xwininfo -id ${id} printed no Map State line`);
   }

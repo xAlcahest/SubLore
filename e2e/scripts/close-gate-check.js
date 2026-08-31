@@ -33,7 +33,7 @@ import {
 } from "../lib/paths.js";
 import { SUBTITLE_OPENED, waitForEditedLength, waitForLog } from "../lib/applog.js";
 import { appEnv } from "../lib/env.js";
-import { clickDialogButton } from "../lib/gtk-dialog.js";
+import { answerDialog } from "../lib/gtk-dialog.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { allWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
 
@@ -299,7 +299,7 @@ async function main() {
       mapState(again.id) === "IsViewable",
     );
 
-    clickDialogButton(again, "discard");
+    answerDialog(again, "discard");
     // The proof that the answer landed is `waitForDialogGone` throwing if it did not; a `check`
     // here would only inflate the counter.
     await waitForDialogGone("discard");
@@ -341,7 +341,7 @@ async function main() {
       mapState(dialog.id) === "IsViewable",
     );
 
-    clickDialogButton(dialog, "save");
+    answerDialog(dialog, "save");
     // The proof that the answer landed is `waitForDialogGone` throwing if it did not; a `check`
     // here would only inflate the counter.
     await waitForDialogGone("save");
