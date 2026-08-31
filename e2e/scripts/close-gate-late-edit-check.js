@@ -173,15 +173,45 @@ async function waitForWindow(state) {
  * without a DOM there is nothing here to wait on, and the checks below say so when the setup
  * misses rather than passing anyway.
  */
-async function editFirstCue(toplevel, mark, settleMs) {
-  focusWindow(toplevel.id);
+async function editFirstCue(toplevel, mark, settleMs, dataHome) {
   const cue = { x: toplevel.absX + FIRST_CUE_TEXT.x, y: toplevel.absY + FIRST_CUE_TEXT.y };
-  doubleClickAt(cue.x, cue.y);
-  await sleep(600);
-  typeText(mark);
-  // Enter commits the inline edit into the backend session. Without it only the frontend knows.
-  pressKey("Return");
+  // Attempted rather than assumed: the cue list paints after the backend has parsed the file, and
+  // a click that lands early leaves the document clean while every later assertion still runs. The
+  // app writes a line when an edit is committed, so this retries until it does (CI run 33341052061).
+  const before = (appLog(dataHome).match(/subtitle: edit committed/g) ?? []).length;
+  for (let attempt = 1; ; attempt += 1) {
+    focusWindow(toplevel.id);
+    doubleClickAt(cue.x, cue.y);
+    await sleep(600);
+    typeText(mark);
+    // Enter commits the inline edit into the backend session. Without it only the frontend knows.
+    pressKey("Return");
+    const landed = await waitForCount(dataHome, before + 1, 4000);
+    if (landed) {
+      break;
+    }
+    if (attempt >= 6) {
+      throw new Error(`the edit "${mark}" never landed in ${attempt} attempts`);
+    }
+    // A half-open inline editor would take the next attempt's keystrokes as well.
+    pressKey("Escape");
+    await sleep(500);
+  }
   await sleep(settleMs);
+}
+
+/** True once the app has logged at least `wanted` committed edits. */
+async function waitForCount(dataHome, wanted, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if ((appLog(dataHome).match(/subtitle: edit committed/g) ?? []).length >= wanted) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await sleep(100);
+  }
 }
 
 function requestClose(toplevel) {
@@ -233,7 +263,7 @@ async function main() {
     // The app says when the document is open; waiting for that instead of for a fixed number of
     // milliseconds is what makes this run on a slower machine than the one it was written on.
     await waitForLog(dataHome, SUBTITLE_OPENED, { what: "the subtitle to be open" });
-    await editFirstCue(toplevel, EDIT_EARLY, 2500);
+    await editFirstCue(toplevel, EDIT_EARLY, 2500, dataHome);
 
     requestClose(toplevel);
     const first = await waitForDialog(state, "asking about the first edit");
@@ -243,7 +273,7 @@ async function main() {
     await waitForDialogGone("save");
 
     // The interval under test: the dialog is gone, the save is in flight, the window is live.
-    await editFirstCue(toplevel, EDIT_LATE, 1500);
+    await editFirstCue(toplevel, EDIT_LATE, 1500, dataHome);
     check(
       "the app was still running when the second edit was committed",
       state.exit === null,

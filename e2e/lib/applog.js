@@ -51,3 +51,6 @@ export async function waitForLog(dataHome, pattern, options = {}) {
 
 /** The line `subtitle::open_session` writes once a document is the one on screen. */
 export const SUBTITLE_OPENED = /subtitle: opened .* — \d+ cues/;
+
+/** The line `subtitle::apply_edit` writes once a finished edit is in the document. */
+export const EDIT_COMMITTED = /subtitle: edit committed, revision \d+, dirty/;

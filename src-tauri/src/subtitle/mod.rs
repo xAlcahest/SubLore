@@ -357,6 +357,13 @@ pub fn apply_edit(
     let patch = session
         .apply(&edit, Run::New, Instant::now())
         .map_err(SubtitleError::from_edit)?;
+    // One line per committed edit, not per keystroke: the editor sends a field when it is finished.
+    // It is the only outside evidence that an edit landed, which the harness had to assume before.
+    crate::log::info!(
+        "subtitle: edit committed, revision {}, {}",
+        session.revision(),
+        if session.dirty() { "dirty" } else { "clean" }
+    );
     Ok(describe(session, patch))
 }
 

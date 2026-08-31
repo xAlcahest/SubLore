@@ -31,7 +31,7 @@ import {
   windowHeight,
   windowWidth,
 } from "../lib/paths.js";
-import { SUBTITLE_OPENED, waitForLog } from "../lib/applog.js";
+import { EDIT_COMMITTED, SUBTITLE_OPENED, waitForLog } from "../lib/applog.js";
 import { appEnv } from "../lib/env.js";
 import { clickDialogButton } from "../lib/gtk-dialog.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
@@ -160,17 +160,37 @@ async function openAndDirty(toplevel, dataHome) {
   // milliseconds someone measured on their own machine. The number was 3500 and the first real CI
   // run was slower than it (gate 2, run 33339776169).
   await waitForLog(dataHome, SUBTITLE_OPENED, { what: "the subtitle to be open" });
-  focusWindow(toplevel.id);
 
+  // The backend having parsed the file is not the cue list being on screen, and nothing in the log
+  // says when a row paints. So the edit is attempted rather than assumed: the app writes a line
+  // when one lands, and this retries until it does. Before this, a click that arrived early left
+  // the document clean and the failure surfaced four assertions later as "nothing changed on disk"
+  // (gate 2, CI run 33341052061).
   const cue = at(FIRST_CUE_TEXT);
-  doubleClickAt(cue.x, cue.y);
-  // Same reason: the inline editor has to exist before the keystrokes go anywhere.
-  await sleep(600);
-  typeText(EDIT_MARK);
-  // Enter commits the inline edit into the document. Without it only the frontend knows about the
-  // change and the backend session is still clean, which is a different case (see the delivery).
-  pressKey("Return");
-  await sleep(2500);
+  for (let attempt = 1; ; attempt += 1) {
+    focusWindow(toplevel.id);
+    doubleClickAt(cue.x, cue.y);
+    await sleep(600);
+    typeText(EDIT_MARK);
+    // Enter commits the inline edit into the document. Without it only the frontend knows about
+    // the change and the backend session is still clean, which is a different case.
+    pressKey("Return");
+    try {
+      await waitForLog(dataHome, EDIT_COMMITTED, {
+        timeout: 4000,
+        what: "an edit to be committed",
+      });
+      return;
+    } catch (error) {
+      if (attempt >= 6) {
+        throw new Error(`the edit never landed in ${attempt} attempts.\n${error.message}`);
+      }
+      // Escape first: a half-open inline editor would take the next attempt's keystrokes and the
+      // mark would end up in the document twice.
+      pressKey("Escape");
+      await sleep(500);
+    }
+  }
 }
 
 function requestClose(toplevel) {
