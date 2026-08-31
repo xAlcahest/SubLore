@@ -99,6 +99,17 @@ A remote that declares closed what it does not hold is worse than one that is me
 first is trusted, the second is obviously stale. Commit markdown as it changes, and when a document
 and its code describe each other, push them in the same round.
 
+## 4e. Questions about editor behaviour (owner ruling 2026-08-31)
+
+Before asking the owner how the editor should behave, and before deciding it alone, two readings
+happen in this order: **Sublore's own code**, because the answer is often already there and written
+down, and then **Aegisub's source**, because it is the reference this project measures itself
+against (`decisions.md` 19). Only what neither settles is a question worth the owner's time.
+
+This exists because it was broken: a decision was put to the owner that `session.rs:80` had already
+made, with a test named after it. A question asked from a log instead of from the code costs the
+owner a decision and buys nothing.
+
 ## 5. Parallelism
 
 Independent tasks may run as parallel implementers (agent teams per the parallel-build skill). Rules:
