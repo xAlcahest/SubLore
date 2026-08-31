@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import process from "node:process";
 
 import { mapState } from "./x11.js";
 
@@ -8,7 +9,48 @@ import { mapState } from "./x11.js";
  * through XTEST instead. These are genuine key and button events, not synthesized DOM events.
  */
 function xdotool(args) {
+  requireOwnedDisplay();
   return execFileSync("xdotool", args, { encoding: "utf8", timeout: 15000 });
+}
+
+/** Answered once per process: asking X the same question for every keystroke buys nothing. */
+let ownsDisplay;
+
+/**
+ * Refuse to drive XTEST on a display that belongs to somebody.
+ *
+ * XTEST types into whatever holds focus on the whole server, not into a window this code chose. The
+ * checks allowed on a real display only launch the app, read its arguments and take screenshots;
+ * anything that types or clicks belongs on a bare X server the run owns. Running `pnpm e2e:close-gate`
+ * without `xvfb-run` sent keystrokes into the owner's session on 2026-08-31, and nothing stopped it.
+ *
+ * A window manager is the difference that can be asked about: Xvfb here runs without one, and every
+ * real session has one.
+ */
+function requireOwnedDisplay() {
+  if (ownsDisplay === undefined) {
+    let root;
+    try {
+      root = execFileSync("xprop", ["-root", "_NET_SUPPORTING_WM_CHECK"], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+    } catch (error) {
+      // Not knowing whose display this is is not permission to type on it.
+      throw new Error(
+        `cannot tell whose display ${process.env.DISPLAY} is: xprop failed (${error.message}). ` +
+          `Install x11-utils, or run this check under Xvfb.`,
+      );
+    }
+    ownsDisplay = !/window id #/.test(root);
+  }
+  if (!ownsDisplay) {
+    throw new Error(
+      `refusing to send synthetic input to ${process.env.DISPLAY}: a window manager is running ` +
+        `there, so it is a real session and XTEST would type into it. Run the check under its own ` +
+        `X server: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:<check>.`,
+    );
+  }
 }
 
 /** XSetInputFocus, which works without a window manager. Typed keys follow the input focus. */
