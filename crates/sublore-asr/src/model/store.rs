@@ -5,6 +5,7 @@
 //! drop a model in by hand and it works, and deleting one by hand is not a corruption.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -144,13 +145,22 @@ impl ModelStore {
                 format!("cannot open {}: {error}", path.display()),
             )
         })?;
+        // Read in chunks rather than `io::copy`: the hasher's `io::Write` impl is an accident of
+        // one sha2 version, and the models are gigabytes, so a buffer belongs here anyway.
         let mut hasher = Sha256::new();
-        std::io::copy(&mut file, &mut hasher).map_err(|error| {
-            AsrError::new(
-                AsrErrorKind::ModelCorrupt,
-                format!("cannot read {}: {error}", path.display()),
-            )
-        })?;
+        let mut buffer = vec![0u8; 64 * 1024];
+        loop {
+            let read = file.read(&mut buffer).map_err(|error| {
+                AsrError::new(
+                    AsrErrorKind::ModelCorrupt,
+                    format!("cannot read {}: {error}", path.display()),
+                )
+            })?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
         let digest = hex(&hasher.finalize());
         if digest != spec.sha256 {
             return Err(AsrError::new(

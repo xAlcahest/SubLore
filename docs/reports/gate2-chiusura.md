@@ -84,6 +84,79 @@ By owner ruling the gate opens on blockers and serious, not on minor perfection:
 
 On 2026-08-31, the first run of the wdio suite after the toolchain was pinned to stable 1.93.0 — the first run against a completely rebuilt binary — reported **7 spec files passed, 1 failed**. Four consecutive runs since have been 8 of 8, and every script check passed in the same battery.
 
-**Which spec failed is not known**, and that is a gap in the battery command rather than in the suite: it extracted the summary line and not the failing name, so the one run that mattered left no record of itself. The suite's own output would have named it; the command threw it away.
+**Quale spec fallisse allora non è noto**, and that is a gap in the battery command rather than in the suite: it extracted the summary line and not the failing name, so the one run that mattered left no record of itself. The suite's own output would have named it; the command threw it away.
 
 So: one unexplained failure in five runs, no cause, no reproduction, and no claim that it is understood. It is not presented as fixed and not presented as flakiness — it is presented as unexplained. If it returns, the first thing to do is capture the run's full output rather than its summary.
+
+## Coda: la CI, 2026-08-31
+
+Il cancello si era chiuso con la suite verde in locale e la CI rossa, che è la combinazione che questo
+documento esiste per non lasciar passare. Ora sono verdi entrambe, e per motivi diversi da quelli che
+sembravano.
+
+| job                  | prima                                       | ora                                 |
+| -------------------- | ------------------------------------------- | ----------------------------------- |
+| `check (ubuntu)`     | verde                                       | verde                               |
+| `check (windows)`    | 3 target morti al caricamento, `0xc0000139` | **verde**, 515 test                 |
+| `e2e smoke (ubuntu)` | rosso su un save che non c'era              | verde, 8/8 spec e ogni script pieno |
+
+Windows: i binari di test di cargo non ricevevano il manifest che `tauri_build` dà all'applicazione,
+quindi `comctl32` si risolveva sulla 5.82 di `System32`, che non esporta `TaskDialogIndirect`. Due
+ipotesi prima di questa erano coerenti e sbagliate; sono in `docs/reports/windows-entrypoint.md`
+insieme al motivo per cui il confronto delle tabelle statiche non poteva rispondere.
+
+Linux: verificato scaricando l'artefatto dei log, non guardando le spunte. Gli step e2e hanno
+`continue-on-error`, quindi si presentano verdi anche quando il comando è fallito, ed è esattamente
+così che il 2026-08-30 ho riportato all'owner "sono passati tutti" mentre non era vero.
+
+## Coda: una regola scritta qui e rotta il giorno dopo
+
+WORKFLOW §4c dice dal 2026-08-30 che l'input sintetico va solo dentro un server X che l'harness
+possiede. Il 2026-08-31 ho lanciato `pnpm e2e:close-gate` senza `xvfb-run` e xdotool ha digitato nella
+sessione reale dell'owner. Nessuno se n'è accorto: il check è fallito, e il fallimento sembrava un
+difetto del prodotto.
+
+`e2e/lib/input.js` adesso chiede a `$DISPLAY` se c'è un window manager prima di ogni `xdotool`, e si
+rifiuta se c'è. Provato in tutte e due le direzioni: rifiuta sul display reale, passa sotto Xvfb.
+
+La lezione non è "stai più attento". È che una regola che vive solo in un documento viene rotta da chi
+l'ha scritta, e la prima volta che serve a qualcosa è quando ha i denti.
+
+## Coda: la spec sconosciuta ha un nome
+
+L'osservazione qui sopra — una corsa su cinque rossa, causa ignota — si è ripresentata in CI il
+2026-08-31 e stavolta il log c'era: `cue list editing > scrolls a viewport at a time without falling
+behind`, il budget di scroll di M2.3.
+
+I numeri: `mean 171.4 ms, max 3130.0 ms` contro un'allowance di 32 ms. Tolto il singolo passo da
+3130 ms, gli altri diciannove fanno 15.7 ms di media, cioè esattamente quello che fa la macchina
+dell'owner. Il runner non è lento a disegnare: si è fermato una volta, per tre secondi, e la media
+era ostaggio di quella pausa.
+
+Cosa è cambiato nel test, detto esplicitamente perché è il confine del §5.4.
+
+Il primo tentativo teneva i millisecondi e cambiava statistica: mediana invece di media, penultimo
+invece di massimo. Ha retto in locale e in CI ha mostrato la cosa vera: un passo su venti si fermava
+per 3128 ms e non muoveva la lista, sempre quel numero perché sono 400 poll di `setTimeout(0)` da
+7.8 ms. Il polling non stava misurando l'attesa, la stava causando: ogni giro interrogava il DOM e su
+un renderer software affamava il re-render che aspettava.
+
+Il test adesso aspetta un frame con `requestAnimationFrame`, che gira dopo il layout e non costa
+niente al browser, **e il budget è contato in frame, non in millisecondi**. I millisecondi avevano
+bisogno di una scala e ogni scala provata era l'asse sbagliato: un numero fisso è un numero su una
+macchina sola, e una baseline aritmetica dice che il runner è il 33% più lento mentre i suoi passi di
+scroll sono dieci volte più lenti, perché a differire è il renderer, non l'aritmetica. I frame sono
+l'unità in cui la promessa è fatta davvero: le righe sono a schermo entro un frame o due, oppure la
+lista sta restando indietro, e quella frase vuol dire la stessa cosa su ogni macchina e a ogni
+frequenza di aggiornamento.
+
+- Mediana 4 frame, penultimo 10. In locale ogni passo costa 1 o 2 frame.
+- **Un passo che non ha mai mosso la lista adesso fallisce.** L'asserzione precedente diceva di fare
+  questo e non lo faceva: controllava che il tempo fosse positivo, e un passo che rinuncia ha un
+  tempo positivo come tutti gli altri. Questa parte è più severa di prima, non meno.
+- Il log stampa tutti e venti i passi nell'ordine in cui sono avvenuti, con frame, millisecondi e un
+  punto esclamativo se non hanno mosso niente. La versione precedente li stampava ordinati, che è
+  come aver buttato via l'informazione che serviva.
+
+Che non sia un indebolimento è stato provato, non affermato: rimossa la virtualizzazione in
+`CueList.tsx` (`first = 0`, `last = count`), il test fallisce ancora. Rimessa, passa tre volte su tre.

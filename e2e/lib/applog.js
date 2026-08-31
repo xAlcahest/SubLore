@@ -54,3 +54,28 @@ export const SUBTITLE_OPENED = /subtitle: opened .* — \d+ cues/;
 
 /** The line `subtitle::apply_edit` writes once a finished edit is in the document. */
 export const EDIT_COMMITTED = /subtitle: edit committed, revision \d+, dirty/;
+
+/**
+ * Wait until an edit has actually changed the first cue's length.
+ *
+ * "An edit was committed" is not "the text changed": an inline editor that takes Enter before the
+ * keystrokes reach it commits the field unchanged, which bumps the revision and marks the session
+ * dirty while leaving the document identical. That is exactly what happened on CI, and the harness
+ * believed it (gate 2, run 33363671401). The length is what the app logs, and the length is enough.
+ */
+export async function waitForEditedLength(dataHome, unchangedLength, options = {}) {
+  const timeout = options.timeout ?? 4000;
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const seen = [...appLog(dataHome).matchAll(/edit committed[^\n]*now (\d+) chars/g)].map((m) =>
+      Number(m[1]),
+    );
+    if (seen.some((length) => length !== unchangedLength)) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await sleep(100);
+  }
+}

@@ -28,7 +28,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { appEnv } from "../lib/env.js";
 import { doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
-import { clickDialogButton } from "../lib/gtk-dialog.js";
+import { answerDialog } from "../lib/gtk-dialog.js";
 import { closeWindowTool, repoRoot, requireAppBinary } from "../lib/paths.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { allWindows, findToplevel } from "../lib/x11.js";
@@ -100,7 +100,7 @@ try {
   );
 
   phase = "answer";
-  clickDialogButton(dialog, answer);
+  answerDialog(dialog, answer);
 
   phase = "exit";
   await waitFor(() => exit !== null, { timeout: 20000, message: "the app to exit" });

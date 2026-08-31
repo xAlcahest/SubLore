@@ -9,6 +9,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# One run per pull request. Four runs of the same branch raced each other while this was being
+# fixed, and three of them were answering a question already superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -127,8 +133,30 @@ jobs:
 
       # --no-fail-fast: one target that cannot start must not hide the state of the others. The
       # Windows run of 2026-08-30 stopped at crash_main_thread and told us nothing about the rest.
+      # Windows searches the executable's own directory before PATH, so the pinned DLL goes there.
+      # Without this the loader is free to find another libmpv-2.dll first, and it did: the three
+      # test targets that actually reference mpv symbols died with STATUS_ENTRYPOINT_NOT_FOUND
+      # while the unit tests, which reference none, passed (gate 2, run 33366855143).
+      - name: Put libmpv beside the test binaries (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path target\debug\deps | Out-Null
+          foreach ($to in @("target\debug", "target\debug\deps")) {
+            Copy-Item "$env:LIBMPV_LIB_DIR\libmpv-2.dll" $to -Force
+          }
+          Get-ChildItem target\debug\libmpv-2.dll, target\debug\deps\libmpv-2.dll |
+            ForEach-Object { "placed $($_.FullName) ($($_.Length) bytes)" }
+
       - name: Test Rust
         run: cargo test --workspace --no-fail-fast
+
+      # STATUS_ENTRYPOINT_NOT_FOUND says a dependency is missing a symbol and never says which one.
+      - name: Name the missing entry point (Windows, only when the tests failed)
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: .github/scripts/windows-entrypoint.ps1
 
   e2e:
     name: e2e smoke (ubuntu)
