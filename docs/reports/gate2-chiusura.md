@@ -84,7 +84,7 @@ By owner ruling the gate opens on blockers and serious, not on minor perfection:
 
 On 2026-08-31, the first run of the wdio suite after the toolchain was pinned to stable 1.93.0 — the first run against a completely rebuilt binary — reported **7 spec files passed, 1 failed**. Four consecutive runs since have been 8 of 8, and every script check passed in the same battery.
 
-**Which spec failed is not known**, and that is a gap in the battery command rather than in the suite: it extracted the summary line and not the failing name, so the one run that mattered left no record of itself. The suite's own output would have named it; the command threw it away.
+**Quale spec fallisse allora non è noto**, and that is a gap in the battery command rather than in the suite: it extracted the summary line and not the failing name, so the one run that mattered left no record of itself. The suite's own output would have named it; the command threw it away.
 
 So: one unexplained failure in five runs, no cause, no reproduction, and no claim that it is understood. It is not presented as fixed and not presented as flakiness — it is presented as unexplained. If it returns, the first thing to do is capture the run's full output rather than its summary.
 
@@ -121,3 +121,32 @@ rifiuta se c'è. Provato in tutte e due le direzioni: rifiuta sul display reale,
 
 La lezione non è "stai più attento". È che una regola che vive solo in un documento viene rotta da chi
 l'ha scritta, e la prima volta che serve a qualcosa è quando ha i denti.
+
+## Coda: la spec sconosciuta ha un nome
+
+L'osservazione qui sopra — una corsa su cinque rossa, causa ignota — si è ripresentata in CI il
+2026-08-31 e stavolta il log c'era: `cue list editing > scrolls a viewport at a time without falling
+behind`, il budget di scroll di M2.3.
+
+I numeri: `mean 171.4 ms, max 3130.0 ms` contro un'allowance di 32 ms. Tolto il singolo passo da
+3130 ms, gli altri diciannove fanno 15.7 ms di media, cioè esattamente quello che fa la macchina
+dell'owner. Il runner non è lento a disegnare: si è fermato una volta, per tre secondi, e la media
+era ostaggio di quella pausa.
+
+Cosa è cambiato nel test, detto esplicitamente perché è il confine del §5.4:
+
+- **Mediana al posto della media** per il budget centrale. La media su venti campioni su una VM
+  condivisa la decide lo stallo peggiore; la mediana risponde alla domanda che dà il nome al test.
+- **Penultimo al posto del massimo** per il caso peggiore. Uno stallo su venti è la macchina, due
+  sono il codice. Il massimo viene loggato, non asserito, così una regressione vera resta visibile
+  nella corsa che la trova.
+- **Un passo che non ha mai mosso la lista adesso fallisce.** L'asserzione precedente diceva di
+  fare questo e non lo faceva: controllava che il tempo fosse positivo, e un passo che esaurisce i
+  400 tentativi di `settle` ha un tempo positivo come tutti gli altri. Questa parte è più severa di
+  prima, non meno.
+- **Il log stampa tutti e venti i tempi**, perché la corsa che conta non lasci di nuovo solo un
+  riassunto.
+
+Che non sia un indebolimento è stato provato, non affermato: rimossa la virtualizzazione in
+`CueList.tsx` (`first = 0`, `last = count`), il test fallisce ancora. Rimessa, passa tre volte su
+tre con mediana 8–16 ms contro un'allowance di 24.
