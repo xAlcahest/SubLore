@@ -9,6 +9,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# One run per pull request. Four runs of the same branch raced each other while this was being
+# fixed, and three of them were answering a question already superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
