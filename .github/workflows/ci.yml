@@ -265,12 +265,25 @@ jobs:
           path: ci-logs/
           if-no-files-found: warn
 
+      # A verdict that can pass a red run is worse than no verdict: the first shape of this step
+      # matched "7 passed, 8 total" inside "Spec Files: 1 failed, 7 passed, 8 total" and would have
+      # called that green. Success is now one explicit shape per kind of check, and a summary line
+      # that mentions a failure is a failure whatever else it says.
       - name: Verdict (red if any check failed)
         if: always()
         run: |
           failed=""
           for log in ci-logs/*.log; do
-            grep -qE "check passed \(|Spec Files:.* 0 failed|[0-9]+ passed, [0-9]+ total" "$log" || failed="$failed $(basename "$log" .log)"
+            name=$(basename "$log" .log)
+            if grep -qE "Spec Files:" "$log"; then
+              # wdio: its summary names the failures. "0 failed" never appears, so the absence of
+              # the word is the only success there is.
+              grep -E "Spec Files:" "$log" | grep -q "failed" && failed="$failed $name"
+            elif grep -qE "check passed \([0-9]+/[0-9]+ checks\)" "$log"; then
+              : # a counted script check that reported its own total
+            else
+              failed="$failed $name"
+            fi
           done
           if [ -n "$failed" ]; then
             echo "failing checks:$failed"
