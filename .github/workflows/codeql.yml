@@ -1,0 +1,44 @@
+name: CodeQL
+
+# Weekly as well as on every change: a query pack that gains a rule finds old code with it, and a
+# repository that only scans on push never learns what the new rule would have said.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # All three extract from source. Rust refuses `autobuild` outright ("Rust does not support
+        # the autobuild build mode"), which is why this job needs none of the system libraries the
+        # check job installs and none of the frontend build.
+        language: [actions, javascript-typescript, rust]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
