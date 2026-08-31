@@ -134,10 +134,10 @@ whisper.cpp's built-in Silero VAD is **not** the route for this domain. Cue-boun
 
 **Why.** The asymmetry decides it. A false positive costs the slower rendering path, which is an annoyance. A false negative costs a blank window, which is a dead product at launch. `SUBLORE_WEBKIT_WORKAROUNDS` exists in both directions for whoever is on the wrong side of the guess. Reopened only on a real report from a hybrid laptop, not on the theory of one. The sysfs measurements that would argue the other way are in `docs/reports/gate2-fix-env.md`.
 
-## 19. Aegisub is the reference for editor behaviour — owner ruling 2026-08-31
+## 19. The code answers before the owner does — owner ruling 2026-08-31
 
-When a question is "how should the editor behave here", the first answer is **what Aegisub does**, read from its source, not reasoned out from first principles and not put to the owner as an open question. Sublore departs from it only where there is a stated reason, and the reason goes in this file.
+When a question is "how should the editor behave here", it is not a question for the owner until Sublore's own code has been read for the answer. Much of the behaviour is already decided and written down; asking about it spends the owner's time on something the repository already says.
 
-**Why.** The owner has asked for this more than once, and the cost of not doing it is visible in this session: a question was put to him about whether committing an unchanged field should dirty the document, when the answer was already in `session.rs:80` and in a test called `committing_an_unchanged_field_is_not_an_edit`. Aegisub has answered these questions for twenty years against real subtitlers, and its answers are the baseline a translator arrives expecting. Inventing a different one is a cost that has to be justified, not a default.
+**Why.** A decision was put to the owner about whether committing an unchanged field should dirty the document, when the answer was already in `session.rs:80` and in a test called `committing_an_unchanged_field_is_not_an_edit`. The question was asked from a log instead of from the code.
 
-**How to apply.** Before asking the owner about editor behaviour, and before deciding it alone: read Sublore's own code for the answer, then read Aegisub's. Only what neither settles is a question for the owner.
+**How to apply.** Read the code. If it settles the question, follow it and say where it was settled. If it does not, decide it, state the reason here, and only then take it to the owner if the reason is one he owns.
