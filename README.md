@@ -178,4 +178,6 @@ The pre-commit hook runs `pnpm format:check`, `pnpm lint` and `cargo fmt --check
 
 ## License
 
-GNU General Public License v3.0. See [LICENSE](LICENSE).
+GNU General Public License v3.0, with one additional permission under section 7: a module that Sublore loads at run time through the `sublore-module-api` interface need not be released under the GPL, and its source need not be offered. The permission covers what crosses that interface and nothing else. See [LICENSE](LICENSE).
+
+This is what makes the open core an open core rather than a demo: the editor, the playback, the formats and the project files are free software and stay that way, and the paid modules load into them without dragging the whole program into their licence.

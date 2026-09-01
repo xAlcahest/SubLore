@@ -1,3 +1,6 @@
+//! Licensed under the GNU GPL v3 or later, with the section 7 additional permission for modules
+//! loaded through `sublore-module-api`. See LICENSE at the root of the repository.
+
 //! The whisper.cpp sidecar: run it, watch it, cancel it, and turn what it wrote into cues.
 //!
 //! No Tauri and no async here. Process handling in std is blocking, the crate is driven from a
