@@ -588,14 +588,6 @@ pub fn session_state(slot: &SessionSlot) -> SessionState {
 /// Save at whatever revision the session holds, recovering a poisoned lock. `Ok(None)` means there
 /// was nothing to write.
 ///
-/// The interactive commands refuse a poisoned session and that is right for them: a refused edit
-/// costs a retry. The close gate is the user's last chance to keep the work, so it recovers
-/// instead. Sound here because a mutation never edits the document in place: `plan::edit` builds a
-/// whole new document, `EditSession::commit` assigns it in one move, and `history` is only touched
-/// after the new document exists, so a panic leaves the session holding one whole document or the
-/// other and never half of one. The poison flag is cleared once the guard is in hand, or every
-/// later command would keep refusing a session this call just proved usable.
-///
 /// A clean session writes nothing. The gate can open on a session that is merely busy, and an
 /// unasked-for write would change the mtime of a file the user only opened, and would overwrite
 /// whatever another program put there in the meantime (CONTRIBUTING.md §3.1).
@@ -603,13 +595,7 @@ pub fn save_current(
     slot: &SessionSlot,
     backup_root: PathBuf,
 ) -> Result<Option<SubtitleSaved>, SubtitleError> {
-    let mut guard = match slot.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            slot.clear_poison();
-            poisoned.into_inner()
-        }
-    };
+    let mut guard = lock_recovering(slot);
     let session = current(&mut guard)?;
     if !session.dirty() {
         return Ok(None);
@@ -617,11 +603,49 @@ pub fn save_current(
     save_locked(session, backup_root).map(Some)
 }
 
-/// Write the document somewhere else. The file being edited keeps its unsaved edits, and the
-/// session keeps pointing at it: saying otherwise would be a lie the user pays for.
+/// The gate's save for a document that has never had a file: write it where the user has just been
+/// asked, and the session points there afterwards (decision 24, B2).
+///
+/// Unconditional, unlike [`save_current`]: the user was asked for this path because the document
+/// was dirty and had nowhere to go, and a session that has been closed under the question is
+/// `NoDocument` here rather than a silent write.
+pub fn save_current_as(
+    slot: &SessionSlot,
+    destination: &str,
+    backup_root: PathBuf,
+) -> Result<SubtitleSaved, SubtitleError> {
+    let mut guard = lock_recovering(slot);
+    let session = current(&mut guard)?;
+    // A file given to the document while the question was up answers it: Save writes there, and the
+    // gate never closes over a document that a copy elsewhere left unsaved.
+    if let Some(own) = session.path().map(Path::to_path_buf) {
+        crate::log::info!(
+            "close gate: the document was given {} while it was being asked, so {destination} is \
+             not written",
+            own.display()
+        );
+        return save_locked(session, backup_root);
+    }
+    save_as_locked(session, destination, backup_root)
+}
+
+/// Write the document somewhere else. A document with its own file keeps its unsaved edits and
+/// keeps pointing at that file: saying otherwise would be a lie the user pays for.
 pub fn save_as(
     slot: &SessionSlot,
     revision: u64,
+    destination: &str,
+    backup_root: PathBuf,
+) -> Result<SubtitleSaved, SubtitleError> {
+    let mut guard = lock(slot)?;
+    let session = current(&mut guard)?;
+    check_revision(session, revision)?;
+    save_as_locked(session, destination, backup_root)
+}
+
+/// The write to a named destination, under a lock the caller already holds.
+fn save_as_locked(
+    session: &mut EditSession,
     destination: &str,
     backup_root: PathBuf,
 ) -> Result<SubtitleSaved, SubtitleError> {
@@ -632,10 +656,6 @@ pub fn save_as(
         ));
     }
 
-    let mut guard = lock(slot)?;
-    let session = current(&mut guard)?;
-    check_revision(session, revision)?;
-
     let bytes = session.to_bytes();
     let outcome = save_with_backup(
         Path::new(destination),
@@ -643,10 +663,15 @@ pub fn save_as(
         &BackupStore::new(backup_root),
     )
     .map_err(SubtitleError::from_io)?;
-    // A document with no file of its own has nothing to be out of step with, so this write is the
-    // one place its bytes now exist and it is not unsaved work any more. See BACKLOG.md M3.5.
+    // A document that has never had a file adopts the one it was just written to, and its bytes are
+    // now on disk, so it is not unsaved work any more (decision 24, B2).
     if session.path().is_none() {
+        session.adopt_path(outcome.destination.clone());
         session.mark_saved();
+        crate::log::info!(
+            "subtitle: a document with no file adopted {}",
+            outcome.destination.display()
+        );
     }
     Ok(saved(outcome, session.dirty()))
 }
@@ -699,8 +724,27 @@ pub fn backup_root(app: &AppHandle) -> Result<PathBuf, SubtitleError> {
         .join(BACKUP_DIR))
 }
 
+/// The lock the close gate takes, which recovers a poisoned session instead of refusing it.
+///
+/// The interactive commands refuse a poisoned session and that is right for them: a refused edit
+/// costs a retry. The close gate is the user's last chance to keep the work, so it recovers
+/// instead. Sound here because a mutation never edits the document in place: `plan::edit` builds a
+/// whole new document, `EditSession::commit` assigns it in one move, and `history` is only touched
+/// after the new document exists, so a panic leaves the session holding one whole document or the
+/// other and never half of one. The poison flag is cleared once the guard is in hand, or every
+/// later command would keep refusing a session this call just proved usable.
+fn lock_recovering(slot: &SessionSlot) -> MutexGuard<'_, Option<EditSession>> {
+    match slot.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            slot.clear_poison();
+            poisoned.into_inner()
+        }
+    }
+}
+
 /// A poisoned lock means a command panicked holding it, so the commands refuse rather than build on
-/// it. [`save_current`] deliberately does not: see the reasoning there.
+/// it. The close gate's saves deliberately do not: see [`lock_recovering`].
 fn lock(slot: &SessionSlot) -> Result<MutexGuard<'_, Option<EditSession>>, SubtitleError> {
     slot.lock().map_err(|_| {
         SubtitleError::new(

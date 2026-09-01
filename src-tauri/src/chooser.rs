@@ -51,12 +51,15 @@ impl ChooserError {
 
 /// What the chooser was asked for. Parsed once, so no platform branch matches on a string.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Choice {
+pub enum Choice {
     ProjectFolder,
     ProjectFile,
     Video,
     Subtitle,
     SubtitleSave,
+    /// Where a document that has never had a file goes, asked by Save rather than by Save a copy
+    /// (decision 24, B2).
+    SubtitleFirstSave,
 }
 
 impl Choice {
@@ -69,6 +72,7 @@ impl Choice {
             "video" => Some(Self::Video),
             "subtitle" => Some(Self::Subtitle),
             "subtitle-save" => Some(Self::SubtitleSave),
+            "subtitle-first-save" => Some(Self::SubtitleFirstSave),
             _ => None,
         }
     }
@@ -80,13 +84,14 @@ impl Choice {
             Self::Video => strings::CHOOSE_VIDEO,
             Self::Subtitle => strings::CHOOSE_SUBTITLE,
             Self::SubtitleSave => strings::CHOOSE_SUBTITLE_SAVE,
+            Self::SubtitleFirstSave => strings::CHOOSE_SUBTITLE_FIRST_SAVE,
         }
     }
 
     /// Naming a file to write is a different question from picking one that exists, and the chooser
     /// asks it differently: a filename field, and a warning before an overwrite.
     fn is_save(self) -> bool {
-        matches!(self, Self::SubtitleSave)
+        matches!(self, Self::SubtitleSave | Self::SubtitleFirstSave)
     }
 
     /// The word the log uses, which is also the literal the frontend sent.
@@ -97,6 +102,7 @@ impl Choice {
             Self::Video => "video",
             Self::Subtitle => "subtitle",
             Self::SubtitleSave => "subtitle-save",
+            Self::SubtitleFirstSave => "subtitle-first-save",
         }
     }
 }
@@ -212,15 +218,9 @@ fn write_memory(path: &Path, folders: &BTreeMap<String, String>) -> std::io::Res
 /// `suggested` is a path whose file name a save chooser opens with; the others ignore it.
 pub fn choose(
     app: &AppHandle,
-    kind: &str,
+    choice: Choice,
     suggested: Option<&str>,
 ) -> Result<Option<String>, ChooserError> {
-    let Some(choice) = Choice::parse(kind) else {
-        return Err(ChooserError::new(
-            ChooserErrorCode::ChooserFailed,
-            format!("unknown chooser kind {kind:?}"),
-        ));
-    };
     let Some(path) = pick(app, choice, suggested)? else {
         // Every outcome is said out loud: nothing else outside the webview can see one, and the
         // check for BACKLOG N1c is built on these two lines.
@@ -278,7 +278,7 @@ fn pick(
         }
         let action = match choice {
             Choice::ProjectFolder => gtk::FileChooserAction::SelectFolder,
-            Choice::SubtitleSave => gtk::FileChooserAction::Save,
+            _ if choice.is_save() => gtk::FileChooserAction::Save,
             _ => gtk::FileChooserAction::Open,
         };
         let dialog = gtk::FileChooserDialog::new(Some(choice.title()), parent.as_ref(), action);
@@ -387,7 +387,7 @@ fn pick(
     }
     let picked = match choice {
         Choice::ProjectFolder => dialog.blocking_pick_folder(),
-        Choice::SubtitleSave => dialog.blocking_save_file(),
+        _ if choice.is_save() => dialog.blocking_save_file(),
         _ => dialog.blocking_pick_file(),
     };
     let Some(file) = picked else {
@@ -426,7 +426,14 @@ pub async fn choose_path(
     kind: String,
     suggested: Option<String>,
 ) -> Result<Option<String>, ChooserError> {
-    blocking(move || choose(&app, &kind, suggested.as_deref())).await
+    // An unknown kind is a bug in the frontend, so nothing is raised and the caller is told.
+    let Some(choice) = Choice::parse(&kind) else {
+        return Err(ChooserError::new(
+            ChooserErrorCode::ChooserFailed,
+            format!("unknown chooser kind {kind:?}"),
+        ));
+    };
+    blocking(move || choose(&app, choice, suggested.as_deref())).await
 }
 
 #[cfg(test)]
@@ -483,6 +490,7 @@ mod tests {
             "video",
             "subtitle",
             "subtitle-save",
+            "subtitle-first-save",
         ];
         let mut titles = Vec::new();
         for kind in kinds {
@@ -500,8 +508,10 @@ mod tests {
     }
 
     #[test]
-    fn only_the_save_kind_names_a_file_to_write() {
-        assert!(Choice::parse("subtitle-save").expect("a kind").is_save());
+    fn only_the_save_kinds_name_a_file_to_write() {
+        for kind in ["subtitle-save", "subtitle-first-save"] {
+            assert!(Choice::parse(kind).expect("a kind").is_save());
+        }
         for kind in ["project-folder", "project-file", "video", "subtitle"] {
             assert!(
                 !Choice::parse(kind).expect("a kind").is_save(),

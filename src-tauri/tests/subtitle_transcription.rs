@@ -14,7 +14,8 @@ use sublore_edit::plan::Edit;
 use sublore_lib::dialog::CloseAnswer;
 use sublore_lib::subtitle::error::SubtitleErrorCode;
 use sublore_lib::subtitle::{
-    adopt_answered, adopt_if_clean, apply_edit, open_session, save, save_as, SessionSlot,
+    adopt_answered, adopt_if_clean, apply_edit, open_session, save, save_as, save_current,
+    save_current_as, SessionSlot,
 };
 
 /// The fixture the E2E spec transcribes is 60 s long; cue times are clamped to it.
@@ -142,7 +143,8 @@ fn the_adopted_document_edits_and_saves_like_any_other_and_the_edit_reaches_disk
     assert_eq!(patch.cues[0].text, "Corrected by hand");
     assert!(patch.can_undo, "the same undo the editor uses");
 
-    // Nowhere to write it back to until a destination is named: that is what Save as is for.
+    // Nowhere to write it back to until a destination is named, which is what the save chooser asks
+    // the user for (decision 24, B2).
     let refused = save(&slot, patch.revision, scratch.backups())
         .expect_err("a document with no file cannot be saved in place");
     assert_eq!(refused.code, SubtitleErrorCode::NoPath);
@@ -166,6 +168,87 @@ fn the_adopted_document_edits_and_saves_like_any_other_and_the_edit_reaches_disk
         .expect("the written file opens");
     assert_eq!(reopened.cues[0].text, "Corrected by hand");
     assert_eq!(reopened.cues.len(), patch.cue_count);
+}
+
+#[test]
+fn a_first_save_adopts_the_path_it_is_given_and_the_next_save_writes_there() {
+    let scratch = Scratch::new("first-save");
+    let slot = SessionSlot::default();
+    adopt_if_clean(&slot, &transcribed_srt())
+        .expect("nothing is in the way")
+        .expect("no question needed");
+
+    // The path the user chose in the save chooser, which this document has never had (decision 24,
+    // B2). The command layer asks; this is what it does with the answer.
+    let chosen = scratch.join("episode-01.srt");
+    let first = save_as(&slot, 0, &chosen.to_string_lossy(), scratch.backups())
+        .expect("the first save writes where it was told");
+    assert_eq!(first.path, chosen.to_string_lossy());
+    assert!(!first.dirty, "its bytes are on disk now");
+
+    // Adopted: an edit and a save in place, with no destination named, reach that same file.
+    let patch =
+        apply_edit(&slot, 0, text(0, "Corrected after the first save")).expect("still open");
+    let again = save(&slot, patch.revision, scratch.backups())
+        .expect("a document that has a file can be saved in place");
+    assert_eq!(again.path, chosen.to_string_lossy());
+    assert!(!again.dirty);
+    assert!(
+        again.backup_path.is_some(),
+        "the first save's file was overwritten, so it was kept (CONTRIBUTING.md §3.3)"
+    );
+    let on_disk = String::from_utf8(fs::read(&chosen).expect("readable")).expect("UTF-8");
+    assert!(
+        on_disk.contains("Corrected after the first save"),
+        "{on_disk}"
+    );
+}
+
+#[test]
+fn the_close_gates_save_writes_a_document_with_no_file_where_it_is_told() {
+    let scratch = Scratch::new("gate-first-save");
+    let slot = SessionSlot::default();
+    adopt_if_clean(&slot, &transcribed_srt())
+        .expect("nothing is in the way")
+        .expect("no question needed");
+
+    // Without a path the gate's own save has nowhere to go, which is what makes it ask.
+    let refused = save_current(&slot, scratch.backups())
+        .expect_err("a document with no file cannot be saved in place");
+    assert_eq!(refused.code, SubtitleErrorCode::NoPath);
+
+    let chosen = scratch.join("from-the-gate.srt");
+    let written = save_current_as(&slot, &chosen.to_string_lossy(), scratch.backups())
+        .expect("the answer to that question is a path, and this writes there");
+    assert_eq!(written.path, chosen.to_string_lossy());
+    assert!(!written.dirty, "the gate may close the window now");
+    let on_disk = String::from_utf8(fs::read(&chosen).expect("readable")).expect("UTF-8");
+    assert!(on_disk.contains("terminology"), "the cues are on disk");
+
+    // Nothing more to write, so a second pass over the same session is not another save.
+    assert!(save_current(&slot, scratch.backups())
+        .expect("the document is clean")
+        .is_none());
+}
+
+#[test]
+fn the_gates_save_writes_the_document_s_own_file_when_it_was_given_one_while_it_asked() {
+    let scratch = Scratch::new("gate-overtaken");
+    let slot = SessionSlot::default();
+    let file = scratch.copy_of("fixtures/subtitles/srt/clean/basic-lf.srt");
+    edited_document(&slot, &file);
+
+    // The interleaving this guards: the gate asked a document with no file where it goes, and by
+    // the time the answer came the document had a file and edits that are not in it.
+    let elsewhere = scratch.join("not-this-one.srt");
+    let written = save_current_as(&slot, &elsewhere.to_string_lossy(), scratch.backups())
+        .expect("a document with a file has somewhere to be saved");
+
+    assert_eq!(written.path, file.to_string_lossy(), "its own file");
+    assert!(!written.dirty, "the gate may close the window now");
+    assert!(!elsewhere.exists(), "the stale answer wrote nothing");
+    let saved = String::from_utf8(fs::read(&file).expect("readable")).expect("UTF-8");
+    assert!(saved.contains("Edited and not saved"), "{saved}");
 }
 
 #[test]

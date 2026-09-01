@@ -122,8 +122,7 @@ export const en = {
         "This format cannot hold that text. Remove the blank line or the line break and try again.",
       editRefused: "Sublore did not make that change, so the file is exactly as it was.",
       unsavedChanges: "This file has changes that are not saved. Save them, or discard them.",
-      noPath:
-        "This document has never been saved, so Sublore does not know where to write it. Use Save as.",
+      noPath: "This document has never been saved, so Sublore does not know where to write it.",
       transcriptionGone:
         "Those cues are gone: another transcription has started since. Run it again.",
       commandFailed: "Sublore could not finish that action. Restart Sublore if it happens again.",
