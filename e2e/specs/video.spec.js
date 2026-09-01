@@ -88,7 +88,7 @@ describe("video playback", () => {
     );
 
     const error = await browser.execute(
-      () => document.querySelector(".app__error")?.textContent ?? null,
+      () => document.querySelector(".statusbar__video-error")?.textContent ?? null,
     );
     expect(error).toBe(null);
   });

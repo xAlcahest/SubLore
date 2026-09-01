@@ -1,0 +1,110 @@
+/* The project rail. T7 gives it the shape the mockup draws; this is what M4.4 left, re-parented. */
+
+.project {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.project__new-episode {
+  flex: 1;
+  min-width: 10rem;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+/* Bounded and clipped: these hold whatever path the chooser answered, and a long one growing the
+   row moves every button beside it. */
+.project__path,
+.project__file-path {
+  flex: 0 1 16rem;
+  min-width: 8rem;
+  max-width: 16rem;
+  overflow: hidden;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.project button {
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.project__role {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.project__status,
+.project__error {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.project__error {
+  color: var(--ink-error);
+}
+
+/* The one part of the rail that grows: it takes whatever the controls above it leave. */
+.project__episodes {
+  flex: 1;
+  min-height: 4rem;
+  margin: 0;
+  padding: 0.25rem 0.75rem;
+  overflow-y: auto;
+  list-style: none;
+  font-size: 0.875rem;
+}
+
+.project__episode--selected {
+  font-weight: 600;
+}
+
+.project__episode-title {
+  padding: 0.1rem 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.project__files {
+  margin: 0;
+  padding: 0 0 0.25rem 1rem;
+  list-style: none;
+  font-weight: 400;
+}
+
+.project__file,
+.project__none {
+  margin: 0;
+  color: var(--ink-dim);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.project__none {
+  padding-left: 1rem;
+}

@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { choosePath, type ChooseKind } from "./chooser";
 import CueList from "./components/CueList";
 import ProjectPanel from "./components/ProjectPanel";
+import StatusBar from "./components/StatusBar";
 import SubtitleBar from "./components/SubtitleBar";
 import TranscribeBar from "./components/TranscribeBar";
 import VideoControls from "./components/VideoControls";
@@ -12,7 +13,7 @@ import { useProject } from "./hooks/useProject";
 import { useStartupFiles } from "./hooks/useStartupFiles";
 import { useSubtitleFile } from "./hooks/useSubtitleFile";
 import { useTranscription } from "./hooks/useTranscription";
-import { useVideoPlayer, videoErrorMessage } from "./hooks/useVideoPlayer";
+import { useVideoPlayer } from "./hooks/useVideoPlayer";
 import "./App.css";
 
 export default function App() {
@@ -85,36 +86,16 @@ export default function App() {
     await subtitle.adoptTranscription(runId);
   }
 
+  const dirty = subtitle.dirty || editorOpen;
+
   return (
-    <main className="app">
-      <aside className="sidebar">
-        <ProjectPanel
-          busy={project.busy}
-          project={project.project}
-          deleted={project.deleted}
-          error={project.error}
-          onCreate={(folder) => void project.create(folder)}
-          onOpen={(folder) => void project.open(folder)}
-          onDelete={() => void project.remove()}
-          onAddEpisode={(title) => void project.addEpisode(title)}
-          onAttachFile={(episodeId, role, path) => void project.attachFile(episodeId, role, path)}
-          onChoosePath={project.choosePath}
-        />
-      </aside>
-      <div className="workspace">
+    <div className="shell">
+      {/* The command bars M0 to M4 left behind. T3 replaces them with a menu bar and a toolbar. */}
+      <header className="shell__chrome">
         <VideoOpenBar busy={state.status === "loading"} onOpen={(path) => void open(path)} />
-        {errorCode !== null && (
-          <p className="app__error" role="alert">
-            {videoErrorMessage(errorCode)}
-          </p>
-        )}
         <SubtitleBar
           summary={subtitle.summary}
-          saved={subtitle.saved}
-          savedInPlace={subtitle.savedInPlace}
-          error={subtitle.error}
-          dirty={subtitle.dirty || editorOpen}
-          truncated={subtitle.truncated}
+          dirty={dirty}
           canUndo={subtitle.canUndo}
           canRedo={subtitle.canRedo}
           blocked={subtitle.blockedPath !== null}
@@ -132,27 +113,62 @@ export default function App() {
           adoptedRunId={subtitle.adoptedRunId}
           onUse={(runId) => void adoptTranscription(runId)}
         />
-        <VideoStage hasVideo={ready} onRegionChange={setRegion} />
-        <VideoControls
-          enabled={ready}
-          paused={state.paused}
-          duration={state.duration ?? 0}
-          position={position}
-          onToggle={() => void togglePlayback()}
-          onSeek={(target) => void seek(target)}
-        />
-        <CueList
-          key={subtitle.openId}
-          cues={subtitle.cues}
-          multiline={subtitle.summary?.format !== "ass"}
-          flushRef={flushEditor}
-          onEditingChange={setEditorOpen}
-          onCommit={subtitle.setText}
-          onUndo={subtitle.undo}
-          onRedo={subtitle.redo}
-          onSave={saveDocument}
-        />
+      </header>
+      <div className="shell__body">
+        <aside className="shell__rail">
+          <ProjectPanel
+            busy={project.busy}
+            project={project.project}
+            deleted={project.deleted}
+            error={project.error}
+            onCreate={(folder) => void project.create(folder)}
+            onOpen={(folder) => void project.open(folder)}
+            onDelete={() => void project.remove()}
+            onAddEpisode={(title) => void project.addEpisode(title)}
+            onAttachFile={(episodeId, role, path) => void project.attachFile(episodeId, role, path)}
+            onChoosePath={project.choosePath}
+          />
+        </aside>
+        <div className="shell__main">
+          <div className="shell__top">
+            <section className="shell__video">
+              <VideoStage hasVideo={ready} onRegionChange={setRegion} />
+              <VideoControls
+                enabled={ready}
+                paused={state.paused}
+                duration={state.duration ?? 0}
+                position={position}
+                onToggle={() => void togglePlayback()}
+                onSeek={(target) => void seek(target)}
+              />
+            </section>
+            {/* Empty until the waveform (M2.4) and the current line (T5) land beside the video. */}
+            <section className="shell__tools" />
+          </div>
+          <section className="shell__grid">
+            <CueList
+              key={subtitle.openId}
+              cues={subtitle.cues}
+              multiline={subtitle.summary?.format !== "ass"}
+              flushRef={flushEditor}
+              onEditingChange={setEditorOpen}
+              onCommit={subtitle.setText}
+              onUndo={subtitle.undo}
+              onRedo={subtitle.redo}
+              onSave={saveDocument}
+            />
+          </section>
+        </div>
       </div>
-    </main>
+      <StatusBar
+        summary={subtitle.summary}
+        dirty={dirty}
+        truncated={subtitle.truncated}
+        saved={subtitle.saved}
+        savedInPlace={subtitle.savedInPlace}
+        subtitleError={subtitle.error}
+        videoErrorCode={errorCode}
+      />
+    </div>
   );
 }

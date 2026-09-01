@@ -64,12 +64,13 @@ let checksRun = 0;
  * Points in the current shell, relative to the toplevel origin, measured rather than guessed.
  *
  * This script has no DOM, so it reaches the buttons by pixel. Every layout change moves them, and
- * M2.0's remaining tasks will move them again. When this check reports "no chooser after 8 clicks",
- * the clicks are landing on nothing and these are what to re-measure.
+ * M2.0's remaining tasks will move them again: T2 put the rail under the chrome region and moved
+ * all three down by 186 px. When this check reports "no chooser after 8 clicks", the clicks are
+ * landing on nothing and these are what to re-measure, from a screenshot of this check's own window.
  */
-const CHOOSE_FOLDER = { x: 52, y: 85 };
-const CREATE_PROJECT = { x: 136, y: 85 };
-const CHOOSE_FILE = { x: 52, y: 291 };
+const CHOOSE_FOLDER = { x: 52, y: 271 };
+const CREATE_PROJECT = { x: 136, y: 271 };
+const CHOOSE_FILE = { x: 52, y: 477 };
 
 /** The two chooser titles. Frozen contract with src-tauri/src/strings.rs. */
 const FOLDER_TITLE = "Choose a project folder";
