@@ -145,7 +145,7 @@ Two items jump the queue by owner decision. Full reasoning in `decisions.md`; th
 
 ## M2 — Editor with video and waveform (tasks detailed 2026-08-28)
 
-Before M2.0 starts: `x11-vs-render-api.md` records four stale citations that M2.0's own preparation documents carry — `video/mod.rs:106` in `decisions.md`, `shell-layout.md` and `post-v1-plan.md`, and `video/mod.rs:196-197` in `shell-layout.md`. Fix them there, or M2.0 is designed against line numbers that moved.
+M2.0's precondition is met. `x11-vs-render-api.md` recorded four stale citations that M2.0's preparation documents carried — `video/mod.rs:106` in `decisions.md`, `shell-layout.md` and `post-v1-plan.md`, and `video/mod.rs:196-197` in `shell-layout.md`. All four were corrected in the planning archive on 2026-09-01, against the code as it stands: `d224f3c` derives the surface's visibility, so the two calls those addresses named have one caller each now. T1 has landed.
 
 
 Goal: the free product's core: cue list, text editing, timing adjust against waveform, side-by-side source/target view.
