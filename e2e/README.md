@@ -159,7 +159,7 @@ A harness that runs nothing must not report success. WebdriverIO does not reliab
 specs, so `wdio.conf.js` asserts the count itself:
 
 ```js
-const EXPECTED_TESTS = 39;
+const EXPECTED_TESTS = 53;
 ```
 
 `onComplete` throws if fewer than that many tests passed, which covers a deleted spec file, an
