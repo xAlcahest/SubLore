@@ -119,7 +119,7 @@ async function openSubtitle(toplevel, file) {
 
 /** Name the copy in the save chooser. Its filename field is what the destination box used to be. */
 async function saveCopyTo(toplevel, destination) {
-  await clickElement(toplevel, ".subbar__save");
+  await clickElement(toplevel, ".subbar__save-copy");
   const chooser = await waitForChooser("Save a copy of the subtitle");
   await answerChooser(chooser, destination, "save a copy");
   focusWindow(toplevel.id);

@@ -205,14 +205,14 @@ belonged to — `.bar__input`, `.subbar__input` and `.subbar__dest` — and noth
 more.
 
 `.bar__button`, `.app__error`, `.stage__surface`, `.stage__empty`, `.controls__button`,
-`.controls__slider`, `.subbar__open`, `.subbar__save`, `.subbar__status`, `.subbar__error`,
+`.controls__slider`, `.subbar__open`, `.subbar__save-copy`, `.subbar__status`, `.subbar__error`,
 `.project__path`, `.project__choose-folder`, `.project__create`, `.project__open`, `.project__delete`,
 `.project__status`, `.project__error`, `.project__episodes`, `.project__episode`,
 `.project__episode--selected`, `.project__episode-title`, `.project__files`, `.project__file`,
 `.project__new-episode`, `.project__add-episode`, `.project__file-path`, `.project__choose-file`,
 `.project__role-media`, `.project__role-source`, `.project__role-target`, `.project__attach`
 
-Added by M2.3: `.subbar__savefile`, `.subbar__undo`, `.subbar__redo`, `.subbar__discard`, `.subbar__dirty`,
+Added by M2.3: `.subbar__save`, `.subbar__undo`, `.subbar__redo`, `.subbar__discard`, `.subbar__dirty`,
 `.subbar__truncated`, `.cuelist`, `.cuelist__sizer`, `.cuelist__row`, `.cuelist__row--selected`,
 `.cuelist__row--comment`, `.cuelist__pos`, `.cuelist__number`, `.cuelist__start`, `.cuelist__end`,
 `.cuelist__text`, `.cuelist__editor`, `.cuelist__empty`
