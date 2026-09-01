@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 
+import { choosePath, type ChooseKind } from "./chooser";
 import CueList from "./components/CueList";
 import ProjectPanel from "./components/ProjectPanel";
 import SubtitleBar from "./components/SubtitleBar";
@@ -27,10 +28,54 @@ export default function App() {
   // open editor is unsaved work whether or not it has reached the document yet.
   const flushEditor = useRef<() => Promise<void>>(() => Promise.resolve());
   const [editorOpen, setEditorOpen] = useState(false);
+  // The chooser is modal and answers on its own thread, so a second one asked for while it is up
+  // would sit behind the first. Every subtitle chooser is raised here, so one flag covers them all.
+  const [choosing, setChoosing] = useState(false);
 
-  async function saveWithPendingEdit(destination: string | null) {
+  async function pick(
+    kind: ChooseKind,
+    suggested: string | undefined,
+    act: (path: string) => void,
+  ) {
+    if (choosing) {
+      return;
+    }
+    setChoosing(true);
+    try {
+      const path = await choosePath(kind, suggested);
+      // Cancelled is an outcome, not a failure: nothing opens, nothing is written, nothing is said.
+      if (path !== null) {
+        act(path);
+      }
+    } finally {
+      setChoosing(false);
+    }
+  }
+
+  /**
+   * Save the document where it belongs. One that has never had a file is asked where that is, and
+   * points at the path it is given from then on, so the next save writes there (decision 24, B2).
+   */
+  async function saveDocument() {
     await flushEditor.current();
-    await (destination === null ? subtitle.save() : subtitle.saveAs(destination));
+    if (subtitle.summary === null) {
+      return;
+    }
+    if (subtitle.summary.path === null) {
+      await pick("subtitle-first-save", undefined, (path) => void subtitle.saveAs(path));
+      return;
+    }
+    await subtitle.save();
+  }
+
+  /** A copy elsewhere, which leaves a document with a file of its own unsaved. */
+  async function saveCopy() {
+    await flushEditor.current();
+    // The chooser opens on the open file's own name, which is what a copy is usually called; a
+    // document that has never had a file has no name to offer.
+    await pick("subtitle-save", subtitle.summary?.path ?? undefined, (path) => {
+      void subtitle.saveAs(path);
+    });
   }
 
   async function adoptTranscription(runId: number) {
@@ -73,10 +118,11 @@ export default function App() {
           canUndo={subtitle.canUndo}
           canRedo={subtitle.canRedo}
           blocked={subtitle.blockedPath !== null}
-          onOpen={(path) => void subtitle.open(path)}
+          choosing={choosing}
+          onOpen={() => void pick("subtitle", undefined, (path) => void subtitle.open(path))}
           onDiscard={() => void subtitle.discardAndOpen()}
-          onSave={() => void saveWithPendingEdit(null)}
-          onSaveAs={(destination) => void saveWithPendingEdit(destination)}
+          onSave={() => void saveDocument()}
+          onSaveCopy={() => void saveCopy()}
           onUndo={() => void subtitle.undo()}
           onRedo={() => void subtitle.redo()}
         />
@@ -104,7 +150,7 @@ export default function App() {
           onCommit={subtitle.setText}
           onUndo={subtitle.undo}
           onRedo={subtitle.redo}
-          onSave={subtitle.save}
+          onSave={saveDocument}
         />
       </div>
     </main>

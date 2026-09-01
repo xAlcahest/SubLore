@@ -1,4 +1,5 @@
 /* global describe, it, before, document, window */
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -15,10 +16,17 @@ import {
   stubArgv,
   stubPid,
 } from "../lib/asr.js";
-import { answerChooser, waitForChooser } from "../lib/chooser.js";
+import { answerChooser, cancelChooser, findChooser, waitForChooser } from "../lib/chooser.js";
 import { answerDialog, waitForUnsavedDialog, waitForUnsavedDialogGone } from "../lib/gtk-dialog.js";
 import { clickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
-import { repoRoot, requireVideoFixture, windowHeight, windowWidth } from "../lib/paths.js";
+import {
+  closeWindowTool,
+  repoRoot,
+  requireCloseWindowTool,
+  requireVideoFixture,
+  windowHeight,
+  windowWidth,
+} from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
 
@@ -31,14 +39,18 @@ const FIXTURE_MS = 60000;
 /** What is typed over a cue of the transcription, and over one of the file it was saved to. */
 const CORRECTION = "Corrected by hand in the grid";
 const SECOND_EDIT = "Edited while a transcription was running";
+/** Typed after a first save, to prove the save that follows writes the file it adopted. */
+const AFTER_FIRST_SAVE = "Edited after the first save";
+/** The save chooser a document with no file raises. Frozen contract with src-tauri/src/strings.rs. */
+const FIRST_SAVE_TITLE = "Save the subtitle";
 
 /** Writes go to the harness temp dir, never into the repo and never beside a fixture. */
-function saveDirectory() {
+function saveDirectory(name) {
   const dataHome = process.env.SUBLORE_E2E_DATA_HOME;
   if (typeof dataHome !== "string" || dataHome === "") {
     throw new Error("SUBLORE_E2E_DATA_HOME is not set; e2e/wdio.conf.js sets it for every run.");
   }
-  const directory = path.join(dataHome, "transcription-save");
+  const directory = path.join(dataHome, name);
   rmSync(directory, { recursive: true, force: true });
   mkdirSync(directory, { recursive: true });
   return directory;
@@ -198,12 +210,18 @@ describe("transcription", () => {
   let toplevel = null;
   let fixture = null;
   let saveDir = null;
+  /** Where the first-save tests write, kept apart so "nothing was written" is exact. */
+  let firstSaveDir = null;
+  /** The file a first save gave the document, which the save after it has to write to. */
+  let adopted = null;
   /** The bytes the transcription was saved to, so a later step can prove they did not move. */
   let saved = null;
 
   before(async () => {
     fixture = requireVideoFixture();
-    saveDir = saveDirectory();
+    saveDir = saveDirectory("transcription-save");
+    firstSaveDir = saveDirectory("first-save");
+    requireCloseWindowTool();
     toplevel = await waitFor(findToplevel, {
       timeout: 30000,
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
@@ -307,8 +325,8 @@ describe("transcription", () => {
     expect(words(await rowText(1))).toBe(words(cues[0].text));
     // Unsaved from the first moment: these bytes exist nowhere but in the session.
     expect(await present(".subbar__dirty")).toBe(true);
-    // Nowhere to write it back to yet, so the in-place save is not offered; a copy is.
-    expect(await propertyOf(".subbar__savefile", "disabled")).toBe(true);
+    // Both saves are offered: Save asks where a document with no file goes (decision 24, B2).
+    expect(await propertyOf(".subbar__savefile", "disabled")).toBe(false);
     expect(await propertyOf(".subbar__save", "disabled")).toBe(false);
     expect(await textOf(".subbar__error")).toBe(null);
 
@@ -385,7 +403,7 @@ describe("transcription", () => {
     await waitForSubtitleStatus(`SRT · ${cues.length} cues · LF`);
     expect(words(await rowText(1))).toBe(words(cues[0].text));
     expect(await present(".subbar__dirty")).toBe(true);
-    expect(await propertyOf(".subbar__savefile", "disabled")).toBe(true);
+    expect(await propertyOf(".subbar__savefile", "disabled")).toBe(false);
     // The result is the document now, so there is nothing left to offer.
     expect(await propertyOf(".asrbar__use", "tagName")).toBe(null);
     // Discarding drops edits that were never on disk; it never rewrites the file they came from.
@@ -465,6 +483,91 @@ describe("transcription", () => {
     // label on the screen: it is on the command line.
     expect(stubArgv()).toContain("-ng");
     expect(await textOf(".asrbar__error")).toBe(null);
+  });
+
+  // Decision 24, B2: the document on screen is the transcription the CPU run left, and it has
+  // never had a file. These four drive its first save through the window.
+  it("asks a document with no file where it goes, and cancelling writes nothing", async () => {
+    expect(await present(".subbar__dirty")).toBe(true);
+
+    await clickElement(toplevel, ".subbar__savefile");
+    const chooser = await waitForChooser(FIRST_SAVE_TITLE);
+    await cancelChooser(chooser, "first save");
+    focusWindow(toplevel.id);
+
+    // Nothing written, nothing lost, and the question can be asked again.
+    expect(readdirSync(firstSaveDir)).toEqual([]);
+    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await propertyOf(".subbar__savefile", "disabled")).toBe(false);
+  });
+
+  it("writes it where the chooser was answered, and it is not unsaved work any more", async () => {
+    adopted = path.join(firstSaveDir, "first-save.srt");
+    const firstCue = await rowText(1);
+    expect(words(firstCue).length).toBeGreaterThan(0);
+
+    await clickElement(toplevel, ".subbar__savefile");
+    const chooser = await waitForChooser(FIRST_SAVE_TITLE);
+    await answerChooser(chooser, adopted, "first save");
+    focusWindow(toplevel.id);
+    await waitFor(async () => (await textOf(".subbar__status"))?.includes(adopted) === true, {
+      timeout: 20000,
+      message: `the status line to report the file written at ${adopted}`,
+    });
+
+    expect(await present(".subbar__dirty")).toBe(false);
+    // Saved, not "saved a copy to": this file is the document's own from now on.
+    expect(await textOf(".subbar__status")).toContain(`Saved ${adopted}`);
+    expect(readdirSync(firstSaveDir)).toEqual(["first-save.srt"]);
+    expect(words(readFileSync(adopted, "utf8"))).toContain(words(firstCue));
+  });
+
+  it("writes to that same file on Ctrl+S afterwards, with no chooser", async () => {
+    await editRow(toplevel, 1, AFTER_FIRST_SAVE);
+    expect(await present(".subbar__dirty")).toBe(true);
+
+    focusWindow(toplevel.id);
+    pressKey("ctrl+s");
+    await waitFor(async () => ((await present(".subbar__dirty")) === false ? true : null), {
+      timeout: 20000,
+      message: "the dirty marker to clear after Ctrl+S wrote the file the document adopted",
+    });
+
+    // Asked nobody where to go: it already knows, which is what adopting the path means.
+    expect(findChooser(FIRST_SAVE_TITLE)).toBe(null);
+    expect(readFileSync(adopted, "utf8")).toContain(AFTER_FIRST_SAVE);
+    expect(readdirSync(firstSaveDir)).toEqual(["first-save.srt"]);
+    expect(await textOf(".subbar__error")).toBe(null);
+  });
+
+  it("holds the window open when the close gate's Save is asked and the chooser is cancelled", async () => {
+    // A fresh transcription, so the document in the way has no file again. The one on screen was
+    // just saved, so nothing is asked before it is replaced.
+    setStubMode("fast");
+    await startRun(toplevel);
+    await waitForStatus(" cues");
+    await waitFor(async () => ((await present(".subbar__dirty")) === true ? true : null), {
+      timeout: 30000,
+      message: "the new transcription to become the open document",
+    });
+    const before = readdirSync(firstSaveDir);
+
+    execFileSync("python3", [closeWindowTool, toplevel.id], { stdio: "inherit", timeout: 15000 });
+    const dialog = await waitForUnsavedDialog();
+    answerDialog(dialog, "save");
+    await waitForUnsavedDialogGone("Save");
+
+    // The gate's Save has nowhere to write, so it asks — and cancelling keeps the window and the
+    // work in it (decision 17, decision 24 B2).
+    const chooser = await waitForChooser(FIRST_SAVE_TITLE);
+    await cancelChooser(chooser, "the close gate's first save");
+    focusWindow(toplevel.id);
+
+    expect(await present(".subbar__dirty")).toBe(true);
+    expect((await shownCues()).length).toBeGreaterThan(0);
+    expect(readdirSync(firstSaveDir)).toEqual(before);
+    expect(readFileSync(adopted, "utf8")).toContain(AFTER_FIRST_SAVE);
   });
 
   it("refuses a damaged model and never hands it to the sidecar", async () => {

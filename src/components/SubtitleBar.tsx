@@ -1,6 +1,3 @@
-import { useState } from "react";
-
-import { choosePath } from "../chooser";
 import {
   subtitleErrorDetail,
   subtitleErrorMessage,
@@ -21,10 +18,12 @@ type SubtitleBarProps = {
   canRedo: boolean;
   /** Set when an open was refused because the file on screen has unsaved edits. */
   blocked: boolean;
-  onOpen: (path: string) => void;
+  /** Set while a chooser is up. It is modal, so nothing here may raise a second one behind it. */
+  choosing: boolean;
+  onOpen: () => void;
   onDiscard: () => void;
   onSave: () => void;
-  onSaveAs: (destination: string) => void;
+  onSaveCopy: () => void;
   onUndo: () => void;
   onRedo: () => void;
 };
@@ -40,49 +39,26 @@ export default function SubtitleBar({
   canUndo,
   canRedo,
   blocked,
+  choosing,
   onOpen,
   onDiscard,
   onSave,
-  onSaveAs,
+  onSaveCopy,
   onUndo,
   onRedo,
 }: SubtitleBarProps) {
-  // The chooser is modal and answers on its own thread, so a second click while it is up would
-  // raise a second one behind the first.
-  const [choosing, setChoosing] = useState(false);
   const detail = error === null ? null : subtitleErrorDetail(error);
-
-  async function pick(kind: "subtitle" | "subtitle-save", act: (path: string) => void) {
-    setChoosing(true);
-    try {
-      // A save chooser opens on the open file's own name, which is what a copy is usually called.
-      // A document that has never had a file has no name to offer.
-      const from = kind === "subtitle-save" ? (summary?.path ?? undefined) : undefined;
-      const path = await choosePath(kind, from);
-      // Cancelled is an outcome, not a failure: nothing opens, nothing is written, nothing is said.
-      if (path !== null) {
-        act(path);
-      }
-    } finally {
-      setChoosing(false);
-    }
-  }
 
   return (
     <>
       <div className="subbar">
-        <button
-          className="subbar__open"
-          type="button"
-          disabled={choosing}
-          onClick={() => void pick("subtitle", onOpen)}
-        >
+        <button className="subbar__open" type="button" disabled={choosing} onClick={onOpen}>
           {en.subtitle.open}
         </button>
         <button
           className="subbar__savefile"
           type="button"
-          disabled={summary === null || summary.path === null || !dirty}
+          disabled={summary === null || !dirty || choosing}
           onClick={onSave}
         >
           {en.subtitle.saveFile}
@@ -102,7 +78,7 @@ export default function SubtitleBar({
           className="subbar__save"
           type="button"
           disabled={summary === null || choosing}
-          onClick={() => void pick("subtitle-save", onSaveAs)}
+          onClick={onSaveCopy}
         >
           {en.subtitle.save}
         </button>
