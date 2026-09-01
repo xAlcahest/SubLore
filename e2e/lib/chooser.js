@@ -125,6 +125,26 @@ export async function answerChooser(chooser, chosen, what) {
   }
 }
 
+/**
+ * Accept a folder chooser with whatever it is already showing, through its accept button.
+ *
+ * This is how a check outside the app asks where the chooser opened: a `SelectFolder` chooser hands
+ * back its current folder, and one that opened on GTK's Recent list cannot be accepted at all —
+ * there the accept button is insensitive (measured, see `answerChooser`). So a chooser that opened
+ * where it was told answers with that folder, and one that ignored it stays on screen and fails
+ * here. Alt+O is the mnemonic `chooser.rs` gives the button.
+ */
+export async function acceptChooser(chooser, what) {
+  focusWindow(chooser.id);
+  pressKey("alt+o");
+  if (!(await chooserClosed(chooser))) {
+    throw new Error(
+      `the ${what} chooser would not accept what it was showing, so it did not open at a folder ` +
+        `it could hand back — GTK's Recent list is where that happens.\n${rootTree()}`,
+    );
+  }
+}
+
 /** Dismiss a chooser without choosing. The app reports this as a cancellation, not a failure. */
 export async function cancelChooser(chooser, what) {
   focusWindow(chooser.id);

@@ -24,18 +24,27 @@
  * project file appearing in the folder the picker returned, the file half and the cancellation by
  * the lines `project::choose_path` writes. A dialog that closed proves nothing on its own — a
  * keystroke that missed closes it just as well as one that landed.
+ *
+ * N7 lives here too, in a second run of the app over the same data home, because this is the only
+ * thing that drives a chooser without WebDriver. AC: "choosing a folder, closing the app and
+ * choosing again opens the chooser at the folder chosen last, proved by a check that fails when the
+ * stored path is ignored." Where a chooser opened is read the only way it can be read from outside:
+ * it is accepted with nothing chosen in it, and a `SelectFolder` chooser then hands back the folder
+ * it is showing. The other two criteria are here too: a remembered folder that has been deleted is
+ * dropped and its chooser still answers, and a chooser that was browsed elsewhere and then
+ * cancelled leaves the memory alone — which is what the run after it opens at.
  */
 import { spawn, spawnSync } from "node:child_process";
 import console from "node:console";
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
 import { appLog, waitForLog } from "../lib/applog.js";
-import { answerChooser, cancelChooser, clickUntilChooser } from "../lib/chooser.js";
+import { acceptChooser, answerChooser, cancelChooser, clickUntilChooser } from "../lib/chooser.js";
 import { appEnv } from "../lib/env.js";
-import { clickAt, focusWindow } from "../lib/input.js";
+import { clickAt, focusWindow, pressKey } from "../lib/input.js";
 import {
   repoRoot,
   requireAppBinary,
@@ -48,7 +57,7 @@ import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
 
 /** Gutting an assertion has to be as red as failing one, so the checks count themselves. */
-const EXPECTED_CHECKS = 9;
+const EXPECTED_CHECKS = 14;
 let checksRun = 0;
 
 /**
@@ -418,9 +427,99 @@ async function main() {
       state.exit === null,
       `the app exited with ${JSON.stringify(state.exit)}`,
     );
+
+    // N7, first half: a chooser browsed away from its opening folder and then dismissed. What the
+    // second run below proves depends on this one having really been cancelled, so it is asserted
+    // here rather than assumed: an Escape that missed would leave the same log as a memory the
+    // cancellation never touched.
+    const FOLDER_CANCELLED = /chooser: the project-folder choice was cancelled/g;
+    const cancelledBefore = (appLog(dataHome).match(FOLDER_CANCELLED) ?? []).length;
+    const browsed = await clickUntilChooser(toplevel, at(CHOOSE_FOLDER), FOLDER_TITLE, { alive });
+    // Alt+Home is GTK's own "go to the home folder", so this cancellation happens somewhere other
+    // than the folder that was chosen. A memory written from where the chooser was browsing would
+    // be the home folder, and the second run would say so.
+    focusWindow(browsed.id);
+    pressKey("alt+Home");
+    await cancelChooser(browsed, "folder");
+    check(
+      "a folder chooser browsed elsewhere and then dismissed comes back as a cancellation",
+      await waitFor(
+        () => (appLog(dataHome).match(FOLDER_CANCELLED) ?? []).length > cancelledBefore,
+        { timeout: 15000, message: "the cancellation this Escape caused" },
+      ).then(
+        () => true,
+        () => false,
+      ),
+      `Escape produced no cancellation beyond the ${cancelledBefore} already logged. ` +
+        `The app's log held:\n${appLog(dataHome)}`,
+    );
   } finally {
     cleanup(state);
     await reap(state);
+  }
+
+  // N7, second half: the same data home, a new process. Everything above is over, and what the app
+  // knows about the first run is now only what it wrote down.
+  const CHOSE_FOLDER = new RegExp(
+    `chooser: chose a project-folder: ${quoted(projectFolder)}$`,
+    "gm",
+  );
+  const chosenBefore = (appLog(dataHome).match(CHOSE_FOLDER) ?? []).length;
+  const second = launch(dataHome);
+  try {
+    const toplevel = await waitForWindow(second);
+    const at = (point) => ({ x: toplevel.absX + point.x, y: toplevel.absY + point.y });
+    const alive = () => second.exit === null;
+
+    // Accepted with nothing chosen in it, so the folder it hands back is the folder it opened at.
+    const reopened = await clickUntilChooser(toplevel, at(CHOOSE_FOLDER), FOLDER_TITLE, { alive });
+    await acceptChooser(reopened, "folder");
+    check(
+      "the folder chooser opened at the folder chosen before the app was closed",
+      await waitFor(() => (appLog(dataHome).match(CHOSE_FOLDER) ?? []).length > chosenBefore, {
+        timeout: 15000,
+        message: `a second choice of ${projectFolder}`,
+      }).then(
+        () => true,
+        () => false,
+      ),
+      `the chooser handed back something other than ${projectFolder}, so it did not open there. ` +
+        `The app's log held:\n${appLog(dataHome)}`,
+    );
+
+    // A remembered folder that is gone is a folder the user moved or deleted between sessions.
+    rmSync(projectFolder, { recursive: true, force: true });
+    const defaulted = await clickUntilChooser(toplevel, at(CHOOSE_FOLDER), FOLDER_TITLE, { alive });
+    check(
+      "a remembered folder that is no longer there is dropped instead of handed to the chooser",
+      await said(
+        dataHome,
+        new RegExp(
+          `chooser: the project-folder chooser's remembered folder is gone.*${quoted(projectFolder)}$`,
+          "m",
+        ),
+      ),
+      `nothing said ${projectFolder} was gone, so the chooser was opened at a folder that is not ` +
+        `there. The app's log held:\n${appLog(dataHome)}`,
+    );
+    await answerChooser(defaulted, dataHome, "folder");
+    check(
+      "and that chooser still opened, and still answers",
+      await said(
+        dataHome,
+        new RegExp(`chooser: chose a project-folder: ${quoted(dataHome)}$`, "m"),
+      ),
+      `${dataHome} never came back, so the chooser that opened over a deleted folder could not be ` +
+        `answered. The app's log held:\n${appLog(dataHome)}`,
+    );
+    check(
+      "the app survived the second run",
+      second.exit === null,
+      `the app exited with ${JSON.stringify(second.exit)}`,
+    );
+  } finally {
+    cleanup(second);
+    await reap(second);
   }
 
   if (checksRun < EXPECTED_CHECKS) {
