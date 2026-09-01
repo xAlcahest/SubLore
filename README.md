@@ -80,9 +80,9 @@ pnpm tauri dev
 
 ## Subtitle files
 
-Sublore opens SRT, VTT and ASS files, shows the format, the cue count and the line endings, and saves a copy elsewhere. There is no editor yet.
+Sublore opens SRT, VTT and ASS files, shows the format, the cue count and the line endings, and lists the cues. A cue's text can be edited in place, with undo and redo, and the file can be saved over itself or as a copy elsewhere. Timing, the side-by-side view and everything the termbase needs are not built yet.
 
-The file you open is never written to. "Save as" writes the copy atomically: a temporary file first, then a rename, so the destination is always either the old file or the new one and never something in between. If the destination already existed, its previous contents are kept as a timestamped backup, inside Sublore's own folder rather than next to your file:
+A file is written only when you ask for it, by saving. Both routes — over the file you opened, and as a copy elsewhere — write atomically: a temporary file first, then a rename, so the destination is always either the old file or the new one and never something in between. Whatever was there before is kept as a timestamped backup, inside Sublore's own folder rather than next to your file:
 
 - Linux: `~/.local/share/com.sublore.app/backups/`
 - Windows: `%APPDATA%\com.sublore.app\backups\`
@@ -163,7 +163,7 @@ pnpm build
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build
-cargo test --workspace
+cargo test --workspace --no-fail-fast
 ```
 
 ## Git hooks
@@ -174,7 +174,7 @@ Enable the repo's hooks once per clone:
 git config core.hooksPath .githooks
 ```
 
-The pre-commit hook runs `pnpm format:check`, `pnpm lint` and `cargo fmt --check`, and refuses the commit if any of them fails.
+The pre-commit hook runs `prettier --check` over the files being committed, then `pnpm lint` and `cargo fmt --check`, and refuses the commit if any of them fails. Formatting is checked on the staged files rather than the whole tree, because a working directory can hold files that are none of the repository's business; CI checks the whole tree.
 
 ## License
 
