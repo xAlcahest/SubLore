@@ -1,3 +1,6 @@
+//! Licensed under the GNU GPL v3 or later, with the section 7 additional permission for modules
+//! loaded through `sublore-module-api`. See LICENSE at the root of the repository.
+
 //! Lossless subtitle parsing and serialization for SRT, WEBVTT and ASS/SSA.
 //!
 //! The crate holds no I/O: it takes bytes and returns bytes, so the rule that a user's file is

@@ -1,3 +1,6 @@
+//! Licensed under the GNU GPL v3 or later, with the section 7 additional permission for modules
+//! loaded through `sublore-module-api`. See LICENSE at the root of the repository.
+
 pub mod asr;
 pub mod chooser;
 pub mod crash;
