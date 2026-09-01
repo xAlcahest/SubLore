@@ -1,3 +1,6 @@
+//! Licensed under the GNU GPL v3 or later, with the section 7 additional permission for modules
+//! loaded through `sublore-module-api`. See LICENSE at the root of the repository.
+
 //! The project database: one SQLite file per project, holding a series, its episodes, and the
 //! paths of the files attached to each episode.
 //!
