@@ -14,8 +14,8 @@ use sublore_edit::plan::Edit;
 use sublore_lib::dialog::CloseAnswer;
 use sublore_lib::subtitle::error::SubtitleErrorCode;
 use sublore_lib::subtitle::{
-    adopt_answered, adopt_if_clean, apply_edit, open_session, save, save_as, save_current,
-    save_current_as, SessionSlot,
+    adopt_answered, adopt_answered_at, adopt_if_clean, apply_edit, open_session, save, save_as,
+    save_current, save_current_as, SessionSlot,
 };
 
 /// The fixture the E2E spec transcribes is 60 s long; cue times are clamped to it.
@@ -368,4 +368,83 @@ fn a_save_that_cannot_be_written_replaces_nothing() {
     // The work is still in the session, which is the whole point of refusing.
     let patch = apply_edit(&slot, 1, text(1, "Still here")).expect("still open");
     assert!(patch.dirty);
+}
+
+/// The work in the way has no file, so Save asks for one. What the command layer does with that
+/// answer is below; the E2E in `asr.spec.js` drives the question itself. See BACKLOG.md M3.6.
+#[test]
+fn the_path_the_first_save_is_given_takes_the_work_in_the_way_before_the_replacement() {
+    let scratch = Scratch::new("adopt-first-save");
+    let slot = SessionSlot::default();
+    adopt_if_clean(&slot, &transcribed_srt())
+        .expect("nothing is in the way")
+        .expect("no question needed");
+    apply_edit(&slot, 0, text(0, "Work that must not be lost")).expect("the edit lands");
+
+    let chosen = scratch.join("in-the-way.srt");
+    let opened = adopt_answered_at(
+        &slot,
+        &transcribed_srt(),
+        &chosen.to_string_lossy(),
+        scratch.backups(),
+    )
+    .expect("the save has somewhere to go now");
+
+    // The work that was in the way is on disk, and the transcription is the document.
+    let written = String::from_utf8(fs::read(&chosen).expect("readable")).expect("UTF-8");
+    assert!(written.contains("Work that must not be lost"), "{written}");
+    assert_eq!(
+        opened.summary.path, None,
+        "the replacement has never had a file"
+    );
+    assert!(opened.dirty, "and it is unsaved work from the start");
+    assert!(opened.cues.len() > 1);
+}
+
+#[test]
+fn a_document_given_a_file_while_the_chooser_was_up_is_written_to_that_file() {
+    let scratch = Scratch::new("adopt-path-appeared");
+    let slot = SessionSlot::default();
+    let file = scratch.copy_of("fixtures/subtitles/srt/clean/basic-lf.srt");
+    edited_document(&slot, &file);
+
+    // The document has a file of its own by the time the answer arrives, so that is what Save
+    // writes and the chosen path is left alone.
+    let chosen = scratch.join("never-written.srt");
+    let opened = adopt_answered_at(
+        &slot,
+        &transcribed_srt(),
+        &chosen.to_string_lossy(),
+        scratch.backups(),
+    )
+    .expect("the document's own file takes the save");
+
+    assert!(!chosen.exists(), "the chosen path was not written");
+    let saved = String::from_utf8(fs::read(&file).expect("readable")).expect("UTF-8");
+    assert!(saved.contains("Edited and not saved"), "{saved}");
+    assert!(opened.cues.len() > 1);
+}
+
+#[test]
+fn a_first_save_writes_nothing_when_there_is_nothing_left_to_save() {
+    let scratch = Scratch::new("adopt-nothing-to-save");
+    let slot = SessionSlot::default();
+    let file = scratch.copy_of("fixtures/subtitles/srt/clean/basic-lf.srt");
+    let before = fs::read(&file).expect("readable");
+    open_session(&slot, &file.to_string_lossy()).expect("the fixture opens");
+
+    // Saved or closed while the chooser was up: an unasked-for write would change the mtime of a
+    // file the user only opened (CONTRIBUTING.md §3.1).
+    let chosen = scratch.join("never-written.srt");
+    let opened = adopt_answered_at(
+        &slot,
+        &transcribed_srt(),
+        &chosen.to_string_lossy(),
+        scratch.backups(),
+    )
+    .expect("a clean document needs no write");
+
+    assert!(!chosen.exists(), "the chosen path was not written");
+    assert_eq!(fs::read(&file).expect("readable"), before);
+    assert!(opened.cues.len() > 1);
 }
