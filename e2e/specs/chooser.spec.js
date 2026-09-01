@@ -205,7 +205,12 @@ describe("the chooser is the only way in", () => {
   it("writes nothing when the save chooser is dismissed", async () => {
     expect(readdirSync(saveFolder)).toEqual([]);
 
-    await cancelFrom(toplevel, ".subbar__save", "Save a copy of the subtitle", "subtitle-save");
+    await cancelFrom(
+      toplevel,
+      ".subbar__save-copy",
+      "Save a copy of the subtitle",
+      "subtitle-save",
+    );
 
     expect(readdirSync(saveFolder)).toEqual([]);
     expect(await textOf(".subbar__error")).toBe(null);

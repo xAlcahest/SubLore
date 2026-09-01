@@ -555,7 +555,7 @@ describe("cue list editing", () => {
   });
 
   it("saves the edit, and every other byte of the file is the byte that was there", async () => {
-    await clickElement(toplevel, ".subbar__savefile");
+    await clickElement(toplevel, ".subbar__save");
     await waitFor(async () => (await present(".subbar__dirty")) === false, {
       timeout: 20000,
       message: "the dirty marker to clear after a save",
@@ -611,7 +611,7 @@ describe("cue list editing", () => {
 
     // Save without pressing Enter first: the click blurs the editor, so the commit it causes and
     // the save must both land, in that order.
-    await clickElement(toplevel, ".subbar__savefile");
+    await clickElement(toplevel, ".subbar__save");
     await waitFor(async () => (await present(".subbar__dirty")) === false, {
       timeout: 20000,
       message: "the dirty marker to clear after saving an open editor",

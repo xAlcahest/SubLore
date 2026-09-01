@@ -328,8 +328,8 @@ describe("transcription", () => {
     // Unsaved from the first moment: these bytes exist nowhere but in the session.
     expect(await present(".subbar__dirty")).toBe(true);
     // Both saves are offered: Save asks where a document with no file goes (decision 24, B2).
-    expect(await propertyOf(".subbar__savefile", "disabled")).toBe(false);
     expect(await propertyOf(".subbar__save", "disabled")).toBe(false);
+    expect(await propertyOf(".subbar__save-copy", "disabled")).toBe(false);
     expect(await textOf(".subbar__error")).toBe(null);
 
     // The transcription wrote nothing at all: not beside the media, and nowhere Sublore saves.
@@ -348,7 +348,7 @@ describe("transcription", () => {
     expect(await propertyOf(".subbar__undo", "disabled")).toBe(false);
 
     const destination = path.join(saveDir, "from-transcription.srt");
-    await clickElement(toplevel, ".subbar__save");
+    await clickElement(toplevel, ".subbar__save-copy");
     const chooser = await waitForChooser("Save a copy of the subtitle");
     await answerChooser(chooser, destination, "save a copy");
     focusWindow(toplevel.id);
@@ -405,7 +405,7 @@ describe("transcription", () => {
     await waitForSubtitleStatus(`SRT · ${cues.length} cues · LF`);
     expect(words(await rowText(1))).toBe(words(cues[0].text));
     expect(await present(".subbar__dirty")).toBe(true);
-    expect(await propertyOf(".subbar__savefile", "disabled")).toBe(false);
+    expect(await propertyOf(".subbar__save", "disabled")).toBe(false);
     // The result is the document now, so there is nothing left to offer.
     expect(await propertyOf(".asrbar__use", "tagName")).toBe(null);
     // Discarding drops edits that were never on disk; it never rewrites the file they came from.
@@ -492,7 +492,7 @@ describe("transcription", () => {
   it("asks a document with no file where it goes, and cancelling writes nothing", async () => {
     expect(await present(".subbar__dirty")).toBe(true);
 
-    await clickElement(toplevel, ".subbar__savefile");
+    await clickElement(toplevel, ".subbar__save");
     const chooser = await waitForChooser(FIRST_SAVE_TITLE);
     await cancelChooser(chooser, "first save");
     focusWindow(toplevel.id);
@@ -501,7 +501,7 @@ describe("transcription", () => {
     expect(readdirSync(firstSaveDir)).toEqual([]);
     expect(await present(".subbar__dirty")).toBe(true);
     expect(await textOf(".subbar__error")).toBe(null);
-    expect(await propertyOf(".subbar__savefile", "disabled")).toBe(false);
+    expect(await propertyOf(".subbar__save", "disabled")).toBe(false);
   });
 
   it("writes it where the chooser was answered, and it is not unsaved work any more", async () => {
@@ -509,7 +509,7 @@ describe("transcription", () => {
     const firstCue = await rowText(1);
     expect(words(firstCue).length).toBeGreaterThan(0);
 
-    await clickElement(toplevel, ".subbar__savefile");
+    await clickElement(toplevel, ".subbar__save");
     const chooser = await waitForChooser(FIRST_SAVE_TITLE);
     await answerChooser(chooser, adopted, "first save");
     focusWindow(toplevel.id);

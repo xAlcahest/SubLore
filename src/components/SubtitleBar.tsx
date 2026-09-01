@@ -56,7 +56,7 @@ export default function SubtitleBar({
           {en.subtitle.open}
         </button>
         <button
-          className="subbar__savefile"
+          className="subbar__save"
           type="button"
           disabled={summary === null || !dirty || choosing}
           onClick={onSave}
@@ -75,7 +75,7 @@ export default function SubtitleBar({
           </button>
         )}
         <button
-          className="subbar__save"
+          className="subbar__save-copy"
           type="button"
           disabled={summary === null || choosing}
           onClick={onSaveCopy}

@@ -157,7 +157,7 @@ body {
 }
 
 .subbar__open,
-.subbar__save {
+.subbar__save-copy {
   padding: 0.35rem 0.9rem;
   font: inherit;
   font-size: 0.875rem;
@@ -326,7 +326,7 @@ body {
   font-weight: 600;
 }
 
-.subbar__savefile,
+.subbar__save,
 .subbar__undo,
 .subbar__redo,
 .subbar__discard {
