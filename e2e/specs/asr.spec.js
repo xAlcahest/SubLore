@@ -41,6 +41,8 @@ const CORRECTION = "Corrected by hand in the grid";
 const SECOND_EDIT = "Edited while a transcription was running";
 /** Typed after a first save, to prove the save that follows writes the file it adopted. */
 const AFTER_FIRST_SAVE = "Edited after the first save";
+/** Typed into the document a transcription is about to replace, so its save can be found on disk. */
+const IN_THE_WAY = "Work in the way of a transcription";
 /** The save chooser a document with no file raises. Frozen contract with src-tauri/src/strings.rs. */
 const FIRST_SAVE_TITLE = "Save the subtitle";
 
@@ -567,6 +569,62 @@ describe("transcription", () => {
     expect(await present(".subbar__dirty")).toBe(true);
     expect((await shownCues()).length).toBeGreaterThan(0);
     expect(readdirSync(firstSaveDir)).toEqual(before);
+    expect(readFileSync(adopted, "utf8")).toContain(AFTER_FIRST_SAVE);
+  });
+
+  // BACKLOG.md M3.6: the third route. The document on screen is the transcription the run above
+  // left, and it has never had a file either, so Save here has to ask the same question.
+  it("asks where the work in the way goes, and cancelling that chooser replaces nothing", async () => {
+    await editRow(toplevel, 1, IN_THE_WAY);
+    expect(await present(".subbar__dirty")).toBe(true);
+    const before = readdirSync(firstSaveDir);
+
+    setStubMode("fast");
+    await startRun(toplevel);
+    const dialog = await waitForUnsavedDialog();
+    answerDialog(dialog, "save");
+    await waitForUnsavedDialogGone("Save");
+
+    const chooser = await waitForChooser(FIRST_SAVE_TITLE);
+    await cancelChooser(chooser, "the transcription's first save");
+    focusWindow(toplevel.id);
+
+    // Nothing written, nothing replaced, and the work that was in the way is still on screen.
+    expect(readdirSync(firstSaveDir)).toEqual(before);
+    expect(await rowText(1)).toBe(IN_THE_WAY);
+    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await textOf(".subbar__error")).toBe(null);
+    // And the result is still there to be taken on a second answer.
+    expect(await propertyOf(".asrbar__use", "tagName")).toBe("BUTTON");
+  });
+
+  it("writes it where that chooser is answered, and then takes the new cues", async () => {
+    const replaced = path.join(firstSaveDir, "replaced.srt");
+    const cues = await shownCues();
+
+    await clickElement(toplevel, ".asrbar__use");
+    const dialog = await waitForUnsavedDialog();
+    answerDialog(dialog, "save");
+    await waitForUnsavedDialogGone("Save");
+    const chooser = await waitForChooser(FIRST_SAVE_TITLE);
+    await answerChooser(chooser, replaced, "the transcription's first save");
+    focusWindow(toplevel.id);
+
+    // The replacement is the signal: the row the work in the way held is not that text any more.
+    await waitFor(async () => ((await rowText(1)) === IN_THE_WAY ? null : true), {
+      timeout: 20000,
+      message: "the transcription to take the place of the document that was saved",
+    });
+    await waitForSubtitleStatus(`SRT · ${cues.length} cues · LF`);
+
+    // The work that was in the way is on disk, where the chooser was answered.
+    expect(readFileSync(replaced, "utf8")).toContain(IN_THE_WAY);
+    // The new cues are the document, unsaved and with no file of their own.
+    expect(words(await rowText(1))).toBe(words(cues[0].text));
+    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await propertyOf(".asrbar__use", "tagName")).toBe(null);
+    expect(await textOf(".subbar__error")).toBe(null);
+    // The file an earlier first save adopted was not touched by any of this.
     expect(readFileSync(adopted, "utf8")).toContain(AFTER_FIRST_SAVE);
   });
 

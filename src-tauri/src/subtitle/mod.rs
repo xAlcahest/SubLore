@@ -292,8 +292,8 @@ pub async fn subtitle_save_as(
 ///
 /// Nothing is written to disk here: the result lives in the session until the user saves it, and
 /// the media file is never touched (CONTRIBUTING.md §3.1). `Ok(None)` is the user answering Cancel,
-/// which leaves both the document that was open and the transcription result exactly as they were.
-/// See BACKLOG.md M3.5.
+/// or dismissing the first-save chooser Save raises, and either leaves the document that was open
+/// and the transcription result exactly as they were. See BACKLOG.md M3.5 and M3.6.
 #[tauri::command]
 pub async fn subtitle_adopt_transcription(
     app: AppHandle,
@@ -322,7 +322,24 @@ pub async fn subtitle_adopt_transcription(
     // Unsaved work is in the way, so the user is asked the same three answers the close gate asks
     // before anything replaces it (decision 24, B1).
     let answer = ask_about_unsaved(&app, window.label()).await?;
-    blocking(move || adopt_answered(&slot, &srt, answer, backups)).await
+    let answered = {
+        let (slot, srt, backups) = (Arc::clone(&slot), srt.clone(), backups.clone());
+        blocking(move || adopt_answered(&slot, &srt, answer, backups)).await
+    };
+    match answered {
+        // Save on a document that has never had a file asks where it goes, as the toolbar's Save
+        // and the close gate's already do (decision 24 B2, BACKLOG.md M3.6).
+        Err(error) if error.code == SubtitleErrorCode::NoPath => {
+            let Some(destination) = ask_first_save_path(&app).await? else {
+                // Cancelled: nothing is written, nothing is replaced, the cues stay.
+                return Ok(None);
+            };
+            blocking(move || adopt_answered_at(&slot, &srt, &destination, backups))
+                .await
+                .map(Some)
+        }
+        other => other,
+    }
 }
 
 // -------------------------------------------------------------------------------------------
@@ -414,6 +431,29 @@ pub fn adopt_answered(
     adopt_locked(&mut guard, srt).map(Some)
 }
 
+/// Write the document in the way where the user has just been asked to put it, then replace it.
+///
+/// The write and the replacement share one lock for the reason [`adopt_answered`] holds one: a
+/// save that fails replaces nothing. See BACKLOG.md M3.6.
+pub fn adopt_answered_at(
+    slot: &SessionSlot,
+    srt: &[u8],
+    destination: &str,
+    backup_root: PathBuf,
+) -> Result<SubtitleOpened, SubtitleError> {
+    let mut guard = lock(slot)?;
+    // A document closed or saved while the chooser was up has nothing to write; one given a file in
+    // the meantime writes there instead, and the chosen path is left alone (decision 24, B2).
+    if let Some(session) = guard.as_mut().filter(|session| session.dirty()) {
+        if session.path().is_some() {
+            save_locked(session, backup_root)?;
+        } else {
+            save_as_locked(session, destination, backup_root)?;
+        }
+    }
+    adopt_locked(&mut guard, srt)
+}
+
 /// The replacement itself: the generated SRT becomes a document with no file, unsaved from the
 /// first moment because these bytes exist nowhere else. See BACKLOG.md M3.5.
 fn adopt_locked(
@@ -467,6 +507,25 @@ async fn ask_about_unsaved(app: &AppHandle, label: &str) -> Result<CloseAnswer, 
     // Off the poll thread: this waits for a person. A dropped sender means the answer thread died
     // holding the question, which is the one case nobody answers, and Cancel keeps both documents.
     blocking(move || Ok(receive.recv().unwrap_or(CloseAnswer::Cancel))).await
+}
+
+/// Ask where a document that has never had a file goes. `Ok(None)` is the user dismissing the
+/// chooser; a chooser that could not be raised is a failed save rather than a cancellation, because
+/// the user asked for one and was never given the question. See BACKLOG.md M3.6.
+async fn ask_first_save_path(app: &AppHandle) -> Result<Option<String>, SubtitleError> {
+    let app = app.clone();
+    // Off the poll thread: the chooser waits for a person, and it refuses the main thread outright.
+    blocking(move || {
+        crate::chooser::choose(&app, crate::chooser::Choice::SubtitleFirstSave, None).map_err(
+            |error| {
+                SubtitleError::new(
+                    SubtitleErrorCode::CommandFailed,
+                    format!("the save chooser could not be raised: {error:?}"),
+                )
+            },
+        )
+    })
+    .await
 }
 
 /// Apply one mutation. Nothing is written to disk here: a save is its own command.
