@@ -51,6 +51,7 @@ anything; the probe reports the failed capture's exit status instead.
 | `scripts/close-gate-check.js`           | 12 checks                                                                           | Closing with unsaved edits asks save/discard/cancel; each answer is proved by the dialog going away, cancel keeps the app and the file, discard exits 0 leaving the file untouched, save writes the edit, moves nothing else and keeps a backup (BACKLOG N1).                                                                            |
 | `scripts/close-gate-late-edit-check.js` | 8 checks                                                                            | An edit made after the gate was answered and before the close it asked for is asked about a second time instead of being carried away in silence, and that late edit is the one that ends up on disk (gate 2, `lib.rs:138`).                                                                                                             |
 | `scripts/startup-args-check.js`         | 6 checks                                                                            | A name on the command line that is not valid Unicode costs that one name and never the launch: the window comes up, the subtitle beside it is the one opened, a real file whose name starts with a dash is opened rather than filtered away, and every argument the app refuses is named in the log (gate 2, `lib.rs:75`, `:43`, `:45`). |
+| `scripts/no-display-check.js`           | 5 checks                                                                            | A launch with no display exits non-zero and not with the panic status, having printed one line naming `DISPLAY` and what to do about it, with no panic trace and no crash report (BACKLOG N4). It is the one check that runs without an X server.                                                                                        |
 | `scripts/scaled-surface-check.js`       | 5 checks                                                                            | At an integer display scale the video surface doubles with the window instead of quadrupling or standing still. It does not prove N2c's fractional case, and its header says why.                                                                                                                                                        |
 | `scripts/webview-paint-check.js`        | 5 checks                                                                            | In the configuration users actually get — the NVIDIA WebKit workarounds armed by the app's own detection — the window paints instead of coming up blank, and the app's recorded decision agrees with the machine's driver state.                                                                                                         |
 | `scripts/wayland-attach-check.js`       | 4 checks                                                                            | Inside a real Wayland session, with `WAYLAND_DISPLAY` left alone, mpv's own window exists inside the native surface and the surface is viewable (BACKLOG N2b).                                                                                                                                                                           |
@@ -89,6 +90,7 @@ xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate-late-edit  # an edit
 xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:startup-args  # names the command line cannot carry
 xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:scale       # an integer display scale
 xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:picker-thread  # the picker starts no second GTK thread
+pnpm e2e:no-display                          # no xvfb-run: this one proves what happens without a display
 ```
 
 Two more have prerequisites no headless runner has, so they are run by hand and are not CI steps:
@@ -113,7 +115,7 @@ Prerequisites, all of them dev tools rather than repo dependencies:
 
 Environment knobs:
 
-- `DISPLAY` is required. A missing display is a failure with a clear message, never a skip.
+- `DISPLAY` is required by every entry point but `e2e:no-display`, whose whole subject is not having one. A missing display is a failure with a clear message, never a skip.
 - `E2E_PORT` (default 4444) moves both driver ports so two runs can share a machine.
 - `CARGO_TARGET_DIR` is honoured, the same way cargo honours it.
 - `TAURI_DRIVER_PATH`, `WEBKIT_WEBDRIVER_PATH` override the two binaries.

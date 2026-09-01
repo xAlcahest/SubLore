@@ -9,6 +9,18 @@ use std::ffi::OsStr;
 #[cfg(target_os = "linux")]
 const WEBKIT_HATCH: &str = "SUBLORE_WEBKIT_WORKAROUNDS";
 
+/// What a launch with nowhere to draw exits with. Deliberately not 101, which is the panic status
+/// this guard replaces.
+#[cfg(target_os = "linux")]
+const EXIT_NO_DISPLAY: i32 = 1;
+
+/// Is there a display to open a window on? Sublore forces the X11 backend below, so `DISPLAY` is
+/// the only variable that answers this, an Xwayland one included. An empty value names no server.
+#[cfg(target_os = "linux")]
+fn display_missing(display: Option<&OsStr>) -> bool {
+    display.is_none_or(OsStr::is_empty)
+}
+
 /// Should the NVIDIA WebKit workarounds be applied? `hatch` is `WEBKIT_HATCH`: `0/false/no/off`
 /// disarms them, `1/true/yes/on` forces them on where the probe cannot see the driver. Every other
 /// value, the empty one included, counts as unset and leaves `nvidia_module` deciding.
@@ -73,6 +85,16 @@ fn main() -> tauri::Result<()> {
     // before GTK picks its backend. See BACKLOG.md M0.2.
     #[cfg(target_os = "linux")]
     {
+        // GTK cannot initialise without a display and tao panics when it tries, so the launch is
+        // refused here with a sentence instead. See BACKLOG.md N4.
+        if display_missing(std::env::var_os("DISPLAY").as_deref()) {
+            eprintln!(
+                "sublore: DISPLAY is not set, so there is no display to open a window on. \
+                 Sublore needs an X display (an Xwayland one counts): start it from a graphical \
+                 session, or run it under a virtual one with `xvfb-run -a sublore`."
+            );
+            std::process::exit(EXIT_NO_DISPLAY);
+        }
         // Both writes run on the process's only thread, before anything is spawned and before GTK
         // reads the environment. Nothing that creates a thread may be added above them.
         std::env::set_var("GDK_BACKEND", "x11");
@@ -84,9 +106,23 @@ fn main() -> tauri::Result<()> {
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
-    use super::{hatch_decision, hatch_report, nvidia_workarounds_wanted};
+    use super::{display_missing, hatch_decision, hatch_report, nvidia_workarounds_wanted};
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
+
+    #[test]
+    fn a_display_nobody_named_is_missing() {
+        assert!(display_missing(None));
+        assert!(display_missing(Some(OsStr::new(""))));
+    }
+
+    #[test]
+    fn a_named_display_is_left_alone() {
+        assert!(!display_missing(Some(OsStr::new(":0"))));
+        // A name Rust cannot decode is still a name, and the guard must not refuse a launch the X
+        // server would have taken.
+        assert!(!display_missing(Some(OsStr::from_bytes(b":0\xff"))));
+    }
 
     #[test]
     fn unset_hatch_leaves_the_module_probe_deciding() {
