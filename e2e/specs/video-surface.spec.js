@@ -15,11 +15,11 @@
  * rectangle, so collapsing that element sends an empty region (hide) and restoring it sends a real
  * one (show). This is exactly what decision 1 will do when a menu opens over the video.
  */
-import { execFileSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { browser, expect } from "@wdio/globals";
 
+import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow } from "../lib/input.js";
 import { requireVideoFixture, videoFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
@@ -113,27 +113,18 @@ describe("video surface hide and show", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => browser.execute(() => document.querySelector(".bar__input") !== null), {
+    await waitFor(() => browser.execute(() => document.querySelector(".bar__button") !== null), {
       timeout: 30000,
       message: "the app UI to render",
     });
 
-    // Open the fixture through the bar, the way a person does.
-    const field = await centreOf(".bar__input");
-    clickAt(toplevel.absX + field.x, toplevel.absY + field.y);
-    execFileSync("xdotool", ["type", "--delay", "5", videoFixture], { timeout: 15000 });
-    // The keystrokes are real X11 events: clicking Open before they have landed submits an empty
-    // path, and the failure then arrives 30 s later blaming mpv for a race in the harness.
-    await waitFor(
-      () =>
-        browser.execute(
-          (want) => document.querySelector(".bar__input")?.value === want,
-          videoFixture,
-        ),
-      { timeout: 15000, message: "the typed path to reach the field" },
-    );
-    const button = await centreOf(".bar__button");
-    clickAt(toplevel.absX + button.x, toplevel.absY + button.y);
+    // Open the fixture through the chooser, the way a person does.
+    const open = await centreOf(".bar__button");
+    clickAt(toplevel.absX + open.x, toplevel.absY + open.y);
+    const chooser = await waitForChooser("Choose a video");
+    await answerChooser(chooser, videoFixture, "video");
+    // The chooser had the keyboard and the transport clicks below need the app window to have it.
+    focusWindow(toplevel.id);
 
     // mpv attaching is the honest signal, not the map state: a surface with no mpv child reports
     // IsViewable while showing the webview underneath.

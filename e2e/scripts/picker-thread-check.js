@@ -31,11 +31,11 @@ import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync } from
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { setTimeout as sleep } from "node:timers/promises";
 
 import { appLog, waitForLog } from "../lib/applog.js";
+import { answerChooser, cancelChooser, clickUntilChooser } from "../lib/chooser.js";
 import { appEnv } from "../lib/env.js";
-import { clickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
+import { clickAt, focusWindow } from "../lib/input.js";
 import {
   repoRoot,
   requireAppBinary,
@@ -45,16 +45,22 @@ import {
   windowWidth,
 } from "../lib/paths.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
-import { allWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
+import { findToplevel } from "../lib/x11.js";
 
 /** Gutting an assertion has to be as red as failing one, so the checks count themselves. */
 const EXPECTED_CHECKS = 9;
 let checksRun = 0;
 
-/** Points in the current shell, relative to the toplevel origin. M2.0 must revisit these. */
-const CHOOSE_FOLDER = { x: 52, y: 64 };
-const CREATE_PROJECT = { x: 136, y: 64 };
-const CHOOSE_FILE = { x: 234, y: 234 };
+/**
+ * Points in the current shell, relative to the toplevel origin, measured rather than guessed.
+ *
+ * This script has no DOM, so it reaches the buttons by pixel. Every layout change moves them, and
+ * M2.0's remaining tasks will move them again. When this check reports "no chooser after 8 clicks",
+ * the clicks are landing on nothing and these are what to re-measure.
+ */
+const CHOOSE_FOLDER = { x: 52, y: 85 };
+const CREATE_PROJECT = { x: 136, y: 85 };
+const CHOOSE_FILE = { x: 52, y: 291 };
 
 /** The two chooser titles. Frozen contract with src-tauri/src/strings.rs. */
 const FOLDER_TITLE = "Choose a project folder";
@@ -268,109 +274,6 @@ async function waitForWindow(state) {
   );
 }
 
-/**
- * The chooser that is on screen, or null. Only viewable ones count: the plugin's chooser is
- * unmapped rather than destroyed when it is answered, so under a plugin build the tree still holds
- * every chooser an earlier step opened. Two viewable at once is a real defect and fails here.
- */
-function findChooser(title) {
-  const onScreen = allWindows()
-    .filter((window) => window.name === title)
-    .filter((window) => mapState(window.id) === "IsViewable");
-  if (onScreen.length > 1) {
-    throw new Error(
-      `expected at most one "${title}" chooser on screen, found ${onScreen.length} ` +
-        `(${onScreen.map((w) => w.id).join(", ")}).\n${rootTree()}`,
-    );
-  }
-  return onScreen.length === 1 ? onScreen[0] : null;
-}
-
-async function waitForChooser(state, title, timeout = 20000) {
-  return waitFor(
-    () => {
-      if (state.exit !== null) {
-        throw new Error(`the app exited (code ${state.exit.code}) instead of raising a chooser`);
-      }
-      return findChooser(title);
-    },
-    { timeout, message: `a toplevel named "${title}"` },
-  ).catch((error) => {
-    throw new Error(`${error.message}\nwindows on the display were:\n${rootTree()}`);
-  });
-}
-
-/**
- * Click until a chooser answers, because the window exists before the webview has painted it.
- *
- * A fixed wait before the first click is a number measured on one machine: 2500 ms was enough here
- * and would be a coin toss on a loaded runner, where it would fail late and read as the picker
- * being broken. Clicking again costs nothing when the button is already there.
- */
-async function clickUntilChooser(state, toplevel, point, title, attempts = 8) {
-  let last = null;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    focusWindow(toplevel.id);
-    clickAt(point.x, point.y);
-    try {
-      return await waitForChooser(state, title, 4000);
-    } catch (error) {
-      last = error;
-    }
-  }
-  throw new Error(`no chooser named "${title}" after ${attempts} clicks.\n${last?.message ?? ""}`);
-}
-
-/** An answered chooser is destroyed here and merely unmapped by the plugin, so both count. */
-async function chooserClosed(chooser, timeout) {
-  try {
-    await waitFor(() => mapState(chooser.id) !== "IsViewable", {
-      timeout,
-      interval: 200,
-      message: `the chooser ${chooser.id} to go away`,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Answer a chooser with a path, from the keyboard.
- *
- * Alt+Home first: GTK opens on its Recent list, where the accept button is insensitive, and an
- * insensitive accept button swallows the location entry's Return (measured — the dialog just sits
- * there). Ctrl+L is the location entry, and Delete drops the suffix inline completion appended and
- * selected, or nothing when there was none.
- */
-async function answerChooser(chooser, chosen, what) {
-  for (let attempt = 1; ; attempt += 1) {
-    focusWindow(chooser.id);
-    pressKey("alt+Home");
-    await sleep(400);
-    pressKey("ctrl+l");
-    await sleep(400);
-    // The entry keeps what a previous attempt typed into it, so each attempt starts from empty.
-    pressKey("ctrl+a");
-    typeText(chosen);
-    await sleep(400);
-    pressKey("Delete");
-    pressKey("Return");
-    if (await chooserClosed(chooser, 5000)) {
-      return;
-    }
-    if (attempt >= 4) {
-      throw new Error(
-        `the ${what} chooser did not take "${chosen}" in ${attempt} attempts. It is still on ` +
-          `screen, so the keystrokes reached nothing that acted on them.\n${rootTree()}`,
-      );
-    }
-    // Escape leaves the location entry; a half-open one would eat the next attempt's Ctrl+L.
-    pressKey("Escape");
-    await sleep(400);
-  }
-}
-
 async function reap(state) {
   return waitFor(
     () => {
@@ -411,6 +314,8 @@ async function main() {
     const toplevel = await waitForWindow(state);
     const at = (point) => ({ x: toplevel.absX + point.x, y: toplevel.absY + point.y });
     const pid = state.app.pid;
+    // The script owns the child, so it can tell a dead app from a slow chooser. A spec cannot.
+    const alive = () => state.exit === null;
 
     // Before any picker: the detector finds the one thread that is supposed to be there, and finds
     // no other. Without this a broken detector reports a clean process and the run reads as green.
@@ -435,7 +340,9 @@ async function main() {
 
     // The folder half. `clickUntilChooser` throws unless a chooser is on screen, so a `check` here
     // would only ever be true and would inflate the counter.
-    const folderChooser = await clickUntilChooser(state, toplevel, at(CHOOSE_FOLDER), FOLDER_TITLE);
+    const folderChooser = await clickUntilChooser(toplevel, at(CHOOSE_FOLDER), FOLDER_TITLE, {
+      alive,
+    });
     await answerChooser(folderChooser, projectFolder, "folder");
     check(
       "the folder chooser handed back the folder it was given",
@@ -464,7 +371,7 @@ async function main() {
 
     // The file half. Its row exists only once a project is open (ProjectPanel.tsx).
     focusWindow(toplevel.id);
-    const fileChooser = await clickUntilChooser(state, toplevel, at(CHOOSE_FILE), FILE_TITLE);
+    const fileChooser = await clickUntilChooser(toplevel, at(CHOOSE_FILE), FILE_TITLE, { alive });
     await answerChooser(fileChooser, subtitle, "file");
     check(
       "the file chooser handed back the file it was given",
@@ -476,9 +383,8 @@ async function main() {
     // from before the Escape: matching the whole log would pass on a cancellation from earlier.
     const CANCELLED = /chooser: the project-file choice was cancelled/g;
     const before_escape = (appLog(dataHome).match(CANCELLED) ?? []).length;
-    const cancelled = await clickUntilChooser(state, toplevel, at(CHOOSE_FILE), FILE_TITLE);
-    focusWindow(cancelled.id);
-    pressKey("Escape");
+    const cancelled = await clickUntilChooser(toplevel, at(CHOOSE_FILE), FILE_TITLE, { alive });
+    await cancelChooser(cancelled, "file");
     check(
       "a chooser dismissed with Escape comes back as a cancellation",
       await waitFor(() => (appLog(dataHome).match(CANCELLED) ?? []).length > before_escape, {

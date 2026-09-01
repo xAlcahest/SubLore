@@ -189,14 +189,27 @@ body {
   border-bottom: 1px solid var(--app-line);
 }
 
-.project__path,
-.project__new-episode,
-.project__file-path {
+.project__new-episode {
   flex: 1;
   min-width: 10rem;
   padding: 0.35rem 0.5rem;
   font: inherit;
   font-size: 0.875rem;
+}
+
+/* Bounded and clipped: these hold whatever path the chooser answered, and a long one growing the
+   row moves every button beside it. */
+.project__path,
+.project__file-path {
+  flex: 0 1 16rem;
+  min-width: 8rem;
+  max-width: 16rem;
+  overflow: hidden;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .project button {

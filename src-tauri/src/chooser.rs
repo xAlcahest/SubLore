@@ -10,7 +10,7 @@
 //! of the process's life, and GTK3 is not built to be driven from two threads. Every other platform
 //! keeps the plugin.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::AppHandle;
@@ -95,9 +95,18 @@ impl Choice {
     }
 }
 
+/// The name a save chooser opens with, taken from the path it was handed. `Path` knows its own
+/// platform's separators; splitting the path in the frontend would only know one of them.
+fn save_name(suggested: Option<&str>) -> Option<String> {
+    suggested
+        .map(Path::new)
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+}
+
 /// Ask the user for a path. `None` means they cancelled, which is an outcome and not a failure.
 ///
-/// `suggested` is the name a save chooser opens with; it is ignored by the others.
+/// `suggested` is a path whose file name a save chooser opens with; the others ignore it.
 pub fn choose(
     app: &AppHandle,
     kind: &str,
@@ -150,7 +159,7 @@ fn pick(
 
     let (send, receive) = std::sync::mpsc::channel();
     let handle = app.clone();
-    let suggested = suggested.map(str::to_owned);
+    let name = save_name(suggested);
     app.run_on_main_thread(move || {
         // Transient and modal, which the plugin's chooser could not be: rfd builds with a null
         // parent, so it could end up behind the window that asked (BACKLOG N1).
@@ -173,7 +182,7 @@ fn pick(
         if choice.is_save() {
             // Never silently replace a file the user already has. See CONTRIBUTING.md §3.
             dialog.set_do_overwrite_confirmation(true);
-            if let Some(name) = suggested.as_deref() {
+            if let Some(name) = name.as_deref() {
                 dialog.set_current_name(name);
             }
         }
@@ -255,7 +264,7 @@ fn pick(
     let mut dialog = app.dialog().file().set_title(choice.title());
     // A suggested name is the save chooser's question; the others are picking something that exists.
     if choice.is_save() {
-        if let Some(name) = suggested {
+        if let Some(name) = save_name(suggested) {
             dialog = dialog.set_file_name(name);
         }
     }
@@ -365,5 +374,27 @@ mod tests {
         send.send(Some(PathBuf::from("/tmp/chosen.srt")))
             .expect("the receiver is alive");
         assert_eq!(answer(&receive), Some(PathBuf::from("/tmp/chosen.srt")));
+    }
+
+    #[test]
+    fn the_save_chooser_opens_on_the_file_name_and_never_on_the_whole_path() {
+        assert_eq!(
+            save_name(Some("/home/a/ep01.srt")).as_deref(),
+            Some("ep01.srt")
+        );
+        // Windows hands back its own separator and the frontend passes the path through untouched,
+        // so only a Windows `Path` splits this one. On Linux a backslash is a legal name character.
+        let windows = save_name(Some(r"C:\media\ep01.srt"));
+        let expected = if cfg!(windows) {
+            "ep01.srt"
+        } else {
+            r"C:\media\ep01.srt"
+        };
+        assert_eq!(windows.as_deref(), Some(expected));
+        assert_eq!(save_name(Some("ep01.srt")).as_deref(), Some("ep01.srt"));
+        assert_eq!(save_name(Some("/home/a/")).as_deref(), Some("a"));
+        assert_eq!(save_name(Some("")), None);
+        assert_eq!(save_name(Some("/")), None);
+        assert_eq!(save_name(None), None);
     }
 }

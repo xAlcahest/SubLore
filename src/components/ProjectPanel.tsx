@@ -47,9 +47,7 @@ export default function ProjectPanel({
   onAttachFile,
   onChoosePath,
 }: ProjectPanelProps) {
-  const folderId = useId();
   const episodeId = useId();
-  const fileId = useId();
   const roleGroup = useId();
   const [folder, setFolder] = useState("");
   const [episodeTitle, setEpisodeTitle] = useState("");
@@ -97,17 +95,9 @@ export default function ProjectPanel({
   return (
     <>
       <div className="project">
-        <label className="bar__label" htmlFor={folderId}>
-          {en.project.pathLabel}
-        </label>
-        <input
-          id={folderId}
-          className="project__path"
-          type="text"
-          value={folder}
-          placeholder={en.project.pathPlaceholder}
-          onChange={(event) => setFolder(event.target.value)}
-        />
+        <span className="bar__label">{en.project.pathLabel}</span>
+        {/* What the chooser answered, shown so the user can see what Create and Open will act on. */}
+        <span className="project__path">{folder === "" ? en.project.pathNone : folder}</span>
         <button
           className="project__choose-folder"
           type="button"
@@ -161,17 +151,10 @@ export default function ProjectPanel({
             {en.project.addEpisode}
           </button>
 
-          <label className="bar__label" htmlFor={fileId}>
-            {en.project.fileLabel}
-          </label>
-          <input
-            id={fileId}
-            className="project__file-path"
-            type="text"
-            value={filePath}
-            placeholder={en.project.filePlaceholder}
-            onChange={(event) => setFilePath(event.target.value)}
-          />
+          <span className="bar__label">{en.project.fileLabel}</span>
+          <span className="project__file-path">
+            {filePath === "" ? en.project.pathNone : filePath}
+          </span>
           <button
             className="project__choose-file"
             type="button"

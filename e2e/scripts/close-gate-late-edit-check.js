@@ -31,6 +31,7 @@ import { answerDialog } from "../lib/gtk-dialog.js";
 import { doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import {
   closeWindowTool,
+  firstCueText,
   repoRoot,
   requireAppBinary,
   requireCloseWindowTool,
@@ -46,9 +47,6 @@ import { allWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
 /** Gutting an assertion has to be as red as failing one, so the checks count themselves. */
 const EXPECTED_CHECKS = 8;
 let checksRun = 0;
-
-/** Point in the current shell, relative to the toplevel origin. Shared with close-gate-check.js. */
-const FIRST_CUE_TEXT = { x: 750, y: 540 };
 
 /** The close dialog's window name. Frozen contract with src-tauri/src/strings.rs. */
 const DIALOG_TITLE = "Unsaved changes";
@@ -174,7 +172,7 @@ async function waitForWindow(state) {
  * misses rather than passing anyway.
  */
 async function editFirstCue(toplevel, mark, settleMs, dataHome) {
-  const cue = { x: toplevel.absX + FIRST_CUE_TEXT.x, y: toplevel.absY + FIRST_CUE_TEXT.y };
+  const cue = { x: toplevel.absX + firstCueText.x, y: toplevel.absY + firstCueText.y };
   // Attempted rather than assumed: the cue list paints after the backend has parsed the file, and
   // a click that lands early leaves the document clean while every later assertion still runs. The
   // app writes a line when an edit is committed, so this retries until it does (CI run 33341052061).

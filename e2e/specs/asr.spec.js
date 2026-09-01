@@ -14,7 +14,8 @@ import {
   stubArgv,
   stubPid,
 } from "../lib/asr.js";
-import { clickAt, focusWindow, typeText } from "../lib/input.js";
+import { answerChooser, waitForChooser } from "../lib/chooser.js";
+import { clickAt, focusWindow } from "../lib/input.js";
 import { repoRoot, requireVideoFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
@@ -146,13 +147,12 @@ describe("transcription", () => {
   });
 
   it("transcribes the open video and shows the cues", async () => {
-    await clickElement(toplevel, ".bar__input");
-    await waitFor(() => browser.execute(() => document.activeElement?.className === "bar__input"), {
-      timeout: 10000,
-      message: "the video path field to take keyboard focus",
-    });
-    typeText(fixture);
     await clickElement(toplevel, ".bar__button");
+    const chooser = await waitForChooser("Choose a video");
+    await answerChooser(chooser, fixture, "video");
+    // The chooser took the keyboard with it; the transcribe controls below are clicked, not typed,
+    // but the app window has to be the focused one again before any of them can answer.
+    focusWindow(toplevel.id);
     await waitFor(
       () =>
         browser.execute(

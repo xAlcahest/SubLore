@@ -1,5 +1,6 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 
+import { choosePath } from "../chooser";
 import {
   subtitleErrorDetail,
   subtitleErrorMessage,
@@ -46,33 +47,34 @@ export default function SubtitleBar({
   onUndo,
   onRedo,
 }: SubtitleBarProps) {
-  const pathId = useId();
-  const destinationId = useId();
-  const [path, setPath] = useState("");
-  const [destination, setDestination] = useState("");
-  const trimmedPath = path.trim();
-  const trimmedDestination = destination.trim();
+  // The chooser is modal and answers on its own thread, so a second click while it is up would
+  // raise a second one behind the first.
+  const [choosing, setChoosing] = useState(false);
   const detail = error === null ? null : subtitleErrorDetail(error);
+
+  async function pick(kind: "subtitle" | "subtitle-save", act: (path: string) => void) {
+    setChoosing(true);
+    try {
+      // A save chooser opens on the open file's own name, which is what a copy is usually called.
+      const from = kind === "subtitle-save" && summary !== null ? summary.path : undefined;
+      const path = await choosePath(kind, from);
+      // Cancelled is an outcome, not a failure: nothing opens, nothing is written, nothing is said.
+      if (path !== null) {
+        act(path);
+      }
+    } finally {
+      setChoosing(false);
+    }
+  }
 
   return (
     <>
       <div className="subbar">
-        <label className="bar__label" htmlFor={pathId}>
-          {en.subtitle.pathLabel}
-        </label>
-        <input
-          id={pathId}
-          className="subbar__input"
-          type="text"
-          value={path}
-          placeholder={en.subtitle.pathPlaceholder}
-          onChange={(event) => setPath(event.target.value)}
-        />
         <button
           className="subbar__open"
           type="button"
-          disabled={trimmedPath === ""}
-          onClick={() => onOpen(trimmedPath)}
+          disabled={choosing}
+          onClick={() => void pick("subtitle", onOpen)}
         >
           {en.subtitle.open}
         </button>
@@ -95,22 +97,11 @@ export default function SubtitleBar({
             {en.subtitle.discard}
           </button>
         )}
-        <label className="bar__label" htmlFor={destinationId}>
-          {en.subtitle.destinationLabel}
-        </label>
-        <input
-          id={destinationId}
-          className="subbar__dest"
-          type="text"
-          value={destination}
-          placeholder={en.subtitle.destinationPlaceholder}
-          onChange={(event) => setDestination(event.target.value)}
-        />
         <button
           className="subbar__save"
           type="button"
-          disabled={summary === null || trimmedDestination === ""}
-          onClick={() => onSaveAs(trimmedDestination)}
+          disabled={summary === null || choosing}
+          onClick={() => void pick("subtitle-save", onSaveAs)}
         >
           {en.subtitle.save}
         </button>

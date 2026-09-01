@@ -24,6 +24,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import {
   closeWindowTool,
+  firstCueText,
   repoRoot,
   requireAppBinary,
   requireCloseWindowTool,
@@ -40,9 +41,6 @@ import { allWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
 /** Gutting an assertion has to be as red as failing one, so the checks count themselves. */
 const EXPECTED_CHECKS = 12;
 let checksRun = 0;
-
-/** Point in the current shell, relative to the toplevel origin. M2.0 must revisit this. */
-const FIRST_CUE_TEXT = { x: 750, y: 540 };
 
 /** The close dialog's window name. Frozen contract with src-tauri/src/strings.rs. */
 const DIALOG_TITLE = "Unsaved changes";
@@ -169,7 +167,7 @@ async function openAndDirty(toplevel, dataHome) {
   // when one lands, and this retries until it does. Before this, a click that arrived early left
   // the document clean and the failure surfaced four assertions later as "nothing changed on disk"
   // (gate 2, CI run 33341052061).
-  const cue = at(FIRST_CUE_TEXT);
+  const cue = at(firstCueText);
   for (let attempt = 1; ; attempt += 1) {
     focusWindow(toplevel.id);
     doubleClickAt(cue.x, cue.y);
