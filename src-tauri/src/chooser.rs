@@ -618,11 +618,29 @@ mod tests {
         );
     }
 
+    /// The case JSON is here for. A newline and a quote are legal in a Linux filename and forbidden
+    /// in a Windows one, so the folder this reads back cannot exist there. See BACKLOG.md N7.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_whose_name_holds_a_newline_and_a_quote_survives_the_round_trip() {
+        let temp = TempDir::new("awkward-name");
+        let awkward = temp.subdir("two\nlines \"quoted\"");
+        let stored = folders(&[(Choice::Subtitle, &awkward)]);
+        let path = temp.join("chooser-folders.json");
+
+        write_memory(&path, &stored).expect("the memory is written");
+        let text = std::fs::read_to_string(&path).expect("the memory is on disk");
+        let read: BTreeMap<String, String> = serde_json::from_str(&text).expect("readable JSON");
+
+        assert_eq!(read, stored);
+        assert_eq!(opens_at(&read, Choice::Subtitle), Some(awkward));
+    }
+
     #[test]
     fn the_folders_written_are_the_folders_read_back() {
         let temp = TempDir::new("round-trip");
-        // A name only JSON survives: newlines and quotes are legal in a Linux path.
-        let awkward = temp.subdir("two\nlines \"quoted\"");
+        // Awkward on every platform: spaces, punctuation and a character outside ASCII.
+        let awkward = temp.subdir("season 2 — episodi (finale)");
         let stored = folders(&[(Choice::Subtitle, &awkward)]);
         let path = temp.join("chooser-folders.json");
 
