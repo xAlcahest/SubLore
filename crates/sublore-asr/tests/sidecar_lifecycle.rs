@@ -188,7 +188,7 @@ fn cancelling_mid_run_kills_the_child_and_leaves_no_process_behind() {
         })
     };
 
-    let mut request = request(media, script);
+    let request = request(media, script);
     let error = transcribe(&sandbox.tools(), &request, &cancel, &|_, _| {})
         .expect_err("a cancelled run is not a transcript");
     watcher.join().expect("the watcher thread should finish");
