@@ -81,7 +81,9 @@ fn a_real_whisper_capture_becomes_cues_that_lose_no_words() {
         .collect::<Vec<_>>()
         .join(" ");
 
-    let done = done_payload(1, transcript).expect("the capture segments and parses");
+    let done = done_payload(1, transcript)
+        .expect("the capture segments and parses")
+        .done;
 
     assert!(done.cues.len() > 1, "8.5 s of speech is more than one cue");
     // Every word, in order, exactly once: segmentation splits, it never rewrites or drops.
@@ -91,7 +93,9 @@ fn a_real_whisper_capture_becomes_cues_that_lose_no_words() {
 
 #[test]
 fn every_generated_cue_is_ordered_and_inside_the_audio() {
-    let done = done_payload(1, captured_transcript()).expect("the capture segments and parses");
+    let done = done_payload(1, captured_transcript())
+        .expect("the capture segments and parses")
+        .done;
 
     let mut previous_end = 0;
     for cue in &done.cues {
@@ -110,7 +114,11 @@ fn every_generated_cue_is_ordered_and_inside_the_audio() {
 fn the_same_transcript_always_produces_the_same_cues() {
     let first = done_payload(1, captured_transcript()).expect("segments");
     let second = done_payload(2, captured_transcript()).expect("segments");
-    assert_eq!(first.cues, second.cues);
+    assert_eq!(first.done.cues, second.done.cues);
+    assert_eq!(
+        first.srt, second.srt,
+        "the bytes the document is built from are as deterministic as the cues"
+    );
 }
 
 #[test]

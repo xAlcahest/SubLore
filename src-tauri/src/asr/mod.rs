@@ -124,7 +124,18 @@ struct AsrModelProgress {
 pub struct AsrState {
     run: Mutex<Option<ActiveRun>>,
     download: Mutex<Option<ActiveDownload>>,
+    /// What the last run that reached the end produced, until another run starts.
+    finished: Mutex<Option<FinishedRun>>,
     next_run_id: AtomicU64,
+}
+
+/// A finished run's cues, as the SRT they render to. Kept so that adopting them builds the document
+/// out of what the sidecar produced rather than out of a payload the webview sends back, and so a
+/// refused adoption can be offered again. See BACKLOG.md M3.5.
+#[derive(Debug)]
+struct FinishedRun {
+    id: u64,
+    srt: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -151,8 +162,16 @@ impl AsrState {
                 "a transcription is already running",
             ));
         }
+        // The run that is starting supersedes the one before it, and a run that ends any other way
+        // than finishing leaves nothing behind (decision 24, C3).
+        *lock(&self.finished) = None;
         *slot = Some(ActiveRun { id, cancel });
         Ok(id)
+    }
+
+    /// Hold what a run produced, for as long as it is the last one to have finished.
+    fn keep_finished(&self, id: u64, srt: Vec<u8>) {
+        *lock(&self.finished) = Some(FinishedRun { id, srt });
     }
 
     /// Free the slot if it still holds this run. A late finisher must never free a newer run.
@@ -242,6 +261,15 @@ pub fn shutdown(app: &AppHandle) {
     for cancel in run.into_iter().chain(download) {
         cancel.cancel();
     }
+}
+
+/// The SRT the run `run_id` produced, or nothing once another run has replaced it. Cloned rather
+/// than taken: an adoption the user cancels leaves the result where it was. See BACKLOG.md M3.5.
+pub fn finished_srt(state: &AsrState, run_id: u64) -> Option<Vec<u8>> {
+    lock(&state.finished)
+        .as_ref()
+        .filter(|finished| finished.id == run_id)
+        .map(|finished| finished.srt.clone())
 }
 
 /// A poisoned lock still has to be able to cancel a child, so the poison is stepped over rather
@@ -399,13 +427,18 @@ pub async fn asr_transcribe_start(
         // result appears is not told Sublore is busy.
         slot.release();
         match outcome {
-            Ok(done) => {
+            Ok(finished) => {
                 crate::log::info!(
                     "transcription {run_id} produced {} cues on the {}",
-                    done.cues.len(),
-                    done.backend
+                    finished.done.cues.len(),
+                    finished.done.backend
                 );
-                let _ = handle.emit(EVENT_DONE, done);
+                // Kept before the event goes out: the UI answers it by asking for these cues, and
+                // an event that arrives first would find nothing to adopt. See BACKLOG.md M3.5.
+                if let Some(state) = handle.try_state::<AsrState>() {
+                    state.keep_finished(run_id, finished.srt);
+                }
+                let _ = handle.emit(EVENT_DONE, finished.done);
             }
             Err(error) => {
                 crate::log::warn!("transcription {run_id} ended: {error}");
@@ -437,12 +470,19 @@ pub async fn asr_transcribe_cancel(
     Ok(())
 }
 
+/// What a run that reached the end leaves behind: the payload the UI is told, and the SRT those
+/// same cues render to, which is what becomes the document. See BACKLOG.md M3.5.
+pub struct Finished {
+    pub done: AsrDone,
+    pub srt: Vec<u8>,
+}
+
 /// Segment a transcript into cues and describe them the way the UI lists them.
 ///
 /// The bytes go out through `sublore_formats::parse`, the same door a file the user opened comes
 /// in by, so M1's coverage guard runs on generated subtitles too and the cues shown are the cues a
 /// saved SRT would hold. See BACKLOG.md M3.3.
-pub fn done_payload(run_id: u64, transcript: Transcript) -> Result<AsrDone, AsrError> {
+pub fn done_payload(run_id: u64, transcript: Transcript) -> Result<Finished, AsrError> {
     let generated = cues::segment(&transcript.words, transcript.audio_duration_ms);
     let bytes = render::srt(&generated);
     let document = parse(SubtitleFormat::Srt, &bytes).map_err(|error| {
@@ -464,12 +504,15 @@ pub fn done_payload(run_id: u64, transcript: Transcript) -> Result<AsrDone, AsrE
         })
         .collect();
 
-    Ok(AsrDone {
-        run_id,
-        backend: backend_name(transcript.backend),
-        fell_back_to_cpu: transcript.fell_back_to_cpu,
-        audio_duration_ms: transcript.audio_duration_ms,
-        cues,
+    Ok(Finished {
+        done: AsrDone {
+            run_id,
+            backend: backend_name(transcript.backend),
+            fell_back_to_cpu: transcript.fell_back_to_cpu,
+            audio_duration_ms: transcript.audio_duration_ms,
+            cues,
+        },
+        srt: bytes,
     })
 }
 
@@ -546,7 +589,9 @@ fn backend_name(backend: Backend) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::error::AsrErrorCode;
-    use super::{backend_name, done_payload, phase_name, state_name, AsrCompute, AsrState};
+    use super::{
+        backend_name, done_payload, finished_srt, phase_name, state_name, AsrCompute, AsrState,
+    };
     use sublore_asr::model::ModelState;
     use sublore_asr::sidecar::{Cancel, Compute, Phase};
     use sublore_asr::transcript::{Backend, Transcript, Word};
@@ -571,7 +616,7 @@ mod tests {
 
     #[test]
     fn a_transcript_becomes_cues_the_ui_can_list() {
-        let done = done_payload(
+        let finished = done_payload(
             7,
             transcript(vec![
                 word("Sublore", 200, 700),
@@ -581,6 +626,13 @@ mod tests {
             ]),
         )
         .expect("a short transcript segments and parses");
+        let done = finished.done;
+        assert!(
+            String::from_utf8(finished.srt)
+                .expect("the SRT is UTF-8")
+                .contains("Sublore keeps your terminology."),
+            "the bytes kept for the document are the cues the UI was shown"
+        );
 
         assert_eq!(done.run_id, 7);
         assert_eq!(done.backend, "cpu");
@@ -598,7 +650,9 @@ mod tests {
         let words: Vec<_> = (0..12)
             .map(|index| word("terminology", index * 300, index * 300 + 250))
             .collect();
-        let done = done_payload(1, transcript(words)).expect("it segments and parses");
+        let done = done_payload(1, transcript(words))
+            .expect("it segments and parses")
+            .done;
 
         for cue in &done.cues {
             assert!(!cue.lines.is_empty());
@@ -620,8 +674,9 @@ mod tests {
 
     #[test]
     fn an_empty_transcript_produces_no_cues_rather_than_a_broken_document() {
-        let done = done_payload(2, transcript(Vec::new())).expect("an empty word list parses");
-        assert!(done.cues.is_empty());
+        let finished = done_payload(2, transcript(Vec::new())).expect("an empty word list parses");
+        assert!(finished.done.cues.is_empty());
+        assert!(finished.srt.is_empty(), "no cues is an empty file");
     }
 
     #[test]
@@ -670,6 +725,23 @@ mod tests {
         assert!(cancel.is_cancelled());
         state.end_run(second);
         assert!(state.run_cancel(second).is_none());
+    }
+
+    #[test]
+    fn what_a_run_produced_is_kept_until_another_run_starts() {
+        let state = AsrState::default();
+        let first = state.begin_run(Cancel::new()).expect("nothing is running");
+        state.keep_finished(first, b"1\n".to_vec());
+        state.end_run(first);
+
+        assert_eq!(finished_srt(&state, first), Some(b"1\n".to_vec()));
+        // Only by its own id: a stale id must never be handed another run's cues.
+        assert_eq!(finished_srt(&state, first + 1), None);
+
+        // A run that starts supersedes it, and one that ends any other way leaves nothing behind.
+        let second = state.begin_run(Cancel::new()).expect("the slot is free");
+        assert_eq!(finished_srt(&state, first), None);
+        assert_eq!(finished_srt(&state, second), None);
     }
 
     #[test]

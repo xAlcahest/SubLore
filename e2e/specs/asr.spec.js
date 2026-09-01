@@ -1,6 +1,7 @@
 /* global describe, it, before, document, window */
-import { readdirSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
+import process from "node:process";
 
 import { browser, expect } from "@wdio/globals";
 
@@ -15,7 +16,8 @@ import {
   stubPid,
 } from "../lib/asr.js";
 import { answerChooser, waitForChooser } from "../lib/chooser.js";
-import { clickAt, focusWindow } from "../lib/input.js";
+import { answerDialog, waitForUnsavedDialog, waitForUnsavedDialogGone } from "../lib/gtk-dialog.js";
+import { clickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import { repoRoot, requireVideoFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
@@ -26,6 +28,21 @@ const IDLE_STATUS = "No transcription yet.";
 const HEARD_WORD = "terminology";
 /** The fixture is 60 s of tone; every generated cue has to sit inside it. */
 const FIXTURE_MS = 60000;
+/** What is typed over a cue of the transcription, and over one of the file it was saved to. */
+const CORRECTION = "Corrected by hand in the grid";
+const SECOND_EDIT = "Edited while a transcription was running";
+
+/** Writes go to the harness temp dir, never into the repo and never beside a fixture. */
+function saveDirectory() {
+  const dataHome = process.env.SUBLORE_E2E_DATA_HOME;
+  if (typeof dataHome !== "string" || dataHome === "") {
+    throw new Error("SUBLORE_E2E_DATA_HOME is not set; e2e/wdio.conf.js sets it for every run.");
+  }
+  const directory = path.join(dataHome, "transcription-save");
+  rmSync(directory, { recursive: true, force: true });
+  mkdirSync(directory, { recursive: true });
+  return directory;
+}
 
 /** Centre of an element in physical pixels, which is what X11 pointer coordinates are. */
 function centreOf(selector) {
@@ -94,6 +111,79 @@ async function waitForStatus(fragment, timeout = 30000) {
   );
 }
 
+/**
+ * A cue's words, however the list that holds them lays them out: the bar joins a wrapped cue's two
+ * lines with a space and draws a timestamp in front, the grid keeps the line break.
+ */
+function words(text) {
+  return (text ?? "")
+    .replace(/^\d+:\d\d/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** The text of the grid row at a 1-based list position, or null when it is not rendered. */
+function rowText(position) {
+  return browser.execute((wanted) => {
+    const rows = Array.from(document.querySelectorAll(".cuelist__row"));
+    const row = rows.find(
+      (candidate) => candidate.querySelector(".cuelist__pos")?.textContent === wanted,
+    );
+    return row?.querySelector(".cuelist__text")?.textContent ?? null;
+  }, String(position));
+}
+
+/** Centre of the text cell of the row at a 1-based list position, if it is rendered. */
+function centreOfRow(position) {
+  return browser.execute((wanted) => {
+    const rows = Array.from(document.querySelectorAll(".cuelist__row"));
+    const row = rows.find(
+      (candidate) => candidate.querySelector(".cuelist__pos")?.textContent === wanted,
+    );
+    const cell = row?.querySelector(".cuelist__text");
+    if (!cell) {
+      return null;
+    }
+    const rect = cell.getBoundingClientRect();
+    const dpr = window.devicePixelRatio;
+    return { x: (rect.x + rect.width / 2) * dpr, y: (rect.y + rect.height / 2) * dpr };
+  }, String(position));
+}
+
+function present(selector) {
+  return browser.execute((css) => document.querySelector(css) !== null, selector);
+}
+
+/** Type over a cue in the grid and commit it, which is the editor the milestone promises. */
+async function editRow(toplevel, position, text) {
+  const centre = await centreOfRow(position);
+  if (centre === null) {
+    throw new Error(`row ${position} is not rendered`);
+  }
+  clickAt(toplevel.absX + centre.x, toplevel.absY + centre.y);
+  await waitFor(() => present(".cuelist__editor"), {
+    timeout: 15000,
+    message: `the inline editor to open on row ${position}`,
+  });
+  pressKey("ctrl+a");
+  typeText(text);
+  pressKey("Return");
+  await waitFor(async () => ((await rowText(position)) === text ? true : null), {
+    timeout: 20000,
+    message: `row ${position} to hold ${JSON.stringify(text)}`,
+  });
+}
+
+async function waitForSubtitleStatus(prefix) {
+  return waitFor(
+    async () => {
+      const status = await textOf(".subbar__status");
+      return status !== null && status.startsWith(prefix) ? status : null;
+    },
+    { timeout: 20000, message: `the subtitle status line to start with ${JSON.stringify(prefix)}` },
+  );
+}
+
 /** Start a run and wait until the sidecar has actually been spawned. */
 async function startRun(toplevel) {
   forgetStubRun();
@@ -107,9 +197,13 @@ async function startRun(toplevel) {
 describe("transcription", () => {
   let toplevel = null;
   let fixture = null;
+  let saveDir = null;
+  /** The bytes the transcription was saved to, so a later step can prove they did not move. */
+  let saved = null;
 
   before(async () => {
     fixture = requireVideoFixture();
+    saveDir = saveDirectory();
     toplevel = await waitFor(findToplevel, {
       timeout: 30000,
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
@@ -204,6 +298,100 @@ describe("transcription", () => {
     expect(after.stat.mtimeMs).toBe(before.stat.mtimeMs);
   });
 
+  // BACKLOG.md M3.5: the run above finished, so its cues are the document. Nothing else opened it.
+  it("leaves the cues it produced as the open document, unsaved and nowhere on disk", async () => {
+    const cues = await shownCues();
+    const status = await waitForSubtitleStatus(`SRT · ${cues.length} cues · LF`);
+
+    expect(status).toContain(`${cues.length} cues`);
+    expect(words(await rowText(1))).toBe(words(cues[0].text));
+    // Unsaved from the first moment: these bytes exist nowhere but in the session.
+    expect(await present(".subbar__dirty")).toBe(true);
+    // Nowhere to write it back to yet, so the in-place save is not offered; a copy is.
+    expect(await propertyOf(".subbar__savefile", "disabled")).toBe(true);
+    expect(await propertyOf(".subbar__save", "disabled")).toBe(false);
+    expect(await textOf(".subbar__error")).toBe(null);
+
+    // The transcription wrote nothing at all: not beside the media, and nowhere Sublore saves.
+    expect(readdirSync(saveDir)).toEqual([]);
+    expect(readdirSync(path.join(repoRoot, "fixtures", "video")).sort()).toEqual([
+      "make-sample.sh",
+      "sample.mkv",
+    ]);
+  });
+
+  it("edits a cue of the result, saves it, and reopens the file with the edit in it", async () => {
+    const cues = await shownCues();
+    await editRow(toplevel, 1, CORRECTION);
+    expect(await present(".subbar__error")).toBe(false);
+    // The document's own undo took it, which is the undo the editor uses everywhere else.
+    expect(await propertyOf(".subbar__undo", "disabled")).toBe(false);
+
+    const destination = path.join(saveDir, "from-transcription.srt");
+    await clickElement(toplevel, ".subbar__save");
+    const chooser = await waitForChooser("Save a copy of the subtitle");
+    await answerChooser(chooser, destination, "save a copy");
+    focusWindow(toplevel.id);
+    await waitFor(async () => (await textOf(".subbar__status"))?.includes(destination) === true, {
+      timeout: 20000,
+      message: `the status line to report the file written at ${destination}`,
+    });
+    // Its bytes are on disk now, so a document that had never been saved is not unsaved work.
+    expect(await present(".subbar__dirty")).toBe(false);
+
+    saved = readFileSync(destination);
+    expect(saved.toString("utf8")).toContain(CORRECTION);
+
+    // Reopened from disk: the edit is there, which is the end of the milestone's own sentence.
+    await clickElement(toplevel, ".subbar__open");
+    const reopen = await waitForChooser("Choose a subtitle");
+    await answerChooser(reopen, destination, "subtitle");
+    focusWindow(toplevel.id);
+    await waitForSubtitleStatus(`SRT · ${cues.length} cues · LF`);
+    expect(await rowText(1)).toBe(CORRECTION);
+    expect(await present(".subbar__dirty")).toBe(false);
+  });
+
+  it("asks before a transcription replaces unsaved work, and cancel keeps both", async () => {
+    await editRow(toplevel, 2, SECOND_EDIT);
+    expect(await present(".subbar__dirty")).toBe(true);
+
+    setStubMode("fast");
+    await startRun(toplevel);
+    const dialog = await waitForUnsavedDialog();
+    answerDialog(dialog, "cancel");
+    await waitForUnsavedDialogGone("Cancel");
+    focusWindow(toplevel.id);
+
+    // The document is untouched: both edits are still on screen and still unsaved.
+    expect(await rowText(1)).toBe(CORRECTION);
+    expect(await rowText(2)).toBe(SECOND_EDIT);
+    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await textOf(".subbar__error")).toBe(null);
+    // And so is the result: the run's cues are still listed, and still on offer.
+    expect((await shownCues()).length).toBeGreaterThan(0);
+    expect(await propertyOf(".asrbar__use", "tagName")).toBe("BUTTON");
+    expect(readFileSync(path.join(saveDir, "from-transcription.srt")).equals(saved)).toBe(true);
+  });
+
+  it("takes the cues once the same question is answered with Discard", async () => {
+    const cues = await shownCues();
+    await clickElement(toplevel, ".asrbar__use");
+    const dialog = await waitForUnsavedDialog();
+    answerDialog(dialog, "discard");
+    await waitForUnsavedDialogGone("Discard");
+    focusWindow(toplevel.id);
+
+    await waitForSubtitleStatus(`SRT · ${cues.length} cues · LF`);
+    expect(words(await rowText(1))).toBe(words(cues[0].text));
+    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await propertyOf(".subbar__savefile", "disabled")).toBe(true);
+    // The result is the document now, so there is nothing left to offer.
+    expect(await propertyOf(".asrbar__use", "tagName")).toBe(null);
+    // Discarding drops edits that were never on disk; it never rewrites the file they came from.
+    expect(readFileSync(path.join(saveDir, "from-transcription.srt")).equals(saved)).toBe(true);
+  });
+
   it("shows progress, stays usable, and leaves nothing running when cancelled", async () => {
     setStubMode("slow");
     const pid = await startRun(toplevel);
@@ -266,6 +454,12 @@ describe("transcription", () => {
     const status = await waitForStatus(" cues");
     expect(status).toContain("CPU");
     expect(status).not.toContain("GPU");
+
+    // The cues on screen are unsaved work, so this run asks before taking their place (M3.5).
+    const dialog = await waitForUnsavedDialog();
+    answerDialog(dialog, "discard");
+    await waitForUnsavedDialogGone("Discard");
+    focusWindow(toplevel.id);
 
     // -ng is what makes a run stay off the GPU inside a Vulkan build, so the CPU path is not a
     // label on the screen: it is on the command line.

@@ -45,6 +45,11 @@ pub enum SubtitleErrorCode {
     EditRefused,
     /// Opening or closing would drop edits the user has not saved.
     UnsavedChanges,
+    /// A save for a document that has never had a file: there is nowhere to write it back to, and
+    /// naming a destination is what "Save as" is for. See BACKLOG.md M3.5.
+    NoPath,
+    /// The cues asked for belong to a run that is no longer the one that finished last.
+    TranscriptionGone,
     /// The command machinery itself failed. Never a situation the user created.
     CommandFailed,
 }

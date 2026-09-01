@@ -433,7 +433,8 @@ body {
 .asrbar__download,
 .asrbar__download-cancel,
 .asrbar__start,
-.asrbar__cancel {
+.asrbar__cancel,
+.asrbar__use {
   padding: 0.35rem 0.9rem;
   font: inherit;
   font-size: 0.875rem;

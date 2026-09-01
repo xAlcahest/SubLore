@@ -132,6 +132,7 @@ pub fn run() -> tauri::Result<()> {
             subtitle::subtitle_redo,
             subtitle::subtitle_save,
             subtitle::subtitle_save_as,
+            subtitle::subtitle_adopt_transcription,
             video::video_open,
             video::video_play,
             video::video_pause,
@@ -819,6 +820,14 @@ mod tests {
     #[test]
     fn a_write_that_failed_keeps_the_window_and_carries_its_reason() {
         let failure = subtitle_error(subtitle::error::SubtitleErrorCode::WriteFailed);
+        assert_eq!(after_save(Err(failure.clone())), Err(failure));
+    }
+
+    /// A transcription that has never been saved has nowhere to be written back to. Reading that
+    /// as nothing to save would close the window over the only copy of it. See BACKLOG.md M3.5.
+    #[test]
+    fn a_document_with_no_file_is_a_failed_save_and_never_nothing_to_save() {
+        let failure = subtitle_error(subtitle::error::SubtitleErrorCode::NoPath);
         assert_eq!(after_save(Err(failure.clone())), Err(failure));
     }
 
