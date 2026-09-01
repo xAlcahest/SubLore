@@ -1,5 +1,6 @@
-import { useId, useState, type SubmitEvent } from "react";
+import { useState } from "react";
 
+import { choosePath } from "../chooser";
 import { en } from "../i18n/en";
 
 type VideoOpenBarProps = {
@@ -8,35 +9,34 @@ type VideoOpenBarProps = {
 };
 
 export default function VideoOpenBar({ busy, onOpen }: VideoOpenBarProps) {
-  const inputId = useId();
-  const [path, setPath] = useState("");
-  const trimmed = path.trim();
+  // The chooser is modal and answers on its own thread, so a second click while it is up would
+  // raise a second one behind the first.
+  const [choosing, setChoosing] = useState(false);
 
-  function submit(event: SubmitEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (trimmed === "" || busy) {
-      return;
+  async function pick() {
+    setChoosing(true);
+    try {
+      const path = await choosePath("video");
+      // Cancelled is an outcome, not a failure: nothing opens and nothing is said.
+      if (path !== null) {
+        onOpen(path);
+      }
+    } finally {
+      setChoosing(false);
     }
-    onOpen(trimmed);
   }
 
   return (
-    <form className="bar" onSubmit={submit}>
+    <div className="bar">
       <span className="bar__brand">{en.appName}</span>
-      <label className="bar__label" htmlFor={inputId}>
-        {en.video.pathLabel}
-      </label>
-      <input
-        id={inputId}
-        className="bar__input"
-        type="text"
-        value={path}
-        placeholder={en.video.pathPlaceholder}
-        onChange={(event) => setPath(event.target.value)}
-      />
-      <button className="bar__button" type="submit" disabled={trimmed === "" || busy}>
+      <button
+        className="bar__button"
+        type="button"
+        disabled={busy || choosing}
+        onClick={() => void pick()}
+      >
         {en.video.open}
       </button>
-    </form>
+    </div>
   );
 }

@@ -1,4 +1,4 @@
-/* global describe, it, before, document, window, Event */
+/* global describe, it, before, document, window */
 /**
  * The other half of the surface state machine (BACKLOG N2, second review pass).
  *
@@ -9,12 +9,33 @@
  * the first layout onwards. Without these checks, a later simplification of `apply_region` brings
  * it back with a fully green suite.
  */
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+
 import { browser, expect } from "@wdio/globals";
 
+import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow } from "../lib/input.js";
 import { windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { childWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
+
+/**
+ * A file that exists and is not a video. The chooser only hands back paths that are really there,
+ * so the failed open this file needs is one mpv refuses to decode rather than one that is missing.
+ */
+function brokenVideo() {
+  const dataHome = process.env.SUBLORE_E2E_DATA_HOME;
+  if (typeof dataHome !== "string" || dataHome === "") {
+    throw new Error("SUBLORE_E2E_DATA_HOME is not set; e2e/wdio.conf.js sets it for every run.");
+  }
+  const directory = path.join(dataHome, "video-empty");
+  mkdirSync(directory, { recursive: true });
+  const file = path.join(directory, "not-a-video.mkv");
+  writeFileSync(file, "Not a Matroska file, and mpv says so.\n");
+  return file;
+}
 
 function centreOf(selector) {
   return browser.execute((css) => {
@@ -57,7 +78,7 @@ describe("video surface with no video open", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => browser.execute(() => document.querySelector(".bar__input") !== null), {
+    await waitFor(() => browser.execute(() => document.querySelector(".bar__button") !== null), {
       timeout: 30000,
       message: "the app UI to render",
     });
@@ -96,19 +117,11 @@ describe("video surface with no video open", () => {
   });
 
   it("keeps the surface unmapped after an open that failed", async () => {
-    const field = await centreOf(".bar__input");
-    clickAt(toplevel.absX + field.x, toplevel.absY + field.y);
-    await browser.execute(() => {
-      const input = document.querySelector(".bar__input");
-      const setter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype,
-        "value",
-      ).set;
-      setter.call(input, "/nonexistent/sublore-n2-does-not-exist.mkv");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
     const button = await centreOf(".bar__button");
     clickAt(toplevel.absX + button.x, toplevel.absY + button.y);
+    const chooser = await waitForChooser("Choose a video");
+    await answerChooser(chooser, brokenVideo(), "video");
+    focusWindow(toplevel.id);
 
     await waitFor(
       () => browser.execute(() => document.querySelector(".app__error")?.textContent ?? null),

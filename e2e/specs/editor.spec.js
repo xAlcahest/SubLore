@@ -6,6 +6,7 @@ import process from "node:process";
 
 import { browser, expect } from "@wdio/globals";
 
+import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow, typeText } from "../lib/input.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
@@ -79,18 +80,31 @@ function fixture(...parts) {
   return file;
 }
 
-/** Writes go to the harness temp dir. The committed fixture is copied, never opened for editing. */
-function workingCopy() {
+/** A fresh folder under the harness temp dir. Everything this spec writes lives inside one. */
+function scratchFolder(...parts) {
   const dataHome = process.env.SUBLORE_E2E_DATA_HOME;
   if (typeof dataHome !== "string" || dataHome === "") {
     throw new Error("SUBLORE_E2E_DATA_HOME is not set; e2e/wdio.conf.js sets it for every run.");
   }
-  const directory = path.join(dataHome, "editor");
+  const directory = path.join(dataHome, "editor", ...parts);
   rmSync(directory, { recursive: true, force: true });
   mkdirSync(directory, { recursive: true });
-  const copy = path.join(directory, "large-2000.srt");
+  return directory;
+}
+
+/** Writes go to the harness temp dir. The committed fixture is copied, never opened for editing. */
+function workingCopy() {
+  const copy = path.join(scratchFolder(), "large-2000.srt");
   copyFileSync(fixture("srt", "clean", "large-2000.srt"), copy);
   return copy;
+}
+
+/** Open a subtitle through the system chooser, which is the only route since T1. */
+async function openSubtitle(toplevel, file) {
+  await clickElement(toplevel, ".subbar__open");
+  const chooser = await waitForChooser("Choose a subtitle");
+  await answerChooser(chooser, file, "subtitle");
+  focusWindow(toplevel.id);
 }
 
 /** Centre of an element in physical pixels, which is what X11 pointer coordinates are. */
@@ -213,20 +227,33 @@ describe("cue list editing", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => present(".subbar__input"), {
+    await waitFor(() => present(".subbar__open"), {
       timeout: 30000,
       message: "the subtitle bar to render",
     });
   });
 
   it("opens the 2000-cue fixture inside the open budget", async () => {
-    await typeInto(toplevel, ".subbar__input", copy);
-    const openButton = await centreOf(".subbar__open");
-
-    // Stamped in the page: the click happens after this returns, so the number measured is the
-    // click round trip plus the open, which can only make the assertion stricter.
+    // Both ends are stamped inside the page, around the command rather than around the click: the
+    // chooser now sits between the two and the seconds a person spends in it are not the app's.
+    // The start is taken as the open leaves the page, so nothing here can flatter the number.
+    // It goes on `fetch`, which is what every command travels on, because Tauri defines
+    // `__TAURI_INTERNALS__.invoke` unwritable and a wrapper there is dropped without a word.
     await browser.execute(() => {
       window.__subloreOpenAt = null;
+      window.__subloreClickAt = null;
+      const passThrough = window.fetch;
+      window.__subloreFetch = passThrough;
+      window.fetch = (...rest) => {
+        const url = String(rest[0]?.url ?? rest[0]);
+        if (url.endsWith("/subtitle_open") && window.__subloreClickAt === null) {
+          window.__subloreClickAt = performance.now();
+        }
+        return passThrough.apply(window, rest);
+      };
+      if (window.fetch === passThrough) {
+        throw new Error("the probe did not take: fetch is not writable here either");
+      }
       const observer = new window.MutationObserver(() => {
         if (window.__subloreOpenAt === null && document.querySelector(".cuelist__row") !== null) {
           window.__subloreOpenAt = performance.now();
@@ -234,17 +261,21 @@ describe("cue list editing", () => {
         }
       });
       observer.observe(document.body, { childList: true, subtree: true });
-      window.__subloreClickAt = performance.now();
     });
-    await clickCentre(toplevel, openButton, ".subbar__open");
+    await openSubtitle(toplevel, copy);
 
     const elapsed = await waitFor(
       () =>
         browser.execute(() =>
-          window.__subloreOpenAt === null ? null : window.__subloreOpenAt - window.__subloreClickAt,
+          window.__subloreOpenAt === null || window.__subloreClickAt === null
+            ? null
+            : window.__subloreOpenAt - window.__subloreClickAt,
         ),
-      { timeout: 30000, message: "the first cue row to appear" },
+      { timeout: 30000, message: "the open command to be issued and the first cue row to appear" },
     );
+    await browser.execute(() => {
+      window.fetch = window.__subloreFetch;
+    });
     console.log(`M2.3 open to first row: ${elapsed.toFixed(1)} ms`);
     expect(elapsed).toBeLessThan(OPEN_BUDGET_MS);
 
@@ -547,8 +578,7 @@ describe("cue list editing", () => {
   });
 
   it("reopens the saved file with the edit in it", async () => {
-    await typeInto(toplevel, ".subbar__input", copy);
-    await clickElement(toplevel, ".subbar__open");
+    await openSubtitle(toplevel, copy);
     await waitFor(async () => (await textOf(".subbar__status"))?.includes(STATUS_PREFIX) === true, {
       timeout: 20000,
       message: "the status line to report the reopened file",
@@ -594,8 +624,8 @@ describe("cue list editing", () => {
   });
 
   // Regression: the shortcuts were captured on the window whatever had focus, so ctrl+z typed in
-  // the destination box undid a cue edit instead of the path. See BACKLOG.md M2.3.
-  it("leaves ctrl+z to the destination box and undoes exactly one step from the toolbar", async () => {
+  // a text box undid a cue edit instead of the typing. See BACKLOG.md M2.3.
+  it("leaves ctrl+z to the text box it was typed in and undoes one step from the toolbar", async () => {
     const blocks = originalBytes.toString("utf8").split("\n\n");
     const thirdOriginal = blocks[THIRD_POSITION - 1].split("\n").pop();
 
@@ -614,7 +644,19 @@ describe("cue list editing", () => {
       message: `row ${THIRD_POSITION} to hold the second edit`,
     });
 
-    await typeInto(toplevel, ".subbar__dest", path.join(path.dirname(copy), "elsewhere.srt"));
+    // T1 left one text box outside the cue editor, in the project panel, so that is where a typed
+    // ctrl+z can still be taken by the document's handler. It only exists once a project is open.
+    await clickElement(toplevel, ".project__choose-folder");
+    const folderChooser = await waitForChooser("Choose a project folder");
+    await answerChooser(folderChooser, scratchFolder("undo-project"), "project folder");
+    focusWindow(toplevel.id);
+    await clickElement(toplevel, ".project__create");
+    await waitFor(() => present(".project__new-episode"), {
+      timeout: 20000,
+      message: "the project panel to offer its episode box",
+    });
+
+    await typeInto(toplevel, ".project__new-episode", "Episode 1");
     key("ctrl+z");
 
     // The toolbar undo that follows must be the first step off the top of the stack. Had the

@@ -2,8 +2,6 @@
 export const en = {
   appName: "Sublore",
   video: {
-    pathLabel: "Video file",
-    pathPlaceholder: "Full path to a video file",
     open: "Open",
     play: "Play",
     pause: "Pause",
@@ -22,7 +20,8 @@ export const en = {
   },
   project: {
     pathLabel: "Project folder",
-    pathPlaceholder: "Full path to a folder",
+    /** Stands where a chosen path goes, so the row does not collapse before anything is chosen. */
+    pathNone: "Nothing chosen",
     choose: "Choose",
     create: "Create",
     open: "Open",
@@ -36,7 +35,6 @@ export const en = {
     addEpisode: "Add episode",
     episode: "{ordinal}. {title}",
     fileLabel: "File",
-    filePlaceholder: "Full path to a video or subtitle file",
     attach: "Attach",
     noFiles: "No files attached.",
     file: "{role} · {path}",
@@ -47,7 +45,7 @@ export const en = {
     },
     deleted: "Deleted the project in {folder}. Your own video and subtitle files were not touched.",
     errors: {
-      invalidPath: "Type the full path to a folder.",
+      invalidPath: "That is not a folder Sublore can use.",
       folderNotFound: "There is no folder at that path.",
       notADirectory: "That path is not a folder.",
       alreadyAProject: "There is already a Sublore project in that folder. Open it instead.",
@@ -58,7 +56,7 @@ export const en = {
         "That project was made by a newer Sublore, which writes version {found}; this one reads version {supported}. Update Sublore to open it.",
       migrationFailed:
         "Sublore could not bring that project file up to date, so it left it at the version it was.",
-      pathNotAbsolute: "Type the full path, starting from the top of the drive.",
+      pathNotAbsolute: "That path does not start from the top of the drive.",
       pathNotUtf8: "Sublore cannot store that path. Move the file somewhere with a plainer name.",
       fileNotFound: "There is no file at that path.",
       notAFile: "That path is not a file.",
@@ -74,11 +72,7 @@ export const en = {
     },
   },
   subtitle: {
-    pathLabel: "Subtitle file",
-    pathPlaceholder: "Full path to an SRT, VTT or ASS file",
     open: "Open",
-    destinationLabel: "Save copy to",
-    destinationPlaceholder: "Full path for the copy",
     save: "Save as",
     saveFile: "Save",
     undo: "Undo",
@@ -107,7 +101,7 @@ export const en = {
     savedFileWithBackup: "Saved {path}. The file that was there is kept at {backup}.",
     lineDetail: "Line {line} — {reason}",
     errors: {
-      invalidPath: "Type the full path to a subtitle file.",
+      invalidPath: "That is not a subtitle file Sublore can read.",
       notAFile: "There is no file at that path.",
       tooLarge: "That file is bigger than Sublore opens as a subtitle (16 MB).",
       readFailed: "Sublore could not read that file.",

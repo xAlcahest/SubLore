@@ -1,13 +1,13 @@
 /* global describe, it, before, document, window */
 import { Buffer } from "node:buffer";
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
 import { browser, expect } from "@wdio/globals";
 
-import { clickAt, focusWindow, typeText } from "../lib/input.js";
+import { answerChooser, waitForChooser } from "../lib/chooser.js";
+import { clickAt, focusWindow } from "../lib/input.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
@@ -68,28 +68,20 @@ function textOf(selector) {
   return browser.execute((css) => document.querySelector(css)?.textContent ?? null, selector);
 }
 
-/**
- * Replace whatever a text field holds. This spec opens four files through one field, so the old
- * path has to go; `e2e/lib/input.js` is frozen for M1, hence the local ctrl+a.
- */
-async function typeInto(toplevel, selector, text) {
-  await clickElement(toplevel, selector);
-  await waitFor(
-    () => browser.execute((css) => document.activeElement?.matches(css) === true, selector),
-    { timeout: 10000, message: `${selector} to take keyboard focus` },
-  );
+/** Open a subtitle through the system chooser, which is the only route since T1. */
+async function openSubtitle(toplevel, file) {
+  await clickElement(toplevel, ".subbar__open");
+  const chooser = await waitForChooser("Choose a subtitle");
+  await answerChooser(chooser, file, "subtitle");
+  focusWindow(toplevel.id);
+}
 
-  execFileSync("xdotool", ["key", "--clearmodifiers", "ctrl+a"], {
-    encoding: "utf8",
-    timeout: 15000,
-  });
-  typeText(text);
-  // Also proves the select-all landed: leftover text would make this value wrong, not just longer.
-  await waitFor(
-    () =>
-      browser.execute((css, want) => document.querySelector(css)?.value === want, selector, text),
-    { timeout: 15000, message: `${selector} to hold exactly ${text}` },
-  );
+/** Name the copy in the save chooser. Its filename field is what the destination box used to be. */
+async function saveCopyTo(toplevel, destination) {
+  await clickElement(toplevel, ".subbar__save");
+  const chooser = await waitForChooser("Save a copy of the subtitle");
+  await answerChooser(chooser, destination, "save a copy");
+  focusWindow(toplevel.id);
 }
 
 async function waitForStatus(expected) {
@@ -116,15 +108,14 @@ describe("subtitle open and save", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => browser.execute(() => document.querySelector(".subbar__input") !== null), {
+    await waitFor(() => browser.execute(() => document.querySelector(".subbar__open") !== null), {
       timeout: 30000,
       message: "the subtitle bar to render",
     });
   });
 
   it("opens an SRT fixture and shows its format and cue count", async () => {
-    await typeInto(toplevel, ".subbar__input", fixture("srt", "clean", "basic-lf.srt"));
-    await clickElement(toplevel, ".subbar__open");
+    await openSubtitle(toplevel, fixture("srt", "clean", "basic-lf.srt"));
 
     expect(await waitForStatus(LF_STATUS)).toBe(LF_STATUS);
     expect(await textOf(".subbar__error")).toBe(null);
@@ -134,12 +125,10 @@ describe("subtitle open and save", () => {
     const source = fixture("srt", "clean", "basic-crlf.srt");
     const destination = path.join(saveDir, "basic-crlf.srt");
 
-    await typeInto(toplevel, ".subbar__input", source);
-    await clickElement(toplevel, ".subbar__open");
+    await openSubtitle(toplevel, source);
     await waitForStatus(CRLF_STATUS);
 
-    await typeInto(toplevel, ".subbar__dest", destination);
-    await clickElement(toplevel, ".subbar__save");
+    await saveCopyTo(toplevel, destination);
     await waitFor(async () => (await textOf(".subbar__status"))?.includes(destination) === true, {
       timeout: 20000,
       message: `the status line to report the copy at ${destination}`,
@@ -151,8 +140,7 @@ describe("subtitle open and save", () => {
   });
 
   it("reports a malformed file readably and stays usable", async () => {
-    await typeInto(toplevel, ".subbar__input", fixture("srt", "malformed", "missing-arrow.srt"));
-    await clickElement(toplevel, ".subbar__open");
+    await openSubtitle(toplevel, fixture("srt", "malformed", "missing-arrow.srt"));
 
     const message = await waitFor(
       async () => {
@@ -165,8 +153,7 @@ describe("subtitle open and save", () => {
     expect(await textOf(".subbar__status")).toBe(NO_FILE_STATUS);
 
     // Still usable: the clean fixture opens straight afterwards, with the error line gone.
-    await typeInto(toplevel, ".subbar__input", fixture("srt", "clean", "basic-lf.srt"));
-    await clickElement(toplevel, ".subbar__open");
+    await openSubtitle(toplevel, fixture("srt", "clean", "basic-lf.srt"));
     expect(await waitForStatus(LF_STATUS)).toBe(LF_STATUS);
     expect(await textOf(".subbar__error")).toBe(null);
   });

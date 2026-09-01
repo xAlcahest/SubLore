@@ -1,12 +1,21 @@
 /* global describe, it, before, document, window */
 import { Buffer } from "node:buffer";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
 import { browser, expect } from "@wdio/globals";
 
+import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow, typeText } from "../lib/input.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
@@ -79,10 +88,23 @@ function textsOf(selector) {
   );
 }
 
-/**
- * Replace whatever a text field holds. This spec drives three fields several times over, so the
- * old value has to go; `e2e/lib/input.js` is shared with the other specs and stays as it is.
- */
+/** Choose the project folder. The panel shows what the chooser answered; nothing is typed. */
+async function chooseFolder(toplevel, folder) {
+  await clickElement(toplevel, ".project__choose-folder");
+  const chooser = await waitForChooser("Choose a project folder");
+  await answerChooser(chooser, folder, "project folder");
+  focusWindow(toplevel.id);
+}
+
+/** Choose the file an episode is attached to, through the same chooser the app raises. */
+async function chooseFile(toplevel, file) {
+  await clickElement(toplevel, ".project__choose-file");
+  const chooser = await waitForChooser("Choose a video or subtitle file");
+  await answerChooser(chooser, file, "episode file");
+  focusWindow(toplevel.id);
+}
+
+/** Replace whatever the episode field holds, which is the one box T1 left in the panel. */
 async function typeInto(toplevel, selector, text) {
   await clickElement(toplevel, selector);
   await waitFor(
@@ -161,7 +183,7 @@ describe("projects", () => {
   it("creates a project in an empty folder", async () => {
     expect(await textOf(".project__status")).toBe(NO_PROJECT);
 
-    await typeInto(toplevel, ".project__path", projectFolder);
+    await chooseFolder(toplevel, projectFolder);
     await clickElement(toplevel, ".project__create");
 
     expect(await waitForStatus(projectFolder)).toContain(projectFolder);
@@ -182,7 +204,7 @@ describe("projects", () => {
       },
     );
 
-    await typeInto(toplevel, ".project__file-path", userSubtitle);
+    await chooseFile(toplevel, userSubtitle);
     await clickElement(toplevel, ".project__attach");
     await waitFor(
       async () => (await textsOf(".project__file")).some((t) => t?.includes(userSubtitle)),
@@ -211,7 +233,7 @@ describe("projects", () => {
     expect(await textOf(".project__status")).toBe(NO_PROJECT);
     expect(await textsOf(".project__episode")).toEqual([]);
 
-    await typeInto(toplevel, ".project__path", projectFolder);
+    await chooseFolder(toplevel, projectFolder);
     await clickElement(toplevel, ".project__open");
 
     await waitForStatus(projectFolder);
@@ -229,7 +251,7 @@ describe("projects", () => {
   });
 
   it("reports a folder that holds no project and stays usable", async () => {
-    await typeInto(toplevel, ".project__path", emptyFolder);
+    await chooseFolder(toplevel, emptyFolder);
     await clickElement(toplevel, ".project__open");
 
     expect(await waitForError()).toContain(NO_PROJECT_HERE);
@@ -237,14 +259,19 @@ describe("projects", () => {
     expect(existsSync(path.join(emptyFolder, DATABASE_NAME))).toBe(false);
 
     // Still usable: the real project opens straight afterwards, with the error line gone.
-    await typeInto(toplevel, ".project__path", projectFolder);
+    await chooseFolder(toplevel, projectFolder);
     await clickElement(toplevel, ".project__open");
     await waitForStatus(projectFolder);
     expect(await textOf(".project__error")).toBe(null);
     expect((await textsOf(".project__episode"))[0]).toContain(EPISODE_ROW);
 
     // An attach that fails changed nothing, so the project stays on screen beside the message.
-    await typeInto(toplevel, ".project__file-path", path.join(userFolder, "no-such-file.srt"));
+    // The chooser will not offer a file that is not there, so the file goes after it is chosen:
+    // a file can vanish between the choosing and the attaching, and that is the case this covers.
+    const vanishing = path.join(userFolder, "vanishing.srt");
+    writeFileSync(vanishing, "1\n00:00:01,000 --> 00:00:02,000\nGone by then.\n");
+    await chooseFile(toplevel, vanishing);
+    rmSync(vanishing);
     await clickElement(toplevel, ".project__attach");
     expect(await waitForError()).toContain(NO_SUCH_FILE);
     expect(await textOf(".project__status")).toContain(projectFolder);

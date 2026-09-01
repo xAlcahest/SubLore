@@ -1,7 +1,8 @@
 /* global describe, it, before, document, window */
 import { browser, expect } from "@wdio/globals";
 
-import { clickAt, focusWindow, typeText } from "../lib/input.js";
+import { answerChooser, waitForChooser } from "../lib/chooser.js";
+import { clickAt, focusWindow } from "../lib/input.js";
 import { requireVideoFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { childWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
@@ -41,7 +42,7 @@ describe("video playback", () => {
     });
     focusWindow(toplevel.id);
     // The toplevel is mapped before React renders into it; interacting earlier is a race.
-    await waitFor(() => browser.execute(() => document.querySelector(".bar__input") !== null), {
+    await waitFor(() => browser.execute(() => document.querySelector(".bar__button") !== null), {
       timeout: 30000,
       message: "the app UI to render",
     });
@@ -50,20 +51,12 @@ describe("video playback", () => {
   it("opens the sample fixture", async () => {
     const fixture = requireVideoFixture();
 
-    await clickElement(toplevel, ".bar__input");
-    await waitFor(() => browser.execute(() => document.activeElement?.className === "bar__input"), {
-      timeout: 10000,
-      message: "the path field to take keyboard focus",
-    });
-
-    typeText(fixture);
-    await waitFor(
-      () =>
-        browser.execute((want) => document.querySelector(".bar__input").value === want, fixture),
-      { timeout: 15000, message: "the typed path to reach the path field" },
-    );
-
+    // The path is chosen in the system chooser now: T1 removed every field for typing one, so
+    // the route in changed and what is asserted below did not.
     await clickElement(toplevel, ".bar__button");
+    const chooser = await waitForChooser("Choose a video");
+    await answerChooser(chooser, fixture, "video");
+    focusWindow(toplevel.id);
 
     // Readiness has no other signal: the empty placeholder is gone and the controls are enabled.
     await browser.waitUntil(

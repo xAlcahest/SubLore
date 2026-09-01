@@ -12,7 +12,13 @@ const WINDOW_LINE =
   /^\s*(0x[0-9a-f]+)\s+(?:"([^"]*)"|\(has no name\)):\s*\([^)]*\)\s+(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\s+\+(-?\d+)\+(-?\d+)\s*$/i;
 
 function xwininfo(args) {
-  return execFileSync("xwininfo", args, { encoding: "utf8", timeout: 15000 });
+  // stderr captured, not inherited: `mapState` classifies a destroyed window by reading it, and the
+  // default leaves it undefined while printing "X Error: 9: BadDrawable" over every run's output.
+  return execFileSync("xwininfo", args, {
+    encoding: "utf8",
+    timeout: 15000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
 
 /**
