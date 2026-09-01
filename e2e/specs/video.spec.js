@@ -2,13 +2,17 @@
 import { browser, expect } from "@wdio/globals";
 
 import { answerChooser, waitForChooser } from "../lib/chooser.js";
-import { clickAt, focusWindow } from "../lib/input.js";
+import { clickAt, dragAt, focusWindow } from "../lib/input.js";
 import { requireVideoFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { childWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
 
 /** The surface travels over IPC after layout, so its geometry lags the DOM by a frame or two. */
 const TOLERANCE_PX = 2;
+/** Whole physical pixels are all an X11 pointer can be put on, and a rect's centre is a fraction. */
+const POINTER_SLOP_PX = 2;
+/** fixtures/video/make-sample.sh writes 30 fps, so even an exact seek lands on a frame boundary. */
+const FRAME_SECONDS = 1 / 30;
 
 /** Centre of an element in physical pixels, which is what X11 pointer coordinates are. */
 function centreOf(selector) {
@@ -30,6 +34,20 @@ async function clickElement(toplevel, selector) {
   }
   // No window manager under Xvfb, so the toplevel origin is also the viewport origin.
   clickAt(toplevel.absX + centre.x, toplevel.absY + centre.y);
+}
+
+/**
+ * The playback position in seconds, read from the slider rather than the clock text, which is
+ * floored to whole seconds (VideoControls.tsx). Both are written from mpv's own `time-pos`.
+ */
+async function position() {
+  const raw = await browser.execute(
+    () => document.querySelector(".controls__slider")?.value ?? null,
+  );
+  if (raw === null) {
+    throw new Error(".controls__slider is missing: there is no playback position to read");
+  }
+  return Number(raw);
 }
 
 describe("video playback", () => {
@@ -127,5 +145,82 @@ describe("video playback", () => {
     );
 
     expect(mapState(surface.id)).toBe("IsViewable");
+  });
+
+  it("seeks the video to where the slider is dragged", async () => {
+    const slider = await browser.execute(() => {
+      const element = document.querySelector(".controls__slider");
+      if (element === null) {
+        return null;
+      }
+      const rect = element.getBoundingClientRect();
+      return {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        dpr: window.devicePixelRatio,
+        duration: Number(element.max),
+      };
+    });
+    if (slider === null) {
+      throw new Error(".controls__slider is missing from the DOM");
+    }
+    expect(slider.duration).toBeGreaterThan(0);
+    const label = await browser.execute(
+      () => document.querySelector(".controls__button")?.textContent ?? null,
+    );
+    // Paused, so nothing but the drag can move the number the assertions below read.
+    expect(label).toBe("Play");
+
+    /**
+     * The drop lands on the horizontal centre of the track, which is the one x where the thumb's
+     * own width cancels out: a range input maps the pointer across the track minus the thumb, and
+     * that mapping puts the exact midpoint of min..max under the midpoint of the rect whatever the
+     * thumb measures. So the expected value is arithmetic, not a guess about WebKit's metrics, and
+     * what is left to absorb is the pointer rounding and the frame the seek lands on.
+     */
+    const target = slider.duration / 2;
+    const tolerance =
+      (POINTER_SLOP_PX / (slider.width * slider.dpr)) * slider.duration + FRAME_SECONDS;
+    const y = toplevel.absY + (slider.y + slider.height / 2) * slider.dpr;
+    const from = toplevel.absX + (slider.x + POINTER_SLOP_PX) * slider.dpr;
+    const to = toplevel.absX + (slider.x + slider.width / 2) * slider.dpr;
+
+    dragAt(from, y, to, y);
+
+    const dropped = await waitFor(
+      async () => {
+        const value = await position();
+        return Math.abs(value - target) <= tolerance ? value : null;
+      },
+      {
+        timeout: 15000,
+        message:
+          `the slider to report ${target.toFixed(2)}s (+/-${tolerance.toFixed(2)}s) after being ` +
+          `dragged to the middle of its track`,
+      },
+    );
+
+    // The reading above is still only what the app asked for: `seek` writes the target into the
+    // position the moment it sends it. Playing puts mpv's own clock back in the number, so a seek
+    // that never reached mpv counts up from where the file was instead of from the drop.
+    const startedAt = Date.now();
+    await clickElement(toplevel, ".controls__button");
+    const playing = await waitFor(
+      async () => {
+        const value = await position();
+        return value > dropped ? value : null;
+      },
+      {
+        timeout: 15000,
+        message: `playback to carry on from the ${dropped.toFixed(2)}s the drag left it at`,
+      },
+    );
+    // Carried on from the drop rather than landing somewhere else: everything past the target is
+    // the time the clip really spent playing while this waited.
+    expect(playing).toBeLessThanOrEqual(target + tolerance + (Date.now() - startedAt) / 1000);
+
+    await clickElement(toplevel, ".controls__button");
   });
 });

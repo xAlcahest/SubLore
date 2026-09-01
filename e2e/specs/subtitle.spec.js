@@ -1,23 +1,28 @@
 /* global describe, it, before, document, window */
 import { Buffer } from "node:buffer";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
 import { browser, expect } from "@wdio/globals";
 
 import { answerChooser, waitForChooser } from "../lib/chooser.js";
-import { clickAt, focusWindow } from "../lib/input.js";
+import { clickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
 
-/** What the status line says for the two clean SRT fixtures this spec opens. */
+/** What the status line says for the clean fixtures this spec opens, one per format in v1 scope. */
 const LF_STATUS = "SRT · 3 cues · LF";
 const CRLF_STATUS = "SRT · 3 cues · CRLF";
+const ASS_STATUS = "ASS · 3 cues · CRLF";
+const VTT_STATUS = "VTT · 3 cues · LF";
 /** missing-arrow.srt loses its arrow on line 6; the sidecar next to the fixture says so too. */
 const MALFORMED_LINE = "Line 6";
 const NO_FILE_STATUS = "No subtitle file open.";
+/** The cue the discard check edits, 1-based in the list, and what it types over the text there. */
+const DISCARD_POSITION = 1;
+const DISCARD_TEXT = "Typed and then thrown away";
 
 /** Subtitle fixtures are committed, unlike the video one: a missing file is a broken checkout. */
 function fixture(...parts) {
@@ -64,8 +69,44 @@ async function clickElement(toplevel, selector) {
   clickAt(toplevel.absX + centre.x, toplevel.absY + centre.y);
 }
 
+/** Click the text cell of the row at a 1-based list position, which opens its inline editor. */
+async function clickRow(toplevel, position) {
+  const centre = await browser.execute((wanted) => {
+    const rows = Array.from(document.querySelectorAll(".cuelist__row"));
+    const row = rows.find(
+      (candidate) => candidate.querySelector(".cuelist__pos")?.textContent === wanted,
+    );
+    const cell = row?.querySelector(".cuelist__text");
+    if (!cell) {
+      return null;
+    }
+    const rect = cell.getBoundingClientRect();
+    const dpr = window.devicePixelRatio;
+    return { x: (rect.x + rect.width / 2) * dpr, y: (rect.y + rect.height / 2) * dpr };
+  }, String(position));
+  if (centre === null) {
+    throw new Error(`row ${position} is missing from the DOM`);
+  }
+  clickAt(toplevel.absX + centre.x, toplevel.absY + centre.y);
+}
+
+/** The text a row shows, by 1-based list position, or null when that row is not rendered. */
+function rowText(position) {
+  return browser.execute((wanted) => {
+    const rows = Array.from(document.querySelectorAll(".cuelist__row"));
+    const row = rows.find(
+      (candidate) => candidate.querySelector(".cuelist__pos")?.textContent === wanted,
+    );
+    return row?.querySelector(".cuelist__text")?.textContent ?? null;
+  }, String(position));
+}
+
 function textOf(selector) {
   return browser.execute((css) => document.querySelector(css)?.textContent ?? null, selector);
+}
+
+function present(selector) {
+  return browser.execute((css) => document.querySelector(css) !== null, selector);
 }
 
 /** Open a subtitle through the system chooser, which is the only route since T1. */
@@ -82,6 +123,21 @@ async function saveCopyTo(toplevel, destination) {
   const chooser = await waitForChooser("Save a copy of the subtitle");
   await answerChooser(chooser, destination, "save a copy");
   focusWindow(toplevel.id);
+}
+
+/** Save the open document elsewhere and prove the copy holds the bytes that were opened. */
+async function savesIdenticalCopy(toplevel, source, saveDir) {
+  const destination = path.join(saveDir, path.basename(source));
+
+  await saveCopyTo(toplevel, destination);
+  await waitFor(async () => (await textOf(".subbar__status"))?.includes(destination) === true, {
+    timeout: 20000,
+    message: `the status line to report the copy at ${destination}`,
+  });
+
+  expect(await textOf(".subbar__error")).toBe(null);
+  // The point of the whole milestone: what came back out is what went in, byte for byte.
+  expect(Buffer.compare(readFileSync(source), readFileSync(destination))).toBe(0);
 }
 
 async function waitForStatus(expected) {
@@ -123,20 +179,33 @@ describe("subtitle open and save", () => {
 
   it("saves a byte-identical copy", async () => {
     const source = fixture("srt", "clean", "basic-crlf.srt");
-    const destination = path.join(saveDir, "basic-crlf.srt");
 
     await openSubtitle(toplevel, source);
     await waitForStatus(CRLF_STATUS);
 
-    await saveCopyTo(toplevel, destination);
-    await waitFor(async () => (await textOf(".subbar__status"))?.includes(destination) === true, {
-      timeout: 20000,
-      message: `the status line to report the copy at ${destination}`,
-    });
+    await savesIdenticalCopy(toplevel, source, saveDir);
+  });
 
+  // SRT is not the format range: CONTRIBUTING.md section 1 puts ASS and VTT in v1 with the same
+  // lossless promise, and until these two the app was only ever driven through one of the three.
+  it("opens an ASS fixture and saves a byte-identical copy", async () => {
+    const source = fixture("ass", "clean", "basic.ass");
+
+    await openSubtitle(toplevel, source);
+    expect(await waitForStatus(ASS_STATUS)).toBe(ASS_STATUS);
     expect(await textOf(".subbar__error")).toBe(null);
-    // The point of the whole milestone: what came back out is what went in, byte for byte.
-    expect(Buffer.compare(readFileSync(source), readFileSync(destination))).toBe(0);
+
+    await savesIdenticalCopy(toplevel, source, saveDir);
+  });
+
+  it("opens a VTT fixture and saves a byte-identical copy", async () => {
+    const source = fixture("vtt", "clean", "basic.vtt");
+
+    await openSubtitle(toplevel, source);
+    expect(await waitForStatus(VTT_STATUS)).toBe(VTT_STATUS);
+    expect(await textOf(".subbar__error")).toBe(null);
+
+    await savesIdenticalCopy(toplevel, source, saveDir);
   });
 
   it("reports a malformed file readably and stays usable", async () => {
@@ -156,5 +225,54 @@ describe("subtitle open and save", () => {
     await openSubtitle(toplevel, fixture("srt", "clean", "basic-lf.srt"));
     expect(await waitForStatus(LF_STATUS)).toBe(LF_STATUS);
     expect(await textOf(".subbar__error")).toBe(null);
+  });
+
+  it("throws an unsaved edit away and writes nothing when the edit is discarded", async () => {
+    // The committed fixture is copied first: the file the app is pointed at here is one it may
+    // legitimately write to, so a defect shows up as a changed copy rather than a changed fixture.
+    const file = path.join(saveDir, "discard-basic-lf.srt");
+    copyFileSync(fixture("srt", "clean", "basic-lf.srt"), file);
+    const opened = readFileSync(file);
+
+    await openSubtitle(toplevel, file);
+    await waitForStatus(LF_STATUS);
+    const original = await rowText(DISCARD_POSITION);
+    expect(original).not.toBe(null);
+
+    await clickRow(toplevel, DISCARD_POSITION);
+    await waitFor(() => present(".cuelist__editor"), {
+      timeout: 15000,
+      message: "the inline editor to open",
+    });
+    pressKey("ctrl+a");
+    typeText(DISCARD_TEXT);
+    pressKey("Return");
+    await waitFor(async () => (await rowText(DISCARD_POSITION)) === DISCARD_TEXT, {
+      timeout: 20000,
+      message: `row ${DISCARD_POSITION} to hold the edit`,
+    });
+    expect(await present(".subbar__dirty")).toBe(true);
+
+    // Discard is offered only where it is meant: an open the unsaved edit refused. Reopening the
+    // same file is that refusal at its plainest, and what comes back is the file on disk.
+    expect(await present(".subbar__discard")).toBe(false);
+    await openSubtitle(toplevel, file);
+    await waitFor(() => present(".subbar__discard"), {
+      timeout: 20000,
+      message: "the discard button to appear once the edit refused an open",
+    });
+    expect(await rowText(DISCARD_POSITION)).toBe(DISCARD_TEXT);
+
+    await clickElement(toplevel, ".subbar__discard");
+    await waitFor(async () => (await rowText(DISCARD_POSITION)) === original, {
+      timeout: 20000,
+      message: `row ${DISCARD_POSITION} to go back to the text it was opened with`,
+    });
+    expect(await waitForStatus(LF_STATUS)).toBe(LF_STATUS);
+    expect(await present(".subbar__dirty")).toBe(false);
+    expect(await present(".subbar__discard")).toBe(false);
+    expect(await present(".subbar__error")).toBe(false);
+    // Discarding is not a write: the file is still every byte it was opened with.
+    expect(readFileSync(file).equals(opened)).toBe(true);
   });
 });
