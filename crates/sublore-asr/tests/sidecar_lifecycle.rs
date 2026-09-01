@@ -38,8 +38,12 @@ const TRANSCRIPT_JSON: &str = r#"{
 fn request(media: std::path::PathBuf, script: std::path::PathBuf) -> TranscribeRequest {
     let mut request =
         TranscribeRequest::new(media, script, Language::Code("en".to_owned()), Compute::Cpu);
-    // The tests must not wait five minutes to see the real timer fire.
-    request.stall = Duration::from_millis(600);
+    // Long enough that a healthy run is never ended by it, short enough that a genuinely wedged
+    // child does not hold the suite for five minutes. The one test that measures the timer sets its
+    // own short value; every other test here runs ffmpeg over real audio, and on a slow runner that
+    // took longer than the 600 ms this used to be — a Windows CI job classified a finished run as
+    // Stalled on 2026-09-01.
+    request.stall = Duration::from_secs(60);
     request
 }
 
@@ -184,9 +188,7 @@ fn cancelling_mid_run_kills_the_child_and_leaves_no_process_behind() {
         })
     };
 
-    let mut request = request(media, script);
-    // A run this test would otherwise sit in forever: the stall timer must not be what ends it.
-    request.stall = Duration::from_secs(60);
+    let request = request(media, script);
     let error = transcribe(&sandbox.tools(), &request, &cancel, &|_, _| {})
         .expect_err("a cancelled run is not a transcript");
     watcher.join().expect("the watcher thread should finish");
@@ -230,15 +232,14 @@ fn a_child_that_says_nothing_is_killed_by_the_stall_timer() {
         "script",
         &[&format!("pid {}", pid_file.display()), "sleep-forever"],
     );
+    // The subject of this test, so it is stated here and not inherited: the default is long enough
+    // that no healthy run trips it, and this run wants it to fire.
+    let mut request = request(media, script);
+    request.stall = Duration::from_millis(600);
 
     let started = Instant::now();
-    let error = transcribe(
-        &sandbox.tools(),
-        &request(media, script),
-        &Cancel::new(),
-        &|_, _| {},
-    )
-    .expect_err("a silent child is not a transcript");
+    let error = transcribe(&sandbox.tools(), &request, &Cancel::new(), &|_, _| {})
+        .expect_err("a silent child is not a transcript");
 
     assert_eq!(error.kind, AsrErrorKind::Stalled);
     assert!(
@@ -347,8 +348,7 @@ fn five_megabytes_of_stderr_do_not_deadlock_the_run() {
         ],
     );
 
-    let mut request = request(media, script);
-    request.stall = Duration::from_secs(60);
+    let request = request(media, script);
     let transcript = transcribe(&sandbox.tools(), &request, &Cancel::new(), &|_, _| {})
         .expect("a chatty child still finishes");
 
@@ -548,7 +548,6 @@ fn a_cancelled_gpu_run_is_not_retried_on_the_cpu() {
 
     let mut request = request(media, script);
     request.compute = Compute::Gpu;
-    request.stall = Duration::from_secs(60);
     let started = Instant::now();
     let error = transcribe(&sandbox.tools(), &request, &cancel, &|_, _| {})
         .expect_err("the user asked for it to stop");
