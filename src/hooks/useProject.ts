@@ -59,7 +59,7 @@ export type Project = {
   addEpisode: (title: string) => Promise<void>;
   attachFile: (episodeId: number, role: FileRole, path: string) => Promise<void>;
   remove: () => Promise<void>;
-  choosePath: (kind: "folder" | "file") => Promise<string | null>;
+  choosePath: (kind: "project-folder" | "project-file") => Promise<string | null>;
 };
 
 export function useProject(): Project {
@@ -125,12 +125,12 @@ export function useProject(): Project {
     }
   }, []);
 
-  const choosePath = useCallback(async (kind: "folder" | "file") => {
+  const choosePath = useCallback(async (kind: "project-folder" | "project-file") => {
     setBusy(true);
     setError(null);
     try {
       // Null means the user cancelled the dialog, which is not a failure.
-      return await invoke<string | null>("project_choose_path", { kind });
+      return await invoke<string | null>("choose_path", { kind });
     } catch (failure) {
       setError(toProjectError(failure));
       return null;
