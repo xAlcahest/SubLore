@@ -738,3 +738,20 @@ fn a_document_with_no_file_is_unsaved_from_the_first_moment_and_edits_like_any_o
     session.mark_saved();
     assert!(!session.dirty(), "a write is what makes it saved");
 }
+
+#[test]
+fn a_document_with_no_file_keeps_the_path_its_first_save_gave_it() {
+    let mut session = EditSession::untitled(document("srt/clean/basic-lf.srt"));
+    assert_eq!(session.path(), None);
+
+    // What the first save adopts, so every save after it writes there (decision 24, B2).
+    session.adopt_path(PathBuf::from("/tmp/episode-01.srt"));
+    assert_eq!(session.path(), Some(Path::new("/tmp/episode-01.srt")));
+
+    // Editing after the adoption does not take the file away again.
+    session
+        .apply(&set_text(0, "Corrected"), Run::New, Instant::now())
+        .expect("the same mutation API");
+    assert!(session.dirty());
+    assert_eq!(session.path(), Some(Path::new("/tmp/episode-01.srt")));
+}

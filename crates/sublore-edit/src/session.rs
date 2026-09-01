@@ -54,6 +54,12 @@ impl EditSession {
         self.path.as_deref()
     }
 
+    /// Take the file a document that had none has just been written to. Its own file from now on,
+    /// which is what a first save decides (decision 24, B2).
+    pub fn adopt_path(&mut self, path: PathBuf) {
+        self.path = Some(path);
+    }
+
     pub fn document(&self) -> &SubtitleDocument {
         &self.document
     }

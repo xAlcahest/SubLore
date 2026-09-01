@@ -500,8 +500,20 @@ fn save_open_file(app: &AppHandle) -> Answered {
         log::error!("close gate: asked to save with no subtitle state");
         return Answered::Stay;
     };
-    let outcome = subtitle::backup_root(app)
+    let written = subtitle::backup_root(app)
         .and_then(|backups| subtitle::save_current(&state.slot(), backups));
+    let outcome = match written {
+        // A document that has never had a file is asked where it goes, so the gate's Save has a way
+        // to succeed on one (decision 24, B2).
+        Err(error) if error.code == subtitle::error::SubtitleErrorCode::NoPath => {
+            match save_where_asked(app, &state) {
+                Some(result) => result.map(Some),
+                // Cancelled: nothing is written, and the window stays open with the work in it.
+                None => return Answered::Stay,
+            }
+        }
+        other => other,
+    };
     match after_save(outcome) {
         Ok(after) => Answered::Close(after),
         Err(error) => {
@@ -509,6 +521,31 @@ fn save_open_file(app: &AppHandle) -> Answered {
             report_save_failure(app, &error);
             Answered::Stay
         }
+    }
+}
+
+/// Ask where a document with no file should go, and write it there. `None` is the user cancelling
+/// the chooser, which writes nothing.
+///
+/// This runs on the dialog's answer thread, never on the main one, which is what the chooser needs
+/// (`chooser::pick`).
+fn save_where_asked(
+    app: &AppHandle,
+    state: &subtitle::SubtitleState,
+) -> Option<Result<subtitle::SubtitleSaved, subtitle::error::SubtitleError>> {
+    match chooser::choose(app, chooser::Choice::SubtitleFirstSave, None) {
+        Ok(Some(destination)) => {
+            Some(subtitle::backup_root(app).and_then(|backups| {
+                subtitle::save_current_as(&state.slot(), &destination, backups)
+            }))
+        }
+        Ok(None) => None,
+        // A chooser that could not be raised leaves the work unwritten, which is a failed save and
+        // not a cancellation: the user asked for one and never got the question.
+        Err(error) => Some(Err(subtitle::error::SubtitleError::new(
+            subtitle::error::SubtitleErrorCode::CommandFailed,
+            format!("the save chooser could not be raised: {error:?}"),
+        ))),
     }
 }
 

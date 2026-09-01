@@ -284,6 +284,9 @@ export function useSubtitleFile(): SubtitleFile {
         if (summary === null) {
           return;
         }
+        // A document that has never had a file is not writing a copy: this write is its first save,
+        // so it adopts the path and points there from now on (decision 24, B2).
+        const adopting = summary.path === null;
         setError(null);
         try {
           const written = await invoke<SubtitleSaved>("subtitle_save_as", {
@@ -291,7 +294,10 @@ export function useSubtitleFile(): SubtitleFile {
             destination,
           });
           setSaved(written);
-          setSavedInPlace(false);
+          setSavedInPlace(adopting);
+          if (adopting) {
+            setSummary((current) => (current === null ? null : { ...current, path: written.path }));
+          }
           // A copy elsewhere leaves a file of its own unsaved, and a document that had none saved.
           setDirty(written.dirty);
         } catch (failure) {

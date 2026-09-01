@@ -23,6 +23,9 @@ pub const CHOOSE_PROJECT_FILE: &str = "Choose a video or subtitle file";
 pub const CHOOSE_VIDEO: &str = "Choose a video";
 pub const CHOOSE_SUBTITLE: &str = "Choose a subtitle";
 pub const CHOOSE_SUBTITLE_SAVE: &str = "Save a copy of the subtitle";
+/// A first save is not a copy: it is where a document that has never had a file goes from now on
+/// (decision 24, B2), so it asks under its own title.
+pub const CHOOSE_SUBTITLE_FIRST_SAVE: &str = "Save the subtitle";
 pub const CHOOSE_ACCEPT: &str = "_Open";
 /// Naming a file to write, not picking one that exists, so the button says what it does.
 pub const CHOOSE_SAVE: &str = "Sa_ve";
