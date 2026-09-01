@@ -9,11 +9,12 @@ name="$1"
 script="$2"
 
 mkdir -p ci-logs
-# The screen is sized explicitly: a root window smaller than the 1024x700 app window fails the
-# fixture, and the xvfb-run default differs per distribution.
+# The screen is sized explicitly: a root window smaller than the window under test fails the
+# fixture, and the xvfb-run default differs per distribution. 1920x1080 is the largest size a check
+# can resize the app window to and still have all of it on screen.
 # No pipe to tee: with a pipeline the status belongs to tee unless pipefail is on, and this must be
 # the check's own status whatever the shell is configured to do.
-xvfb-run -a -s "-screen 0 1280x1024x24" pnpm "$script" > "ci-logs/$name.log" 2>&1
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm "$script" > "ci-logs/$name.log" 2>&1
 status=$?
 cat "ci-logs/$name.log"
 echo "$status" > "ci-logs/$name.exit"

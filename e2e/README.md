@@ -82,13 +82,13 @@ is ready, so the `IsViewable` check is what makes this test meaningful.
 sh fixtures/video/make-sample.sh     # the fixture is generated, never committed
 sh scripts/fetch-model.sh            # ggml-tiny.en.bin, fetched once, never committed
 pnpm e2e:build                       # tauri build --debug --no-bundle
-xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e           # the four WebDriver specs
-xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:shutdown  # the clean-close check
-xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate  # the unsaved-edits gate
-xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:close-gate-late-edit  # an edit made while the answer is in flight
-xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:startup-args  # names the command line cannot carry
-xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:scale       # an integer display scale
-xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:picker-thread  # the picker starts no second GTK thread
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e           # the four WebDriver specs
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:shutdown  # the clean-close check
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:close-gate  # the unsaved-edits gate
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:close-gate-late-edit  # an edit made while the answer is in flight
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:startup-args  # names the command line cannot carry
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:scale       # an integer display scale
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:picker-thread  # the picker starts no second GTK thread
 ```
 
 Two more have prerequisites no headless runner has, so they are run by hand and are not CI steps:
@@ -98,9 +98,10 @@ pnpm e2e:webview   # needs /sys/module/nvidia for the branch it tests to be take
 pnpm e2e:wayland   # needs a real Wayland session, so no Xvfb wrapper
 ```
 
-The screen has to be bigger than the 1024x700 window. Fedora's `xvfb-run` defaults to 640x480, and
-on a root window that small the fixture never reaches the ready state, so the size is passed
-explicitly here and in CI.
+The screen has to hold the whole window under test. Fedora's `xvfb-run` defaults to 640x480, and on
+a root window that small the fixture never reaches the ready state, so the size is passed explicitly
+here and in CI. The app starts at 1024x700 and `lib/input.js`'s `resizeWindow` can grow it, so the
+screen is 1920x1080: the largest window a check can ask for and still measure all of.
 
 Prerequisites, all of them dev tools rather than repo dependencies:
 
