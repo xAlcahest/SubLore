@@ -28,7 +28,7 @@ type ProjectPanelProps = {
   onDelete: () => void;
   onAddEpisode: (title: string) => void;
   onAttachFile: (episodeId: number, role: FileRole, path: string) => void;
-  onChoosePath: (kind: "folder" | "file") => Promise<string | null>;
+  onChoosePath: (kind: "project-folder" | "project-file") => Promise<string | null>;
 };
 
 /**
@@ -67,12 +67,12 @@ export default function ProjectPanel({
   const trimmedEpisode = episodeTitle.trim();
   const trimmedFile = filePath.trim();
 
-  async function choose(kind: "folder" | "file") {
+  async function choose(kind: "project-folder" | "project-file") {
     const picked = await onChoosePath(kind);
     if (picked === null) {
       return;
     }
-    if (kind === "folder") {
+    if (kind === "project-folder") {
       setFolder(picked);
     } else {
       setFilePath(picked);
@@ -112,7 +112,7 @@ export default function ProjectPanel({
           className="project__choose-folder"
           type="button"
           disabled={busy}
-          onClick={() => void choose("folder")}
+          onClick={() => void choose("project-folder")}
         >
           {en.project.choose}
         </button>
@@ -176,7 +176,7 @@ export default function ProjectPanel({
             className="project__choose-file"
             type="button"
             disabled={busy}
-            onClick={() => void choose("file")}
+            onClick={() => void choose("project-file")}
           >
             {en.project.choose}
           </button>

@@ -1,4 +1,5 @@
 pub mod asr;
+pub mod chooser;
 pub mod crash;
 pub mod dialog;
 pub mod project;
@@ -110,9 +111,9 @@ pub fn run() -> tauri::Result<()> {
             asr::asr_model_download_cancel,
             asr::asr_transcribe_start,
             asr::asr_transcribe_cancel,
+            chooser::choose_path,
             project::project_add_episode,
             project::project_attach_file,
-            project::project_choose_path,
             project::project_create,
             project::project_delete,
             project::project_open,

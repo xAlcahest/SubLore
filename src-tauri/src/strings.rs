@@ -20,7 +20,12 @@ pub const CHOOSE_PROJECT_FILE: &str = "Choose a video or subtitle file";
 /// The chooser's own buttons on Linux, where Sublore builds it rather than the plugin (N1c). The
 /// underscore marks the mnemonic, as in the close gate below; "Open" is what GTK's own file chooser
 /// calls the accept button in both modes, and Alt+S is taken by the chooser's search.
+pub const CHOOSE_VIDEO: &str = "Choose a video";
+pub const CHOOSE_SUBTITLE: &str = "Choose a subtitle";
+pub const CHOOSE_SUBTITLE_SAVE: &str = "Save a copy of the subtitle";
 pub const CHOOSE_ACCEPT: &str = "_Open";
+/// Naming a file to write, not picking one that exists, so the button says what it does.
+pub const CHOOSE_SAVE: &str = "Sa_ve";
 pub const CHOOSE_CANCEL: &str = "_Cancel";
 
 /// The close gate. Native, not webview: the answer decides whether the window survives, and the

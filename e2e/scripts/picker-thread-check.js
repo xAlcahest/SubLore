@@ -439,7 +439,10 @@ async function main() {
     await answerChooser(folderChooser, projectFolder, "folder");
     check(
       "the folder chooser handed back the folder it was given",
-      await said(dataHome, new RegExp(`project: chose a folder: ${quoted(projectFolder)}$`, "m")),
+      await said(
+        dataHome,
+        new RegExp(`chooser: chose a project-folder: ${quoted(projectFolder)}$`, "m"),
+      ),
       `${projectFolder} never came back. The app's log held:\n${appLog(dataHome)}`,
     );
 
@@ -465,13 +468,13 @@ async function main() {
     await answerChooser(fileChooser, subtitle, "file");
     check(
       "the file chooser handed back the file it was given",
-      await said(dataHome, new RegExp(`project: chose a file: ${quoted(subtitle)}$`, "m")),
+      await said(dataHome, new RegExp(`chooser: chose a project-file: ${quoted(subtitle)}$`, "m")),
       `${subtitle} never came back. The app's log held:\n${appLog(dataHome)}`,
     );
 
     // A cancelled choice is an outcome, not a failure, and the panel has to be told so. Counted
     // from before the Escape: matching the whole log would pass on a cancellation from earlier.
-    const CANCELLED = /project: the file choice was cancelled/g;
+    const CANCELLED = /chooser: the project-file choice was cancelled/g;
     const before_escape = (appLog(dataHome).match(CANCELLED) ?? []).length;
     const cancelled = await clickUntilChooser(state, toplevel, at(CHOOSE_FILE), FILE_TITLE);
     focusWindow(cancelled.id);
