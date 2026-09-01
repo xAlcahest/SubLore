@@ -176,6 +176,39 @@ export function doubleClickAt(x, y) {
   xdotool(["click", "--repeat", "2", "--delay", "40", "1"]);
 }
 
+/**
+ * Press at one point, travel to another and release: the gesture a click cannot stand in for.
+ *
+ * A range input reads the motion between the two ends, so the pointer is walked there in steps
+ * rather than teleported: one jump from press to release is a path the control never sees. Each
+ * step skips the move when the pointer is already there, for the `--sync` reason `clickAt` gives.
+ */
+export function dragAt(fromX, fromY, toX, toY, steps = 8) {
+  const start = { x: Math.round(fromX), y: Math.round(fromY) };
+  const end = { x: Math.round(toX), y: Math.round(toY) };
+  moveTo(start);
+  xdotool(["mousedown", "1"]);
+  try {
+    for (let step = 1; step <= steps; step += 1) {
+      moveTo({
+        x: Math.round(start.x + ((end.x - start.x) * step) / steps),
+        y: Math.round(start.y + ((end.y - start.y) * step) / steps),
+      });
+    }
+  } finally {
+    // A button left down lands on whatever the next check clicks, in a run nobody is watching.
+    xdotool(["mouseup", "1"]);
+  }
+}
+
+/** Move the pointer, unless it is already there. See the `--sync` note in `clickAt`. */
+function moveTo(target) {
+  const now = pointerLocation();
+  if (now.x !== target.x || now.y !== target.y) {
+    xdotool(["mousemove", "--sync", String(target.x), String(target.y)]);
+  }
+}
+
 export function typeText(text) {
   xdotool(["type", "--delay", "5", text]);
 }
