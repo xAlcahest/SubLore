@@ -1,3 +1,36 @@
+Sublore — translation memory for subtitles.
+Copyright (C) 2026 Alcahest
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+ADDITIONAL PERMISSION UNDER GNU GPL VERSION 3 SECTION 7
+
+If you modify this Program, or any covered work, by linking or combining it
+with a module that this Program loads at run time through the
+`sublore-module-api` interface (or a modified version of that interface), the
+licensors of this Program grant you additional permission to convey the
+resulting work.  A module loaded through that interface is not required to be
+released under the terms of this License, and its source code need not be
+offered.
+
+This permission covers only what crosses that interface.  It does not permit
+linking this Program into a larger proprietary work by any other means, and it
+does not alter the terms under which this Program itself is licensed.
+
+Granted by the sole copyright holder, 2026-09-01.
+
+
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 

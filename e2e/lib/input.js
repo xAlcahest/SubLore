@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 
-import { mapState } from "./x11.js";
+import { mapState, windowSize } from "./x11.js";
 
 /**
  * Real X11 input. WebKitWebDriver answers Element Click, Element Send Keys and the Actions
@@ -48,7 +48,7 @@ function requireOwnedDisplay() {
     throw new Error(
       `refusing to send synthetic input to ${process.env.DISPLAY}: a window manager is running ` +
         `there, so it is a real session and XTEST would type into it. Run the check under its own ` +
-        `X server: xvfb-run -a -s "-screen 0 1280x1024x24" pnpm e2e:<check>.`,
+        `X server: xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:<check>.`,
     );
   }
 }
@@ -93,6 +93,36 @@ export function focusWindow(id, timeoutMs = 5000) {
     throw new Error(
       `window ${id} is ${state} and X still refused focus: ${error.message}\n${describeWindow(id)}`,
     );
+  }
+}
+
+/**
+ * Resize a toplevel and return only once X reports the new size.
+ *
+ * `xdotool windowsize` sends the request and returns, so a caller that measures straight afterwards
+ * measures the old geometry. The layout a resize is asked for is never the point of the resize.
+ */
+export function resizeWindow(id, width, height, timeoutMs = 5000) {
+  xdotool(["windowsize", id, String(width), String(height)]);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const size = windowSize(id);
+    if (size === null) {
+      throw new Error(
+        `window ${id} was destroyed while it was being resized to ${width}x${height}.`,
+      );
+    }
+    if (size.width === width && size.height === height) {
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `window ${id} is still ${size.width}x${size.height} ${timeoutMs}ms after being asked for ` +
+          `${width}x${height}. Either the screen is too small to hold it, or something is resizing ` +
+          `it back.\n${describeWindow(id)}`,
+      );
+    }
+    sleepBriefly();
   }
 }
 

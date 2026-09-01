@@ -62,20 +62,27 @@ export function childWindows(id) {
   return parseWindowLines(xwininfo(["-id", id, "-children"])).filter((child) => child.id !== id);
 }
 
-/** `IsViewable`, `IsUnMapped` or `IsUnviewable`. An unmapped surface is not on screen. */
-export function mapState(id) {
-  let described;
+/** What `xwininfo` says about one window, or null once it is gone. */
+function describeOrNull(id) {
   try {
-    described = xwininfo(["-id", id]);
+    return xwininfo(["-id", id]);
   } catch (error) {
     // A window can be destroyed between being listed and being asked about, and X answers that with
     // `BadDrawable` on a request whose id no longer exists. That is a fact about the window, not a
     // failure of the harness, and reporting it as one cost a CI run its diagnosis (gate 2, run
     // 33366855143). Anything else is a real error and still throws.
     if (/No such window|BadDrawable/i.test(`${error.message}${error.stderr ?? ""}`)) {
-      return "IsGone";
+      return null;
     }
     throw error;
+  }
+}
+
+/** `IsViewable`, `IsUnMapped` or `IsUnviewable`. An unmapped surface is not on screen. */
+export function mapState(id) {
+  const described = describeOrNull(id);
+  if (described === null) {
+    return "IsGone";
   }
   const match = /Map State:\s*(\S+)/.exec(described);
   if (match === null) {
@@ -84,21 +91,60 @@ export function mapState(id) {
   return match[1];
 }
 
+/** GTK's group-leader window, which is never the app. */
+const groupLeaderWidth = 10;
+const groupLeaderHeight = 10;
+
 /**
- * The app toplevel, selected by geometry and exact name. Never by name alone: GTK also creates a
- * 10x10 group-leader window that answers to the same name (BACKLOG M0.5 harness note).
+ * The size X reports for one window, or null once it is gone.
+ * @param {string} id
+ * @returns {{width: number, height: number}|null}
+ */
+export function windowSize(id) {
+  const described = describeOrNull(id);
+  if (described === null) {
+    return null;
+  }
+  const width = /^\s*Width:\s*(\d+)\s*$/m.exec(described);
+  const height = /^\s*Height:\s*(\d+)\s*$/m.exec(described);
+  if (width === null || height === null) {
+    throw new Error(`xwininfo -id ${id} printed no Width and Height lines:\n${described}`);
+  }
+  return { width: Number(width[1]), height: Number(height[1]) };
+}
+
+/**
+ * The app toplevel at the size the caller states, defaulting to the size the app starts at.
+ * Selected by geometry and exact name, never by name alone: GTK also creates a 10x10 group-leader
+ * window that answers to the same name (BACKLOG M0.5 harness note).
+ * @param {{width?: number, height?: number}} size
  * @returns {{id: string, name: string|null, width: number, height: number,
  *            relX: number, relY: number, absX: number, absY: number}|null}
  */
-export function findToplevel() {
+export function findToplevel({ width = windowWidth, height = windowHeight } = {}) {
+  // A size that cannot match anything would otherwise be a null and a caller's timeout, which reads
+  // as the app never opening its window.
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    throw new Error(
+      `findToplevel was asked for a ${JSON.stringify(width)}x${JSON.stringify(height)} window, ` +
+        `which is not a size.`,
+    );
+  }
+  // Asking for the group leader's geometry would hand back the one window this function exists to
+  // refuse, so the guard survives the size becoming the caller's to choose.
+  if (width === groupLeaderWidth && height === groupLeaderHeight) {
+    throw new Error(
+      `refusing to look for a ${width}x${height} "${windowTitle}" toplevel: that size is GTK's ` +
+        `group-leader window, which is never the app.`,
+    );
+  }
   const tree = rootTree();
   const matches = parseWindowLines(tree).filter(
-    (window) =>
-      window.name === windowTitle && window.width === windowWidth && window.height === windowHeight,
+    (window) => window.name === windowTitle && window.width === width && window.height === height,
   );
   if (matches.length > 1) {
     throw new Error(
-      `expected exactly one ${windowWidth}x${windowHeight} "${windowTitle}" toplevel, found ` +
+      `expected exactly one ${width}x${height} "${windowTitle}" toplevel, found ` +
         `${matches.length} (${matches.map((w) => w.id).join(", ")}). ` +
         `A leftover app instance from an earlier run poisons every assertion.\n${tree}`,
     );
