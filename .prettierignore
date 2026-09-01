@@ -17,3 +17,10 @@ BACKLOG.md
 
 # A byte-exact capture of a real whisper run, and hand-written word lists. See BACKLOG.md M3.3.
 fixtures/asr/
+
+# Local tooling and its output: agent worktrees, the OMC state directory, and the logs the CI
+# scripts write when they are run by hand. None of it is the product, and CI never sees any of it.
+.claude/
+.omc/
+ci-logs/
+

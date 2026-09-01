@@ -29,6 +29,9 @@ tauri-build = { version = "2", features = [] }
 libc = "0.2"
 libmpv2 = { version = "6.0.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
+# The remembered chooser folders on disk. Already in the tree through tauri, MIT/Apache-2.0, and it
+# escapes what a hand-rolled line format would corrupt: a Linux path may contain a newline.
+serde_json = "1"
 sublore-asr = { path = "../crates/sublore-asr" }
 sublore-edit = { path = "../crates/sublore-edit" }
 sublore-formats = { path = "../crates/sublore-formats" }
@@ -40,8 +43,6 @@ tauri-plugin-log = "2"
 
 [dev-dependencies]
 libc = "0.2"
-# Asserting the exact JSON the UI receives. Already in the tree through tauri; tests only.
-serde_json = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gdkx11 = "0.18"

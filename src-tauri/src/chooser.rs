@@ -9,7 +9,13 @@
 //! gives: the dialog plugin's rfd backend starts a second thread and iterates GTK on it for the rest
 //! of the process's life, and GTK3 is not built to be driven from two threads. Every other platform
 //! keeps the plugin.
+//!
+//! Each kind of chooser opens where that kind last landed (BACKLOG N7). One folder per kind, not one
+//! for all five: a translator who has just attached a subtitle to an episode and then opens a video
+//! is not in the same folder, and a single memory would send them back to the wrong one every other
+//! gesture.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -110,6 +116,103 @@ fn save_name(suggested: Option<&str>) -> Option<String> {
         .map(|name| name.to_string_lossy().into_owned())
 }
 
+/// Where each kind of chooser last landed. Derived convenience rather than the user's own data, so
+/// it lives in the app's own store beside the models and the scratch (decision 20), never in a
+/// project folder. Losing it costs a translator one navigation.
+const MEMORY_FILE: &str = "chooser-folders.json";
+
+/// The remembered folders, keyed by [`Choice::as_str`]. Nothing here is worth failing a chooser
+/// over: an unreadable memory is no memory, said out loud and then ignored.
+fn memory(app: &AppHandle) -> BTreeMap<String, String> {
+    let Some(path) = memory_path(app) else {
+        return BTreeMap::new();
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) => {
+            // A first launch has no file, which is not something to say anything about.
+            if error.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("chooser: the remembered folders could not be read: {error}");
+            }
+            return BTreeMap::new();
+        }
+    };
+    serde_json::from_str(&text).unwrap_or_else(|error| {
+        log::warn!("chooser: the remembered folders are not readable JSON: {error}");
+        BTreeMap::new()
+    })
+}
+
+fn memory_path(app: &AppHandle) -> Option<PathBuf> {
+    use tauri::Manager;
+
+    match app.path().app_data_dir() {
+        Ok(dir) => Some(dir.join(MEMORY_FILE)),
+        Err(error) => {
+            log::warn!("chooser: no app data directory, so no folder is remembered: {error}");
+            None
+        }
+    }
+}
+
+/// The folder this kind of chooser opens at, or `None` for the platform's own default.
+///
+/// A remembered folder that has been moved or deleted since is dropped here: handing it to the
+/// chooser would open on a folder that is not there (BACKLOG N7).
+fn opens_at(folders: &BTreeMap<String, String>, choice: Choice) -> Option<PathBuf> {
+    let folder = PathBuf::from(folders.get(choice.as_str())?);
+    if !folder.is_dir() {
+        log::info!(
+            "chooser: the {} chooser's remembered folder is gone, opening at the default: {}",
+            choice.as_str(),
+            folder.display()
+        );
+        return None;
+    }
+    Some(folder)
+}
+
+/// The folder to remember for this kind, given what the user chose. A folder chooser answers with
+/// the folder itself; every other kind answers with a file inside one.
+fn folder_of(choice: Choice, chosen: &Path) -> Option<&Path> {
+    if choice == Choice::ProjectFolder {
+        Some(chosen)
+    } else {
+        chosen.parent()
+    }
+}
+
+/// Store where this kind of chooser landed. Only a chosen path reaches here, so a cancelled chooser
+/// leaves the memory exactly as it was (BACKLOG N7).
+fn remember(app: &AppHandle, choice: Choice, chosen: &Path) {
+    let (Some(path), Some(folder)) = (memory_path(app), folder_of(choice, chosen)) else {
+        return;
+    };
+    let Some(folder) = folder.to_str() else {
+        return;
+    };
+    let mut folders = memory(app);
+    folders.insert(choice.as_str().to_owned(), folder.to_owned());
+    if let Err(error) = write_memory(&path, &folders) {
+        log::warn!(
+            "chooser: where the {} chooser landed could not be stored: {error}",
+            choice.as_str()
+        );
+    }
+}
+
+/// Written whole and renamed over the old one: a half-written file would be read back as no memory
+/// at all, and the next chooser would open on the default with nothing said.
+fn write_memory(path: &Path, folders: &BTreeMap<String, String>) -> std::io::Result<()> {
+    let text = serde_json::to_string(folders).map_err(std::io::Error::other)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temp = path.with_extension("json.tmp");
+    std::fs::write(&temp, text)?;
+    std::fs::rename(&temp, path)
+}
+
 /// Ask the user for a path. `None` means they cancelled, which is an outcome and not a failure.
 ///
 /// `suggested` is a path whose file name a save chooser opens with; the others ignore it.
@@ -132,6 +235,7 @@ pub fn choose(
         ));
     };
     log::info!("chooser: chose a {}: {text}", choice.as_str());
+    remember(app, choice, &path);
     Ok(Some(text.to_owned()))
 }
 
@@ -160,6 +264,9 @@ fn pick(
     let (send, receive) = std::sync::mpsc::channel();
     let handle = app.clone();
     let name = save_name(suggested);
+    // Read here rather than in the closure below: that one runs on the main thread, where a file
+    // read is a stall of the whole interface.
+    let folder = opens_at(&memory(app), choice);
     app.run_on_main_thread(move || {
         // Transient and modal, which the plugin's chooser could not be: rfd builds with a null
         // parent, so it could end up behind the window that asked (BACKLOG N1).
@@ -179,6 +286,13 @@ fn pick(
         // A window that closes under its chooser takes the chooser with it, and the guard below
         // turns that into a cancellation instead of leaving one on screen with nobody to answer.
         dialog.set_destroy_with_parent(true);
+        // Before the name below: GTK builds a save chooser's answer from the current folder and the
+        // current name, in that order.
+        if let Some(folder) = folder.as_deref() {
+            if !dialog.set_current_folder(folder) {
+                log::warn!("chooser: GTK refused to open at {}", folder.display());
+            }
+        }
         if choice.is_save() {
             // Never silently replace a file the user already has. See CONTRIBUTING.md §3.
             dialog.set_do_overwrite_confirmation(true);
@@ -262,6 +376,9 @@ fn pick(
     use tauri_plugin_dialog::DialogExt;
 
     let mut dialog = app.dialog().file().set_title(choice.title());
+    if let Some(folder) = opens_at(&memory(app), choice) {
+        dialog = dialog.set_directory(folder);
+    }
     // A suggested name is the save chooser's question; the others are picking something that exists.
     if choice.is_save() {
         if let Some(name) = save_name(suggested) {
@@ -322,6 +439,48 @@ pub async fn choose_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A directory of this test's own, removed when it returns. No `tempfile` dependency for four
+    /// tests that need a path that exists and a path that does not.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let path =
+                std::env::temp_dir().join(format!("sublore-chooser-{}-{name}", std::process::id()));
+            std::fs::remove_dir_all(&path).ok();
+            std::fs::create_dir_all(&path).expect("a directory under the temp dir");
+            Self(path)
+        }
+
+        fn join(&self, name: &str) -> PathBuf {
+            self.0.join(name)
+        }
+
+        fn subdir(&self, name: &str) -> PathBuf {
+            let path = self.join(name);
+            std::fs::create_dir_all(&path).expect("a directory under the temp dir");
+            path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).ok();
+        }
+    }
+
+    fn folders(entries: &[(Choice, &Path)]) -> BTreeMap<String, String> {
+        entries
+            .iter()
+            .map(|(choice, path)| {
+                (
+                    choice.as_str().to_owned(),
+                    path.to_str().expect("a UTF-8 temp path").to_owned(),
+                )
+            })
+            .collect()
+    }
 
     #[test]
     fn every_kind_the_frontend_sends_asks_for_its_own_thing_under_its_own_title() {
@@ -406,5 +565,94 @@ mod tests {
         assert_eq!(save_name(Some("")), None);
         assert_eq!(save_name(Some("/")), None);
         assert_eq!(save_name(None), None);
+    }
+
+    #[test]
+    fn a_folder_chooser_remembers_the_folder_and_every_other_kind_the_one_it_chose_in() {
+        assert_eq!(
+            folder_of(Choice::ProjectFolder, Path::new("/media/series")),
+            Some(Path::new("/media/series")),
+            "the folder chooser answers with the folder itself"
+        );
+        for kind in ["project-file", "video", "subtitle", "subtitle-save"] {
+            let choice = Choice::parse(kind).expect("a kind the frontend sends");
+            assert_eq!(
+                folder_of(choice, Path::new("/media/series/ep01.srt")),
+                Some(Path::new("/media/series")),
+                "{kind} answers with a file, and the folder is where it was"
+            );
+        }
+        // Nothing to remember rather than a panic on a path with no parent.
+        assert_eq!(folder_of(Choice::Video, Path::new("/")), None);
+    }
+
+    #[test]
+    fn each_kind_opens_where_that_kind_landed_and_not_where_another_one_did() {
+        let temp = TempDir::new("per-kind");
+        let videos = temp.subdir("videos");
+        let subtitles = temp.subdir("subtitles");
+        let stored = folders(&[(Choice::Video, &videos), (Choice::Subtitle, &subtitles)]);
+
+        assert_eq!(opens_at(&stored, Choice::Video), Some(videos));
+        assert_eq!(opens_at(&stored, Choice::Subtitle), Some(subtitles));
+        assert_eq!(
+            opens_at(&stored, Choice::ProjectFolder),
+            None,
+            "a kind that has never been used has nowhere of its own to open"
+        );
+    }
+
+    #[test]
+    fn a_remembered_folder_that_is_no_longer_there_opens_the_chooser_at_its_default() {
+        let temp = TempDir::new("gone");
+        let gone = temp.join("moved-away");
+        let file = temp.join("ep01.srt");
+        std::fs::write(&file, "1\n").expect("a file under the temp dir");
+        let stored = folders(&[(Choice::ProjectFolder, &gone), (Choice::Video, &file)]);
+
+        assert_eq!(opens_at(&stored, Choice::ProjectFolder), None);
+        assert_eq!(
+            opens_at(&stored, Choice::Video),
+            None,
+            "a path that is now a file is not a folder to open at"
+        );
+    }
+
+    /// The case JSON is here for. A newline and a quote are legal in a Linux filename and forbidden
+    /// in a Windows one, so the folder this reads back cannot exist there. See BACKLOG.md N7.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_whose_name_holds_a_newline_and_a_quote_survives_the_round_trip() {
+        let temp = TempDir::new("awkward-name");
+        let awkward = temp.subdir("two\nlines \"quoted\"");
+        let stored = folders(&[(Choice::Subtitle, &awkward)]);
+        let path = temp.join("chooser-folders.json");
+
+        write_memory(&path, &stored).expect("the memory is written");
+        let text = std::fs::read_to_string(&path).expect("the memory is on disk");
+        let read: BTreeMap<String, String> = serde_json::from_str(&text).expect("readable JSON");
+
+        assert_eq!(read, stored);
+        assert_eq!(opens_at(&read, Choice::Subtitle), Some(awkward));
+    }
+
+    #[test]
+    fn the_folders_written_are_the_folders_read_back() {
+        let temp = TempDir::new("round-trip");
+        // Awkward on every platform: spaces, punctuation and a character outside ASCII.
+        let awkward = temp.subdir("season 2 — episodi (finale)");
+        let stored = folders(&[(Choice::Subtitle, &awkward)]);
+        let path = temp.join("chooser-folders.json");
+
+        write_memory(&path, &stored).expect("the memory is written");
+        let text = std::fs::read_to_string(&path).expect("the memory is on disk");
+        let read: BTreeMap<String, String> = serde_json::from_str(&text).expect("readable JSON");
+
+        assert_eq!(read, stored);
+        assert_eq!(opens_at(&read, Choice::Subtitle), Some(awkward));
+        assert!(
+            !path.with_extension("json.tmp").exists(),
+            "the temp file is renamed over the memory, never left beside it"
+        );
     }
 }
