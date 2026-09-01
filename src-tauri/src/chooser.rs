@@ -253,8 +253,11 @@ fn pick(
     use tauri_plugin_dialog::DialogExt;
 
     let mut dialog = app.dialog().file().set_title(choice.title());
-    if let Some(name) = suggested {
-        dialog = dialog.set_file_name(name);
+    // A suggested name is the save chooser's question; the others are picking something that exists.
+    if choice.is_save() {
+        if let Some(name) = suggested {
+            dialog = dialog.set_file_name(name);
+        }
     }
     let picked = match choice {
         Choice::ProjectFolder => dialog.blocking_pick_folder(),
