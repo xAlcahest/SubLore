@@ -22,6 +22,9 @@ jobs:
   check:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Without this the default is six hours. On 2026-09-01 apt hung inside "Install Linux system
+    # dependencies" and the job sat there while the other six checks had already answered.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -161,6 +164,9 @@ jobs:
   e2e:
     name: e2e smoke (ubuntu)
     runs-on: ubuntu-latest
+    # The longest job here: 16 minutes measured on 2026-09-01, and every check inside it has its own
+    # wait. This is the backstop for a runner that stops answering, not a budget for the suite.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v7
