@@ -83,8 +83,11 @@ export type SubtitleFile = {
   blockedPath: string | null;
   /** Counts successful opens. The list is keyed on it, so a new file starts at the top. */
   openId: number;
+  /** The transcription run whose cues are the open document, or null. See BACKLOG.md M3.5. */
+  adoptedRunId: number | null;
   open: (path: string) => Promise<void>;
   discardAndOpen: () => Promise<void>;
+  adoptTranscription: (runId: number) => Promise<void>;
   setText: (cue: number, text: string) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
@@ -104,6 +107,7 @@ export function useSubtitleFile(): SubtitleFile {
   const [error, setError] = useState<SubtitleError | null>(null);
   const [blockedPath, setBlockedPath] = useState<string | null>(null);
   const [openId, setOpenId] = useState(0);
+  const [adoptedRunId, setAdoptedRunId] = useState<number | null>(null);
 
   /** The revision the backend is at. A ref, not state: every call needs the value it has now. */
   const revision = useRef(0);
@@ -135,38 +139,47 @@ export function useSubtitleFile(): SubtitleFile {
     setTruncated(patch.truncated);
   }, []);
 
-  const openFile = useCallback(async (path: string) => {
-    setError(null);
-    setSaved(null);
-    try {
-      const opened = await invoke<SubtitleOpened>("subtitle_open", { path });
-      revision.current = opened.revision;
-      setSummary(opened.summary);
-      setCues(opened.cues);
-      setCanUndo(opened.canUndo);
-      setCanRedo(opened.canRedo);
-      setDirty(opened.dirty);
-      setTruncated(opened.truncated);
-      setBlockedPath(null);
-      setOpenId((current) => current + 1);
-    } catch (failure) {
-      const rejected = toSubtitleError(failure);
-      // Unsaved work is the one refusal that leaves the current file open: keep it on screen and
-      // let the user choose. Anything else means the file on screen did not open.
-      if (rejected.code === "unsavedChanges") {
-        setBlockedPath(path);
-      } else {
-        setSummary(null);
-        setCues([]);
-        setCanUndo(false);
-        setCanRedo(false);
-        setDirty(false);
-        setTruncated(false);
-        setBlockedPath(null);
-      }
-      setError(rejected);
-    }
+  /** Take a document the backend has just made the open one, whichever route opened it. */
+  const applyOpened = useCallback((opened: SubtitleOpened) => {
+    revision.current = opened.revision;
+    setSummary(opened.summary);
+    setCues(opened.cues);
+    setCanUndo(opened.canUndo);
+    setCanRedo(opened.canRedo);
+    setDirty(opened.dirty);
+    setTruncated(opened.truncated);
+    setBlockedPath(null);
+    setOpenId((current) => current + 1);
   }, []);
+
+  const openFile = useCallback(
+    async (path: string) => {
+      setError(null);
+      setSaved(null);
+      try {
+        applyOpened(await invoke<SubtitleOpened>("subtitle_open", { path }));
+        setAdoptedRunId(null);
+      } catch (failure) {
+        const rejected = toSubtitleError(failure);
+        // Unsaved work is the one refusal that leaves the current file open: keep it on screen and
+        // let the user choose. Anything else means the file on screen did not open.
+        if (rejected.code === "unsavedChanges") {
+          setBlockedPath(path);
+        } else {
+          setSummary(null);
+          setCues([]);
+          setCanUndo(false);
+          setCanRedo(false);
+          setDirty(false);
+          setTruncated(false);
+          setBlockedPath(null);
+          setAdoptedRunId(null);
+        }
+        setError(rejected);
+      }
+    },
+    [applyOpened],
+  );
 
   const open = useCallback(
     (path: string) => serialize(() => openFile(path)),
@@ -190,6 +203,33 @@ export function useSubtitleFile(): SubtitleFile {
         await openFile(blockedPath);
       }),
     [blockedPath, openFile, serialize],
+  );
+
+  /**
+   * Make a finished transcription's cues the open document. The backend asks about unsaved work
+   * itself, in the native dialog the close gate uses, and answers with the document it opened or
+   * with nothing when the user cancelled. See BACKLOG.md M3.5.
+   */
+  const adoptTranscription = useCallback(
+    (runId: number) =>
+      serialize(async () => {
+        setError(null);
+        setSaved(null);
+        try {
+          const opened = await invoke<SubtitleOpened | null>("subtitle_adopt_transcription", {
+            runId,
+          });
+          // Cancelled: the document on screen and the result in the bar both stay as they were.
+          if (opened === null) {
+            return;
+          }
+          applyOpened(opened);
+          setAdoptedRunId(runId);
+        } catch (failure) {
+          setError(toSubtitleError(failure));
+        }
+      }),
+    [applyOpened, serialize],
   );
 
   /** Every mutating command has the same shape: send the revision, take back a patch. */
@@ -223,10 +263,13 @@ export function useSubtitleFile(): SubtitleFile {
         }
         setError(null);
         try {
-          setSaved(await invoke<SubtitleSaved>("subtitle_save", { revision: revision.current }));
+          const written = await invoke<SubtitleSaved>("subtitle_save", {
+            revision: revision.current,
+          });
+          setSaved(written);
           setSavedInPlace(true);
-          // The bytes in hand are the bytes on disk, which is what the backend just recorded.
-          setDirty(false);
+          // What the write left behind, as the backend recorded it.
+          setDirty(written.dirty);
         } catch (failure) {
           setSaved(null);
           setError(toSubtitleError(failure));
@@ -243,14 +286,14 @@ export function useSubtitleFile(): SubtitleFile {
         }
         setError(null);
         try {
-          setSaved(
-            await invoke<SubtitleSaved>("subtitle_save_as", {
-              revision: revision.current,
-              destination,
-            }),
-          );
-          // A copy elsewhere is not this file being saved, so unsaved edits stay unsaved.
+          const written = await invoke<SubtitleSaved>("subtitle_save_as", {
+            revision: revision.current,
+            destination,
+          });
+          setSaved(written);
           setSavedInPlace(false);
+          // A copy elsewhere leaves a file of its own unsaved, and a document that had none saved.
+          setDirty(written.dirty);
         } catch (failure) {
           setSaved(null);
           setError(toSubtitleError(failure));
@@ -271,8 +314,10 @@ export function useSubtitleFile(): SubtitleFile {
     error,
     blockedPath,
     openId,
+    adoptedRunId,
     open,
     discardAndOpen,
+    adoptTranscription,
     setText,
     undo,
     redo,

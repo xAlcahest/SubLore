@@ -365,7 +365,8 @@ fn save_as_writes_a_copy_and_leaves_the_file_being_edited_unsaved() {
         "save-as does not write the file the session was opened from"
     );
 
-    // The file being edited still has unsaved work, and closing it must say so.
+    // The file being edited still has unsaved work: the write says so, and closing it asks.
+    assert!(saved.dirty, "a copy elsewhere is not this file being saved");
     assert_eq!(
         close_session(&slot, false)
             .expect_err("the edit is still unsaved")

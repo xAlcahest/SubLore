@@ -96,7 +96,12 @@ export type Transcription = {
   cancelDownload: (id: string) => Promise<void>;
 };
 
-export function useTranscription(): Transcription {
+/**
+ * `adopt` is called with the run id the moment a run finishes: a finished transcription becomes the
+ * open document, and the document is the subtitle session's to hold, not this hook's. See
+ * BACKLOG.md M3.5.
+ */
+export function useTranscription(adopt: (runId: number) => void): Transcription {
   const [models, setModels] = useState<AsrModelStatus[]>([]);
   const [modelId, setModelId] = useState("");
   const [useGpu, setUseGpu] = useState(true);
@@ -113,6 +118,12 @@ export function useTranscription(): Transcription {
   /** The run we know we started, and the last one that reached an end. See `mine` below. */
   const startedRef = useRef<number | null>(null);
   const finishedRef = useRef<number | null>(null);
+  /** Read through a ref: the listeners below are installed once, and reinstalling them because the
+   * caller handed over a new function would drop the events that arrive in between. */
+  const adoptRef = useRef(adopt);
+  useEffect(() => {
+    adoptRef.current = adopt;
+  });
 
   const refreshModels = useCallback(async () => {
     try {
@@ -157,6 +168,7 @@ export function useTranscription(): Transcription {
         setRunning(false);
         setPercent(100);
         setResult(event.payload);
+        adoptRef.current(event.payload.runId);
       }),
       listen<AsrRunFailed>("asr://error", (event) => {
         if (!mine(event.payload.runId)) {

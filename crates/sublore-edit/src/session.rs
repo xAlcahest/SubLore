@@ -15,7 +15,9 @@ use crate::history::{History, Run};
 use crate::plan::{self, Edit};
 
 pub struct EditSession {
-    path: PathBuf,
+    /// Where a save writes, or none for a document that has never had a file: a transcription is
+    /// born in memory and only a save gives it somewhere to go. See BACKLOG.md M3.5.
+    path: Option<PathBuf>,
     document: SubtitleDocument,
     history: History,
     /// The list as the UI last saw it, so a patch is a diff of two lists rather than a re-walk.
@@ -26,18 +28,30 @@ pub struct EditSession {
 impl EditSession {
     /// A file as it was opened: nothing to undo, nothing unsaved.
     pub fn open(path: PathBuf, document: SubtitleDocument) -> Self {
-        let views = diff::views(&document);
         Self {
-            path,
+            path: Some(path),
+            views: diff::views(&document),
             document,
             history: History::new(),
-            views,
             revision: 0,
         }
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    /// A document with no file behind it: unsaved from the first moment, because the only copy of
+    /// it is this one. See BACKLOG.md M3.5.
+    pub fn untitled(document: SubtitleDocument) -> Self {
+        Self {
+            path: None,
+            views: diff::views(&document),
+            document,
+            history: History::unsaved(),
+            revision: 0,
+        }
+    }
+
+    /// Where a save writes, or none while the document has never had a file.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
     }
 
     pub fn document(&self) -> &SubtitleDocument {

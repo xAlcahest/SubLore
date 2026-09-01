@@ -56,7 +56,8 @@ export default function SubtitleBar({
     setChoosing(true);
     try {
       // A save chooser opens on the open file's own name, which is what a copy is usually called.
-      const from = kind === "subtitle-save" && summary !== null ? summary.path : undefined;
+      // A document that has never had a file has no name to offer.
+      const from = kind === "subtitle-save" ? (summary?.path ?? undefined) : undefined;
       const path = await choosePath(kind, from);
       // Cancelled is an outcome, not a failure: nothing opens, nothing is written, nothing is said.
       if (path !== null) {
@@ -81,7 +82,7 @@ export default function SubtitleBar({
         <button
           className="subbar__savefile"
           type="button"
-          disabled={summary === null || !dirty}
+          disabled={summary === null || summary.path === null || !dirty}
           onClick={onSave}
         >
           {en.subtitle.saveFile}

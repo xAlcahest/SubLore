@@ -15,6 +15,9 @@ type TranscribeBarProps = {
   /** The video that is open, or null. Nothing can be transcribed without one. */
   mediaPath: string | null;
   transcription: Transcription;
+  /** The run whose cues are the open document, or null. See BACKLOG.md M3.5. */
+  adoptedRunId: number | null;
+  onUse: (runId: number) => void;
 };
 
 /** m:ss, the same shape the playback controls use. Punctuation, not translatable copy. */
@@ -48,10 +51,15 @@ function progressValue({ running, phase, percent, download }: Transcription): nu
 }
 
 /**
- * Choose a model, start a transcription, watch it, stop it. The cue list underneath is read only:
- * editing is M4's editor, not this bar. See BACKLOG.md M3.4.
+ * Choose a model, start a transcription, watch it, stop it. The cue list underneath is what the run
+ * produced; the document those cues became is the grid. See BACKLOG.md M3.4 and M3.5.
  */
-export default function TranscribeBar({ mediaPath, transcription }: TranscribeBarProps) {
+export default function TranscribeBar({
+  mediaPath,
+  transcription,
+  adoptedRunId,
+  onUse,
+}: TranscribeBarProps) {
   const modelFieldId = useId();
   const { models, modelId, useGpu, running, result, error, damagedModelId, download } =
     transcription;
@@ -66,6 +74,9 @@ export default function TranscribeBar({ mediaPath, transcription }: TranscribeBa
     mediaPath !== null && selected?.state === "ready" && !damaged && !running && download === null;
   const status = statusText(transcription);
   const progress = progressValue(transcription);
+  // A finished run becomes the document on its own; this offers it again after the question that
+  // guards unsaved work was answered with Cancel.
+  const unused = !running && result !== null && result.runId !== adoptedRunId;
 
   return (
     <>
@@ -129,6 +140,11 @@ export default function TranscribeBar({ mediaPath, transcription }: TranscribeBa
             onClick={() => void transcription.cancel()}
           >
             {en.asr.cancel}
+          </button>
+        )}
+        {unused && (
+          <button className="asrbar__use" type="button" onClick={() => onUse(result.runId)}>
+            {en.asr.use}
           </button>
         )}
       </div>

@@ -5,7 +5,8 @@ export type SubtitleFormatName = "srt" | "vtt" | "ass";
 export type SubtitleNewline = "lf" | "crlf" | "mixed" | "none";
 
 export type SubtitleSummary = {
-  path: string;
+  /** Where the document came from, or null while it has never had a file. */
+  path: string | null;
   format: SubtitleFormatName;
   /** Cues a player would draw; ASS `Comment:` events are not among them. */
   cueCount: number;
@@ -56,6 +57,8 @@ export type SubtitleSaved = {
   bytesWritten: number;
   /** Null when the destination did not exist before. */
   backupPath: string | null;
+  /** Whether the document still holds edits that are not on disk. */
+  dirty: boolean;
 };
 
 export type SubtitleErrorCode =
@@ -75,6 +78,8 @@ export type SubtitleErrorCode =
   | "unwritableText"
   | "editRefused"
   | "unsavedChanges"
+  | "noPath"
+  | "transcriptionGone"
   | "commandFailed";
 
 /** Why a parse stopped. Sent only with `parseFailed`, always together with a line number. */
@@ -115,6 +120,8 @@ const ERROR_CODES: ReadonlySet<string> = new Set<SubtitleErrorCode>([
   "unwritableText",
   "editRefused",
   "unsavedChanges",
+  "noPath",
+  "transcriptionGone",
   "commandFailed",
 ]);
 

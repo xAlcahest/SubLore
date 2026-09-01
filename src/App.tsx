@@ -18,7 +18,9 @@ export default function App() {
   const { state, position, errorCode, open, togglePlayback, seek, setRegion } = useVideoPlayer();
   const subtitle = useSubtitleFile();
   const project = useProject();
-  const transcription = useTranscription();
+  // A finished transcription becomes the open document, and the backend asks about unsaved work on
+  // the way there. See BACKLOG.md M3.5.
+  const transcription = useTranscription((runId) => void adoptTranscription(runId));
   const ready = state.status === "ready";
   useStartupFiles(open, subtitle.open);
   // Saving writes the document, so it has to include the text sitting in an open editor, and an
@@ -29,6 +31,13 @@ export default function App() {
   async function saveWithPendingEdit(destination: string | null) {
     await flushEditor.current();
     await (destination === null ? subtitle.save() : subtitle.saveAs(destination));
+  }
+
+  async function adoptTranscription(runId: number) {
+    // Text sitting in an open editor is unsaved work too, so it reaches the document before
+    // anything asks whether the document may be replaced.
+    await flushEditor.current();
+    await subtitle.adoptTranscription(runId);
   }
 
   return (
@@ -71,7 +80,12 @@ export default function App() {
           onUndo={() => void subtitle.undo()}
           onRedo={() => void subtitle.redo()}
         />
-        <TranscribeBar mediaPath={state.path} transcription={transcription} />
+        <TranscribeBar
+          mediaPath={state.path}
+          transcription={transcription}
+          adoptedRunId={subtitle.adoptedRunId}
+          onUse={(runId) => void adoptTranscription(runId)}
+        />
         <VideoStage hasVideo={ready} onRegionChange={setRegion} />
         <VideoControls
           enabled={ready}

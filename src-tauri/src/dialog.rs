@@ -63,7 +63,7 @@ impl<F: FnOnce(CloseAnswer)> Drop for Delivery<F> {
     fn drop(&mut self) {
         // Silence here is a window that can never be closed again, so it is said out loud.
         if self.answer.is_some() {
-            log::warn!("close gate: the dialog went away without an answer, taking it as Cancel");
+            log::warn!("unsaved dialog: it went away without an answer, taking it as Cancel");
         }
         self.deliver(CloseAnswer::Cancel);
     }
@@ -95,16 +95,33 @@ where
     Ok(send)
 }
 
+/// Ask what to do with unsaved edits before closing the window.
+pub fn ask_close<F>(app: &AppHandle, label: &str, answer: F) -> tauri::Result<()>
+where
+    F: FnOnce(CloseAnswer) + Send + 'static,
+{
+    ask_unsaved(app, label, crate::strings::CLOSE_UNSAVED_BODY, answer)
+}
+
 /// Ask what to do with unsaved edits, and deliver the answer exactly once.
+///
+/// `body` is the only thing that varies between the routes that ask: the three answers, their
+/// mnemonics and the way the answer travels are one implementation, so a second route cannot drift
+/// into asking a different question (BACKLOG.md M3.5).
 ///
 /// The answer arrives later, on `ANSWER_THREAD`, never on the thread that asks. Every way of losing
 /// the dialog answers `Cancel` rather than dropping the question. An error means nobody was asked
 /// and nobody will be, so the caller has to keep the window open and say so.
 ///
-/// On Linux the dialog is up before this returns: the only caller is already the main thread, and
+/// On Linux the dialog is up before this returns when the caller is the main thread, because
 /// `run_on_main_thread` runs the task inline there rather than posting it.
 #[cfg(target_os = "linux")]
-pub fn ask_close<F>(app: &AppHandle, label: &str, answer: F) -> tauri::Result<()>
+pub fn ask_unsaved<F>(
+    app: &AppHandle,
+    label: &str,
+    body: &'static str,
+    answer: F,
+) -> tauri::Result<()>
 where
     F: FnOnce(CloseAnswer) + Send + 'static,
 {
@@ -124,14 +141,14 @@ where
         if parent.is_none() {
             // A null parent is the rfd behaviour this module exists to escape, so losing it is not
             // something to discover from a screenshot.
-            log::warn!("close gate: no GTK parent for {label}, the dialog cannot be transient");
+            log::warn!("unsaved dialog: no GTK parent for {label}, it cannot be transient");
         }
         let dialog = gtk::MessageDialog::new(
             parent.as_ref(),
             gtk::DialogFlags::MODAL | gtk::DialogFlags::DESTROY_WITH_PARENT,
             gtk::MessageType::Warning,
             gtk::ButtonsType::None,
-            crate::strings::CLOSE_UNSAVED_BODY,
+            body,
         );
         dialog.set_title(crate::strings::CLOSE_UNSAVED_TITLE);
         // Added left to right, so Cancel sits rightmost, where rfd put it and where
@@ -169,7 +186,9 @@ where
             // The worker is only ever gone if it panicked, which the panic hook turns into an
             // exit; logged rather than assumed impossible.
             if send.send(answered).is_err() {
-                log::error!("close gate: the answer thread is gone, {answered:?} was not acted on");
+                log::error!(
+                    "unsaved dialog: the answer thread is gone, {answered:?} was not acted on"
+                );
             }
         });
         dialog.show_all();
@@ -177,7 +196,12 @@ where
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn ask_close<F>(app: &AppHandle, label: &str, answer: F) -> tauri::Result<()>
+pub fn ask_unsaved<F>(
+    app: &AppHandle,
+    label: &str,
+    body: &'static str,
+    answer: F,
+) -> tauri::Result<()>
 where
     F: FnOnce(CloseAnswer) + Send + 'static,
 {
@@ -189,7 +213,7 @@ where
     let send = answer_worker(answer)?;
     let mut dialog = app
         .dialog()
-        .message(crate::strings::CLOSE_UNSAVED_BODY)
+        .message(body)
         .title(crate::strings::CLOSE_UNSAVED_TITLE)
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::YesNoCancelCustom(
@@ -201,7 +225,7 @@ where
         Some(window) => dialog = dialog.parent(&window),
         // Same silent degradation as the Linux branch, one layer down: the plugin swallows both
         // handle errors of its own `parent()` too.
-        None => log::warn!("close gate: no window {label}, the dialog cannot be transient"),
+        None => log::warn!("unsaved dialog: no window {label}, it cannot be transient"),
     }
     // The plugin rewrites every button of a custom set to `Custom(label)` before this callback, so
     // matching the labels covers the three answers and the catch-all covers everything else,
@@ -220,7 +244,7 @@ where
         };
         // Same as the Linux branch: a missing worker means it panicked, and that ends the process.
         if send.send(answered).is_err() {
-            log::error!("close gate: the answer thread is gone, {answered:?} was not acted on");
+            log::error!("unsaved dialog: the answer thread is gone, {answered:?} was not acted on");
         }
     });
     // The plugin discards its own post to the main thread, so the dialog may never be raised. That

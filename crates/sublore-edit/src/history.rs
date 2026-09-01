@@ -81,6 +81,15 @@ impl History {
         }
     }
 
+    /// A history for a document that has never been on disk: nothing to undo, and dirty from the
+    /// start, because every byte of it exists only here. See BACKLOG.md M3.5.
+    pub fn unsaved() -> Self {
+        Self {
+            saved: None,
+            ..Self::new()
+        }
+    }
+
     /// Record an edit that has already been applied to the document: drop what was undone, merge
     /// into the entry above when `run` and [`Self::merge_target`] both allow, then hold both bounds.
     pub fn record(

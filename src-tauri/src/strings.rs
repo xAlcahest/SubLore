@@ -33,6 +33,11 @@ pub const CHOOSE_CANCEL: &str = "_Cancel";
 pub const CLOSE_UNSAVED_TITLE: &str = "Unsaved changes";
 pub const CLOSE_UNSAVED_BODY: &str =
     "The subtitle file has edits that are not on disk.\n\nSave them before closing?";
+/// The same three answers, asked before a finished transcription takes the document's place
+/// (BACKLOG.md M3.5, decision 24 B1).
+pub const REPLACE_UNSAVED_BODY: &str =
+    "The subtitle file has edits that are not on disk.\n\nSave them before the transcription \
+     replaces them?";
 /// The underscore marks the mnemonic letter: GTK shows "Save" and answers Alt+S. It is part of the
 /// translated string on purpose — which letter is free depends on the language — and it is what
 /// gives the dialog keyboard access, for a user whose hands are on the keyboard and for a harness

@@ -119,7 +119,7 @@ fn an_opened_session_lists_every_cue_and_has_nothing_to_undo() {
     );
     assert_eq!(
         session.path(),
-        fixture_path("srt/clean/basic-lf.srt"),
+        Some(fixture_path("srt/clean/basic-lf.srt").as_path()),
         "the session remembers where it came from"
     );
 
@@ -706,4 +706,35 @@ fn sixty_edits_across_the_large_fixture_undo_all_the_way_back() {
     assert_eq!(session.to_bytes(), original, "back to the file as opened");
     assert!(!session.dirty());
     assert!(!session.truncated(), "sixty is well inside the bound");
+}
+
+#[test]
+fn a_document_with_no_file_is_unsaved_from_the_first_moment_and_edits_like_any_other() {
+    let mut session = EditSession::untitled(document("srt/clean/basic-lf.srt"));
+
+    assert_eq!(session.path(), None, "it has never had a file");
+    assert!(
+        session.dirty(),
+        "every byte of it exists only here, so it is unsaved work"
+    );
+    assert!(!session.can_undo());
+    assert!(!session.truncated());
+    assert_eq!(session.views().len(), 3);
+
+    let original = session.to_bytes();
+    session
+        .apply(&set_text(0, "Corrected"), Run::New, Instant::now())
+        .expect("the same mutation API as a file-backed session");
+    assert_eq!(texts(&session)[0], "Corrected");
+    assert!(session.undo().expect("undo replays").is_some());
+    assert_eq!(
+        session.to_bytes(),
+        original,
+        "the same undo the editor uses"
+    );
+
+    // Still unsaved at the bottom of the stack: undoing back does not put bytes on a disk.
+    assert!(session.dirty());
+    session.mark_saved();
+    assert!(!session.dirty(), "a write is what makes it saved");
 }

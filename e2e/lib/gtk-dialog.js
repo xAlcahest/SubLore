@@ -13,9 +13,53 @@
  * cancel and needs no mnemonic.
  */
 import { focusWindow, pressKey } from "./input.js";
+import { waitFor } from "./proc.js";
+import { allWindows, mapState, rootTree } from "./x11.js";
 
 /** Frozen contract with `src-tauri/src/strings.rs`: the letter after the underscore in each label. */
 const KEYS = { save: "alt+s", discard: "alt+d", cancel: "Escape" };
+
+/** The dialog's window name. Frozen contract with `src-tauri/src/strings.rs`. */
+export const UNSAVED_TITLE = "Unsaved changes";
+
+/**
+ * The unsaved-changes dialog, or null. Two at once is a real defect — one answer would decide what
+ * the other is still asking about — so it fails here rather than picking one.
+ */
+export function findUnsavedDialog() {
+  const onScreen = allWindows()
+    .filter((window) => window.name === UNSAVED_TITLE)
+    .filter((window) => mapState(window.id) === "IsViewable");
+  if (onScreen.length > 1) {
+    throw new Error(
+      `expected at most one "${UNSAVED_TITLE}" dialog on screen, found ${onScreen.length} ` +
+        `(${onScreen.map((w) => w.id).join(", ")}).\n${rootTree()}`,
+    );
+  }
+  return onScreen.length === 1 ? onScreen[0] : null;
+}
+
+export async function waitForUnsavedDialog(timeout = 20000) {
+  return waitFor(findUnsavedDialog, {
+    timeout,
+    message: `a toplevel named "${UNSAVED_TITLE}"`,
+  }).catch((error) => {
+    throw new Error(`${error.message}\nwindows on the display were:\n${rootTree()}`);
+  });
+}
+
+/** Positive proof that an answer landed: the dialog it was given to is gone. */
+export async function waitForUnsavedDialogGone(what, timeout = 10000) {
+  return waitFor(() => (findUnsavedDialog() === null ? true : null), {
+    timeout,
+    message: `the dialog to close after ${what}`,
+  }).catch((error) => {
+    throw new Error(
+      `${error.message}\nThe answer did not reach a button, so whatever follows would pass for ` +
+        `the wrong reason.\n${rootTree()}`,
+    );
+  });
+}
 
 export function answerDialog(dialog, which) {
   const key = KEYS[which];
