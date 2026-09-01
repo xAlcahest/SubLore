@@ -245,6 +245,20 @@ jobs:
         continue-on-error: true
         run: .github/scripts/e2e-check.sh mpv-context e2e:mpv-context
 
+      # The one check that must not have a display, so it cannot go through e2e-check.sh: that
+      # wrapper hands every check an X server through xvfb-run. It leaves the same log and exit
+      # code the verdict reads. `|| status=$?` because the step's shell is `bash -e`, which would
+      # otherwise abandon the step at the failure, before the exit file is written.
+      - name: No-display test (a launch with nowhere to draw is a message, not a panic)
+        continue-on-error: true
+        run: |
+          mkdir -p ci-logs
+          status=0
+          pnpm e2e:no-display > ci-logs/no-display.log 2>&1 || status=$?
+          cat ci-logs/no-display.log
+          echo "$status" > ci-logs/no-display.exit
+          exit "$status"
+
       # eu-stack has to ptrace the app, and it is the app's sibling under Node, which Ubuntu's Yama
       # default forbids. The check refuses to run rather than report a clean process without this.
       # continue-on-error, like the checks: a sysctl that fails must cost this check its own red
