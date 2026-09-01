@@ -10,7 +10,9 @@ All thirteen open questions raised in `post-v1-plan.md` under "Decisions due now
 
 ## 14. How the video frame reaches the screen — owner ruling 2026-08-30
 
-**Adopted as a working hypothesis, to be ratified formally at gate 2.** The X11 child window stays for v1.0, and M2.0's layer registry is built as permanent, not as a bridge to something else. The reasoning, the costs and the three conditions that would reverse it are in `x11-vs-render-api.md`, and those conditions stay written there as guards rather than being folded away here.
+**RATIFIED, final — owner ruling 2026-09-01.** No longer a working hypothesis: the X11 child window is the answer for 1.0, occlusion is solved by hiding the surface for HTML layers (decision 1), and no render API is opened before M16. T8 is unblocked, and with it M2.4, M2.5, M2.6 and MW.2. The three reversing conditions in `x11-vs-render-api.md` stay written as guards for a post-1.0 reader; none of them fires before M16.
+
+The X11 child window stays for v1.0, and M2.0's layer registry is built as permanent, not as a bridge to something else. The reasoning, the costs and the three conditions that would reverse it are in `x11-vs-render-api.md`, and those conditions stay written there as guards rather than being folded away here.
 
 **Probe P6, shaping the surface, is parked.** It is not spent now. It becomes current when M16 or decision 1 makes it so, and not before. No new front is opened on this.
 
@@ -141,3 +143,39 @@ When a question is "how should the editor behave here", it is not a question for
 **Why.** A decision was put to the owner about whether committing an unchanged field should dirty the document, when the answer was already in `session.rs:80` and in a test called `committing_an_unchanged_field_is_not_an_edit`. The question was asked from a log instead of from the code.
 
 **How to apply.** Read the code. If it settles the question, follow it and say where it was settled. If it does not, decide it, state the reason here, and only then take it to the owner if the reason is one he owns.
+
+## 20. Two classes of data, two homes — owner ruling 2026-09-01
+
+Derived data goes in the app's cache directory. Irreplaceable data stays in the project folder.
+
+**Derived** means regenerable from a file the user already has: waveform peaks, thumbnails, indexes. It lives in the app cache, keyed by a hash of the source file, under a size cap, and deleting all of it costs the user nothing but time. **Irreplaceable** means the only copy: the timestamped backups CONTRIBUTING.md §3.3 requires before any overwrite. Those stay in the project folder, and nothing automatic deletes them.
+
+**Why.** The peaks cache was the question; the answer is a rule, so the next derived artefact does not come back as another question. It also keeps the project folder small enough to be copied, synced or mailed without dragging a cache along.
+
+**How to apply.** Before adding any new stored artefact, ask which class it is. Derived: app cache, hashed key, capped, freely deletable. Irreplaceable: project folder, never deleted by cleanup logic. Settles the peaks cache for M2.4 and the backup root that `sublore-io/src/backup.rs` and `subtitle/mod.rs` disagree about today.
+
+## 21. The pro repo, and an ABI that survives a compiler upgrade — owner ruling 2026-09-01
+
+The closed modules live in their own private repository, named in the working notes and deliberately not here: this file is public, and the repository's name is not something the open core needs to know.
+
+The interface is designed before any M5 code exists: **N8, a design task with a written document and a review**, and its constraints are fixed now rather than discovered later. Modules are dynamically loaded libraries behind a versioned interface that is stable across compiler versions — a C ABI or an equivalent, never bare Rust types across the boundary. Loading performs a version handshake; when the module is absent or the version does not match, the app degrades cleanly to the free core and says so. The interface crate `sublore-module-api` lives in the public repo and is part of the open core.
+
+**Why.** Rust has no stable ABI, so a module built by a different compiler than the app is undefined behaviour waiting for a user to find. A handshake that fails into the free product is also the honest failure mode for a paid module: the free core must stay fully usable, per CONTRIBUTING.md §4.
+
+**How to apply.** N8 comes before M5. The matcher and the ASS override-tag scanner stay in the core (decision 6). No licence logic, no `isPro` branch, ever, in the public repo.
+
+## 22. The build runs in waves, with the Windows lane parallel throughout — owner ruling 2026-09-01
+
+The wave plan is adopted as proposed. T2 runs alone, owning all of `src/` and every spec, because nothing in the shell parallelises until it has split `App.tsx` and `App.css` into per-region files. The Windows activation lane runs beside the shell lane from the first wave to the last, because it touches no file under `src/`. A colour token layer is defined inside T2, so T3 through T7 write `var(--...)` and never a literal. The restyle is one pass after T7. `EXPECTED_TESTS` is split per platform before the Windows CI wave, because it is one integer today and any Linux-only check would fail the Windows run.
+
+**Why.** The measured shape of the dependency graph, not a preference: the serial spine runs harness geometry, T2, T3, T6, T5, T8, T9, then M2.4 to M2.6, and its length is what sets the finish date. Everything not on that spine is worth running beside it.
+
+**How to apply.** One task per branch. Before scheduling two tasks in the same wave, check they do not both edit a shared file — `src/App.tsx`, `src/App.css`, `src/i18n/en.ts`, `src-tauri/src/lib.rs`, `e2e/wdio.conf.js`. The layout pixel constants outside `src/` (`e2e/lib/paths.js`, `e2e/scripts/picker-thread-check.js`) have one owner per wave and are re-measured with a screenshot as evidence, because the scripts that read them gate CI and sit outside `EXPECTED_TESTS`, so they go red with no counter to warn anybody.
+
+## 23. Maximum autonomy — owner ruling 2026-09-01
+
+The project advances on its own. The full contract is `WORKFLOW.md` §8; this is the record that the owner made the call and the date he made it.
+
+In force after the decision block of the same ruling is delivered. Code no longer waits for approval: a green battery, a self-reviewed diff and an autonomous merge replace it. Gates run and open themselves. Anything not covered by the block follows the recommendation, applied and recorded here as an autonomous decision the owner can reverse by reading. Four things still stop the march: an ambiguity about data safety that no written rule settles, a choice that would move the open-core or licensing boundary, a technical block still standing after two serious attempts with a written report, and any irreversible action outside the repository.
+
+**How to apply.** Autonomy widens who decides. It changes nothing about what may be claimed: reports on file, verdicts carrying their platform, positive proof in tests, measured numbers, and never a green for the wrong reason.
