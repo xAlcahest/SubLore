@@ -16,6 +16,8 @@ jobs:
   analyze:
     name: analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
+    # Six hours is the default and no analysis here has taken more than seven minutes.
+    timeout-minutes: 30
     permissions:
       security-events: write
       actions: read
