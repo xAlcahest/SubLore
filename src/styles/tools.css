@@ -1,0 +1,65 @@
+/*
+ * The tools column, to the video's right. The waveform belongs above the current line and is not
+ * here at all: no audio provider exists before M2.4 and a panel with no provider takes no space,
+ * so the current line starts at the top of the column rather than under an empty box. See T5.
+ */
+
+.currentline {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.4rem 0.75rem;
+}
+
+/* Wraps rather than clips: the column is narrower than the window and has to hold this row at
+   1024x700. */
+.currentline__times {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0 0.9rem;
+  font-size: 0.8125rem;
+}
+
+.currentline__field {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.currentline__label {
+  color: var(--ink-faint);
+}
+
+.currentline__start,
+.currentline__end,
+.currentline__duration,
+.currentline__cps {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Over the 21 cps of decision 24 A8, in the ink the grid uses for the same number. */
+.currentline__cps--over {
+  color: var(--ink-warn);
+}
+
+.currentline__text {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-sunken);
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  resize: none;
+}
+
+.currentline__empty {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.875rem;
+}

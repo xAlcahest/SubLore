@@ -29,8 +29,12 @@ import { findToplevel } from "../lib/x11.js";
  */
 const TEXT_TYPES = ["text", "search", "url", "email", "tel", "password", "number", "textarea"];
 
-/** The one box T1 left that a person types into: the rail's question, open only while it is asked. */
-const ALLOWED_TEXT_FIELDS = ["raildialog__field"];
+/**
+ * Every box a person types into. The rail's question is open only while it is asked; the current
+ * line's box is in the tools column whenever a document is (T5). Neither holds a path, which is
+ * what the assertion below is about.
+ */
+const ALLOWED_TEXT_FIELDS = ["currentline__text", "raildialog__field"];
 
 /** The title the episode added below carries, so the rail has a row to raise a file chooser from. */
 const EPISODE_TITLE = "Episode 1";

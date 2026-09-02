@@ -128,6 +128,34 @@ function scrollableAncestorsOfSurface() {
   });
 }
 
+/**
+ * The tools column's own children, each one's edges measured against the column's.
+ *
+ * "No empty waveform placeholder" is asserted as "nothing else takes space in this column", never
+ * as "the waveform selector is missing": a panel shipped under another name would walk straight
+ * past the second reading and not past this one. See T5.
+ */
+function toolsColumn() {
+  return browser.execute(() => {
+    const column = document.querySelector(".shell__tools");
+    if (column === null) {
+      return null;
+    }
+    const box = column.getBoundingClientRect();
+    return {
+      height: box.height,
+      children: Array.from(column.children).map((child) => {
+        const rect = child.getBoundingClientRect();
+        return {
+          name: `${child.tagName.toLowerCase()}.${child.className}`,
+          top: rect.top - box.top,
+          bottom: rect.bottom - box.top,
+        };
+      }),
+    };
+  });
+}
+
 /** The rectangle the native surface should be sitting on, in the physical pixels X reports. */
 async function surfaceRect() {
   const stage = await browser.execute(() => {
@@ -444,5 +472,34 @@ describe("the shell layout", () => {
 
     expect(await surfaceRect()).toEqual(before);
     await waitForSurfaceOnStage(narrow);
+  });
+
+  // T5's second criterion, "no empty waveform placeholder is on screen". An absence is only worth
+  // asserting if it can be shown failing, so the probe goes in first and the reading is proved to
+  // name it before the real column is read.
+  it("gives the whole tools column to the current line, with no panel above it", async () => {
+    await browser.execute(() => {
+      const probe = document.createElement("div");
+      probe.className = "waveform-probe";
+      probe.style.cssText = "flex:none;height:40px";
+      document.querySelector(".shell__tools")?.prepend(probe);
+    });
+    const withProbe = await toolsColumn();
+    await browser.execute(() => {
+      document.querySelector(".waveform-probe")?.remove();
+    });
+    expect(withProbe).not.toBe(null);
+    expect(withProbe.children.map((child) => child.name)).toEqual([
+      "div.waveform-probe",
+      "section.currentline",
+    ]);
+    expect(withProbe.children[1].top).toBeGreaterThan(EDGE_SLOP_PX);
+
+    const column = await toolsColumn();
+    expect(column.children.map((child) => child.name)).toEqual(["section.currentline"]);
+    // Flush against both edges of the column, so nothing above or below it holds any space either.
+    expect(Math.abs(column.children[0].top)).toBeLessThanOrEqual(EDGE_SLOP_PX);
+    expect(Math.abs(column.children[0].bottom - column.height)).toBeLessThanOrEqual(EDGE_SLOP_PX);
+    expect(column.height).toBeGreaterThan(0);
   });
 });

@@ -80,7 +80,8 @@ body {
   overflow: hidden;
 }
 
-/* Empty until the waveform (M2.4) and the current line (T5) arrive beside the video. */
+/* The current line, with the waveform to arrive above it in M2.4 and nothing standing in for it
+   until then: a panel with no provider takes no space (T5). */
 .shell__tools {
   display: flex;
   flex: 1;
