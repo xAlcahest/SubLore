@@ -1,7 +1,7 @@
 //! The peaks cache on a real disk: what keys an entry, what is refused, what eviction drops, and
 //! what a second open costs. See BACKLOG.md M2.4 and decision 20.
 //!
-//! Nothing here needs ffmpeg or a fixture except the two tests that prove the cache stops a child
+//! Nothing here needs ffmpeg or a fixture except the three tests that prove the cache stops a child
 //! from being spawned at all. Those drive a stand-in program the way `child.rs` does, and are
 //! Linux only for the same reason it is: Linux is where this project's behaviour is proved
 //! (CONTRIBUTING.md §5.5).
@@ -81,6 +81,15 @@ fn listing(root: &Path) -> Vec<(String, u64)> {
     found
 }
 
+/// Everything under `root` that is not the cache's own directory: the media, the project folder,
+/// and every other place this module has no path to.
+fn outside_the_cache(root: &Path) -> Vec<(String, u64)> {
+    listing(root)
+        .into_iter()
+        .filter(|(name, _)| !Path::new(name).starts_with("cache"))
+        .collect()
+}
+
 fn total_bytes(dir: &Path) -> u64 {
     listing(dir).iter().map(|(_, length)| length).sum()
 }
@@ -123,13 +132,30 @@ fn the_key_follows_the_bytes_and_not_the_name() {
     fs::remove_dir_all(&root).ok();
 }
 
+/// Put a file's modification time where the caller says, so that a key which changed changed
+/// because of the thing the assertion names.
+fn stamp(path: &Path, at: SystemTime) {
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .expect("the source should be openable")
+        .set_times(fs::FileTimes::new().set_modified(at))
+        .expect("the modification time should be settable");
+}
+
 #[test]
-fn the_key_changes_with_the_track_the_length_and_either_end_of_the_file() {
+fn the_key_changes_with_the_track_the_length_either_end_of_the_file_and_the_clock() {
     let root = workspace("key-changes");
     // Past two megabytes the head and the tail are different spans, which is the case the key was
     // designed for: everything between them is never read.
     let length = 3 * 1024 * 1024;
+    let megabyte = 1024 * 1024;
+    // One modification time for every file below except the last, so nothing here passes through
+    // the clock by accident.
+    let when = SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+    let whole = source_bytes(length, 7);
     let media = source(&root.join("a.mkv"), length, 7);
+    stamp(&media, when);
     let key = CacheKey::of(&media, 1).expect("a readable file has a key");
 
     // The file name and not the key: it is the name that decides what is read back, and it is cut
@@ -146,29 +172,56 @@ fn the_key_changes_with_the_track_the_length_and_either_end_of_the_file() {
         "two tracks of one file are two entries"
     );
 
-    let mut bytes = fs::read(&media).expect("the source should be readable");
+    let mut bytes = whole.clone();
     bytes[10] ^= 0xff;
     fs::write(&media, &bytes).expect("the source should be writable");
+    stamp(&media, when);
     assert_ne!(
         name_of(&media, 1),
         key.file_name(),
         "a byte changed in the first megabyte is another file"
     );
 
-    let mut bytes = source_bytes(length, 7);
+    let mut bytes = whole.clone();
     bytes[length - 10] ^= 0xff;
     fs::write(&media, &bytes).expect("the source should be writable");
+    stamp(&media, when);
     assert_ne!(
         name_of(&media, 1),
         key.file_name(),
         "a byte changed in the last megabyte is another file"
     );
 
-    let shorter = source(&root.join("b.mkv"), length - 1, 7);
+    // One byte shorter, with the same first and last megabyte: the length is the only thing left
+    // that can tell these two apart.
+    let mut short_bytes = whole[..length - megabyte - 1].to_vec();
+    short_bytes.extend_from_slice(&whole[length - megabyte..]);
+    assert_eq!(short_bytes[..megabyte], whole[..megabyte], "the same head");
+    assert_eq!(
+        short_bytes[short_bytes.len() - megabyte..],
+        whole[length - megabyte..],
+        "the same tail"
+    );
+    let shorter = root.join("b.mkv");
+    fs::write(&shorter, &short_bytes).expect("the source should be writable");
+    stamp(&shorter, when);
     assert_ne!(
         name_of(&shorter, 1),
         key.file_name(),
         "a different length is another file"
+    );
+
+    // The same bytes at the same length, written again: a download that filled a preallocated file
+    // in leaves the length and both ends alone, and the clock is the only thing that says so.
+    let refilled = root.join("c.mkv");
+    fs::write(&refilled, &whole).expect("the source should be writable");
+    stamp(&refilled, when);
+    let before = name_of(&refilled, 1);
+    stamp(&refilled, when + Duration::from_secs(600));
+    assert_ne!(
+        name_of(&refilled, 1),
+        before,
+        "a file written again under a constant length is not the file that was peaked"
     );
 
     fs::remove_dir_all(&root).ok();
@@ -365,6 +418,24 @@ fn writing_past_the_cap_drops_the_least_recently_read_and_keeps_the_rest() {
             .expect("the newest entry survived"),
         each
     );
+
+    // A clock that stepped back (an NTP correction, a resumed VM) stamps the new entry older than
+    // everything already there. It is still the entry the write just made, so the trim that
+    // follows that write takes the next one instead.
+    let stepped_media = source(&root.join("stepped-back.mkv"), 4096, 40);
+    let stepped = CacheKey::of(&stepped_media, 1).expect("a readable file has a key");
+    cache
+        .store(&stepped, &each, hours_ago(20))
+        .expect("an entry stamped before every other one is still written");
+    let left: Vec<String> = listing(&dir).into_iter().map(|(name, _)| name).collect();
+    assert!(
+        left.contains(&stepped.file_name()),
+        "the entry the write just made was deleted by its own trim: {left:?}"
+    );
+    assert!(
+        !left.contains(&keys[0].file_name()),
+        "and the trim still ran, on the next oldest: {left:?}"
+    );
     fs::remove_dir_all(&root).ok();
 }
 
@@ -539,7 +610,7 @@ fn nothing_is_ever_written_beside_the_media_or_in_the_project_folder() {
     let media = source(&media_dir.join("episode-01.mkv"), 3 * 1024 * 1024, 7);
 
     let before_media = listing(&media_dir);
-    let before_project = listing(&project);
+    let before_root = outside_the_cache(&root);
     let modified = fs::metadata(&media)
         .expect("the media should be readable")
         .modified()
@@ -558,9 +629,9 @@ fn nothing_is_ever_written_beside_the_media_or_in_the_project_folder() {
         "something was written beside the user's media"
     );
     assert_eq!(
-        listing(&project),
-        before_project,
-        "something was written into the project folder"
+        outside_the_cache(&root),
+        before_root,
+        "something was written outside the directory the cache was handed"
     );
     assert_eq!(
         fs::metadata(&media)
@@ -590,25 +661,30 @@ fn a_cached_read_of_a_twenty_four_minute_episode_is_under_a_tenth_of_a_second() 
         .store(&key, &written, SystemTime::now())
         .expect("an empty directory should take an entry");
 
-    let started = Instant::now();
-    let found = cache.load(&key, SystemTime::now());
-    let elapsed = started.elapsed();
-    let read = found.peaks.expect("the entry was just written");
+    // The quickest of five. The budget is what the read costs; one attempt on a runner that was
+    // busy elsewhere measures the runner.
+    let mut best = Duration::MAX;
+    for _ in 0..5 {
+        let started = Instant::now();
+        let found = cache.load(&key, SystemTime::now());
+        let elapsed = started.elapsed();
+        let read = found.peaks.expect("the entry was just written");
+        assert_eq!(read.len(), written.len());
+        assert_eq!(read[read.len() - 1], written[written.len() - 1]);
+        best = best.min(elapsed);
+    }
     println!(
-        "a 24-minute entry ({} buckets) read in {elapsed:?}",
-        read.len()
+        "a 24-minute entry ({} buckets) read in {best:?}, quickest of five",
+        written.len()
     );
-
-    assert_eq!(read.len(), written.len());
-    assert_eq!(read[read.len() - 1], written[written.len() - 1]);
     assert!(
-        elapsed < Duration::from_millis(100),
-        "a cached read took {elapsed:?}, and it is on the path the first paint's two seconds pay for"
+        best < Duration::from_millis(100),
+        "the quickest of five cached reads took {best:?}, and it is on the path the first paint's two seconds pay for"
     );
     fs::remove_dir_all(&root).ok();
 }
 
-// The two below are the ones that need a child process, so they are Linux only, for the reason
+// The three below are the ones that need a child process, so they are Linux only, for the reason
 // `child.rs` gives: this is where the project's behaviour is proved.
 #[cfg(target_os = "linux")]
 mod through_a_child {

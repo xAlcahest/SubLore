@@ -8,8 +8,11 @@
 //! The key is a hash of the source's bytes and not of its path, so a rename or a move keeps the
 //! entry. Hashing a four-gigabyte film end to end would cost seconds and the first paint is
 //! allowed two, so it is the length plus the first and last megabyte: two reads, whatever the
-//! file's size. The format version is hashed in as well, so a change to the bytes below orphans
-//! every entry rather than reading an old one as a new one.
+//! file's size. The middle is never read, so the modification time is hashed in as well: a
+//! download filling a preallocated file in leaves the length and both ends alone, and without the
+//! clock it would be handed the half-empty waveform it was first peaked at. The format version is
+//! hashed in too, so a change to the bytes below orphans every entry rather than reading an old
+//! one as a new one.
 //!
 //! Nothing here writes anywhere but the directory it was given. The source is opened for reading
 //! and nothing else (CONTRIBUTING.md §3.1), and the entry is written temp file, fsync, rename
@@ -130,18 +133,27 @@ pub struct CacheKey {
 }
 
 impl CacheKey {
-    /// Hash the source's identity: the format version, the length, the track, and the first and
-    /// last megabyte of the file. Two reads, so a film costs what a trailer costs.
+    /// Hash the source's identity: the format version, the length, the modification time, the
+    /// track, and the first and last megabyte of the file. Two reads, so a film costs what a
+    /// trailer costs.
     pub fn of(media: &Path, ff_index: u32) -> Result<Self, CacheError> {
         let mut file = File::open(media).map_err(|error| unreadable_source(media, &error))?;
-        let length = file
+        let metadata = file
             .metadata()
-            .map_err(|error| unreadable_source(media, &error))?
-            .len();
+            .map_err(|error| unreadable_source(media, &error))?;
+        let length = metadata.len();
+        // The middle of the file is never read, so a rewrite under a constant length would key the
+        // same. A filesystem with no modification time keys on the bytes alone, as before.
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|at| at.duration_since(UNIX_EPOCH).ok())
+            .map_or(0, |since| since.as_nanos());
 
         let mut hasher = Sha256::new();
         hasher.update(PEAK_FORMAT_VERSION.to_le_bytes());
         hasher.update(length.to_le_bytes());
+        hasher.update(modified.to_le_bytes());
         hasher.update(ff_index.to_le_bytes());
         hash_span(&mut file, media, &mut hasher)?;
         // Under two megabytes the two spans would overlap, and the head has already covered the
@@ -304,10 +316,12 @@ impl PeaksCache {
             if entry.path == keep {
                 continue;
             }
-            // A file another program holds open (Windows) still occupies the cap, so it is not
-            // subtracted and the trim moves on to the next one.
-            if fs::remove_file(&entry.path).is_ok() {
-                total -= entry.length;
+            // A file that is gone no longer occupies the cap, however it went; one another program
+            // holds open (Windows) still does, so it stays counted and the trim moves on.
+            match fs::remove_file(&entry.path) {
+                Ok(()) => total -= entry.length,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => total -= entry.length,
+                Err(_) => {}
             }
         }
         if total > self.cap {
