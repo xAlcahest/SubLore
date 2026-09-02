@@ -573,6 +573,46 @@ fn a_child_that_fails_ends_in_one_error_carrying_its_own_words_and_never_in_done
     fs::remove_dir_all(&root).ok();
 }
 
+/// N12: reopening the same media inside the window between the cancel and the dying job giving the
+/// slot back used to be refused as "already being peaked", so that open drew no waveform and
+/// nothing retried it. Driven through `AudioState` directly, so it is a state machine question and
+/// not a race the scheduler decides.
+#[test]
+fn reopening_the_same_media_before_the_cancelled_job_lets_go_is_not_refused() {
+    let state = AudioState::default();
+    let media = PathBuf::from("/media/ep01.mkv");
+    let target = JobTarget {
+        media: media.clone(),
+        ff_index: 1,
+    };
+
+    let first = Cancel::new();
+    let one = state
+        .begin(target.clone(), first.clone())
+        .expect("nothing is peaking yet");
+
+    // What `video_open` does at the top: cancel, without waiting for the slot to come back.
+    state.cancel_all();
+    assert!(first.is_cancelled(), "the cancel reached the job in flight");
+    assert!(
+        state.live().is_some(),
+        "the slot is still claimed, which is the window this test is about"
+    );
+
+    let second = Cancel::new();
+    let two = state
+        .begin(target, second)
+        .expect("a re-open inside the window must start a job, not be told the file is busy");
+    assert_ne!(one, two, "the second open is its own job with its own id");
+
+    // The late release of the job that was cancelled must not take the new job's slot with it.
+    state.end(one);
+    assert!(
+        state.live().is_some_and(|(id, _)| id == two),
+        "the dying job gave back a slot that was no longer its own"
+    );
+}
+
 #[test]
 fn a_missing_ffmpeg_ends_in_one_error_that_says_which_program_could_not_be_run() {
     let _alone = alone();

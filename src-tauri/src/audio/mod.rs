@@ -108,7 +108,10 @@ impl AudioState {
         let id = self.next_job_id.fetch_add(1, Ordering::SeqCst) + 1;
         let mut slot = lock(&self.job);
         if let Some(active) = slot.as_ref() {
-            if active.target == target {
+            // A cancelled occupant is not a reason to refuse: it is on its way out and only its own
+            // thread frees the slot, so a re-open of the same file inside that window would be told
+            // the file is already being peaked and would get no waveform at all. See W4, N12.
+            if active.target == target && !active.cancel.is_cancelled() {
                 return Err(AudioError::new(
                     AudioErrorCode::Busy,
                     format!(
