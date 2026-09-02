@@ -171,7 +171,7 @@ A harness that runs nothing must not report success. WebdriverIO does not reliab
 specs, so `wdio.conf.js` asserts the count itself:
 
 ```js
-const EXPECTED_TESTS = 71;
+const EXPECTED_TESTS = 82;
 ```
 
 `onComplete` throws if fewer than that many tests passed, which covers a deleted spec file, an
@@ -267,6 +267,20 @@ under new names: `.bar__button` is `.toolbar__open-video`, `.subbar__open` is
 `.toolbar__open-subtitle`, and `.subbar__save`, `.subbar__save-copy`, `.subbar__undo`,
 `.subbar__redo` and `.subbar__discard` are the same names under `.toolbar__`. A menu item's id is
 `menuitem-<command>`, which is how a check names the item the cursor is on without reading copy.
+
+Added by T4, which took the transcription band off the screen: `.asrpanel`, `.asrpanel__close` and
+the `transcribe` menu item, last in Edit. The `.asrbar__*` names above are unchanged, but none of
+them is in the DOM until the panel is open, so `asr.spec.js` opens it first. The route is keys, not
+clicks: a dropdown hangs over the video rectangle, and a click there lands on the native surface
+instead of the webview, measured on Linux — Alt opens File, Right moves to Edit, Up wraps to
+Transcribe, Return activates. That is also why the panel takes space under the grid instead of
+covering anything: until decision 1's occlusion lands (T8), an HTML layer over the video is neither
+visible nor clickable.
+
+Two other keyboard routes decide where that item may sit, and both are in File: `chrome.spec.js`
+walks Open video down to Quit over the disabled pair, and `quit-gate-check.js` reaches Quit as the
+last enabled item in File. An item added anywhere in File breaks one of them, which is why
+Transcribe waits in Edit for the Audio title (decision 24 A2).
 
 Readiness has no dedicated signal: a video is loaded when `.stage__empty` is gone **and**
 `.controls__button` is enabled. A subtitle file is open when `.statusbar__document` stops saying
