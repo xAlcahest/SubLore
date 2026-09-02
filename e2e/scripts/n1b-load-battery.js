@@ -26,7 +26,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import { repoRoot, requireAppBinary, requireDisplay } from "../lib/paths.js";
+import { repoRoot, requireAppBinary, requireDisplay, requireTool } from "../lib/paths.js";
 
 const branch = process.argv[2] ?? "save";
 const total = Number(process.argv[3] ?? 60);
@@ -73,7 +73,12 @@ function once(display) {
   });
 }
 
-/** True when `coredumpctl` knows about this pid, which is how a crash is told from a bad exit. */
+/**
+ * True when `coredumpctl` knows about this pid, which is how a crash is told from a bad exit.
+ *
+ * `main` requires the tool by name. Without that guard the spawn error path below answered false
+ * and half of N1b's criterion was satisfied by the package being absent.
+ */
 function hadCore(pid) {
   return new Promise((resolve) => {
     if (pid === undefined || pid === null) {
@@ -101,6 +106,7 @@ async function stream(index, runs) {
 async function main() {
   requireDisplay();
   requireAppBinary();
+  requireTool("coredumpctl", "tell a crash from a bad exit status, which is half of N1b");
 
   const per = Math.ceil(total / streams);
   console.log(

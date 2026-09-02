@@ -93,10 +93,16 @@ impl TranscribeRequest {
     }
 }
 
+/// The thread count a machine reporting `cores` gets. Separate from `default_threads` so the cap
+/// can be driven with values either side of it instead of with whatever the runner happens to have.
+fn threads_for(cores: u64) -> u16 {
+    cores.clamp(1, MAX_THREADS as u64) as u16
+}
+
 /// The thread count every run uses unless the caller says otherwise.
 pub fn default_threads() -> u16 {
     std::thread::available_parallelism()
-        .map(|count| (count.get() as u64).clamp(1, MAX_THREADS as u64) as u16)
+        .map(|count| threads_for(count.get() as u64))
         .unwrap_or(4)
 }
 
@@ -665,8 +671,8 @@ fn cancelled() -> AsrError {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_threads, percent_of, validate, wav_duration_ms, Compute, Language,
-        TranscribeRequest,
+        default_threads, percent_of, threads_for, validate, wav_duration_ms, Compute, Language,
+        TranscribeRequest, MAX_THREADS,
     };
     use crate::error::AsrErrorKind;
     use std::fs;
@@ -758,8 +764,37 @@ mod tests {
 
     #[test]
     fn the_thread_count_is_pinned_inside_a_range_that_stays_comparable() {
-        let threads = default_threads();
-        assert!((1..=8).contains(&threads), "got {threads}");
+        // The cap is what keeps two runs on two machines comparable, so the number is pinned here
+        // and a change to it is a deliberate edit rather than a silent one.
+        assert_eq!(MAX_THREADS, 8);
+
+        assert_eq!(
+            threads_for(0),
+            1,
+            "a machine reporting no cores still gets one"
+        );
+        assert_eq!(threads_for(1), 1);
+        assert_eq!(
+            threads_for(4),
+            4,
+            "below the cap the count follows the machine"
+        );
+        assert_eq!(threads_for(MAX_THREADS as u64), MAX_THREADS);
+        assert_eq!(
+            threads_for(MAX_THREADS as u64 + 1),
+            MAX_THREADS,
+            "one core past the cap must not raise the count"
+        );
+        assert_eq!(threads_for(128), MAX_THREADS);
+        assert_eq!(
+            threads_for(u64::MAX),
+            MAX_THREADS,
+            "and no width of machine does"
+        );
+
+        // The wiring, so the clamp above is the one the app actually gets.
+        let cores = std::thread::available_parallelism().map(|count| count.get() as u64);
+        assert_eq!(default_threads(), cores.map(threads_for).unwrap_or(4));
     }
 
     #[test]

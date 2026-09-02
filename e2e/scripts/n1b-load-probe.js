@@ -30,6 +30,7 @@ import { appEnv } from "../lib/env.js";
 import { doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import { answerDialog } from "../lib/gtk-dialog.js";
 import { closeWindowTool, firstCueText, repoRoot, requireAppBinary } from "../lib/paths.js";
+import { SUBTITLE_OPENED, waitForLog } from "../lib/applog.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { allWindows, findToplevel } from "../lib/x11.js";
 
@@ -73,9 +74,9 @@ try {
   });
 
   phase = "dirty";
-  // Fixed waits, for the same reason close-gate-check.js has them: without a DOM there is nothing
-  // observable to wait on here. A wait that turns out too short shows up as a phase, not as a pass.
-  await sleep(3500);
+  // The app says when the document is open, so this waits for that rather than for a number of
+  // milliseconds: the number was 3500 and CI was slower than it (gate 2, run 33339776169).
+  await waitForLog(dataHome, SUBTITLE_OPENED, { what: "the subtitle to be open" });
   focusWindow(toplevel.id);
   doubleClickAt(toplevel.absX + firstCueText.x, toplevel.absY + firstCueText.y);
   await sleep(600);

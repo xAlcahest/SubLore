@@ -90,6 +90,29 @@ fn assert_no_temp_files(dir: &Path) {
     );
 }
 
+/// The two permission criteria need a directory this process cannot write into. Root ignores the
+/// mode and so do some mounts, and there the case cannot be expressed at all. That is a run which
+/// has to go red, never one that returns green having asserted nothing (CONTRIBUTING.md 5.4).
+#[cfg(unix)]
+fn require_mode_is_enforced(directory: &Path, cleanup: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let probe = directory.join(".mode-probe");
+    let Ok(file) = fs::File::create(&probe) else {
+        return;
+    };
+    drop(file);
+    let _ = fs::remove_file(&probe);
+    let _ = fs::set_permissions(directory, fs::Permissions::from_mode(0o700));
+    let _ = fs::remove_dir_all(cleanup);
+    panic!(
+        "this process can write into a 0o500 directory, so the two permission criteria in \
+         CONTRIBUTING.md section 3 cannot be exercised here and this run proves nothing about \
+         them. Run the suite as an ordinary user on a filesystem that honours mode bits: not as \
+         root, not under fakeroot, not on a mount that drops them."
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Acceptance: overwriting keeps a backup, and the bytes land exactly.
 // ---------------------------------------------------------------------------
@@ -546,15 +569,7 @@ fn a_store_root_that_cannot_be_written_stops_the_save() {
     fs::set_permissions(&store_root, fs::Permissions::from_mode(0o500))
         .expect("the mode should be settable");
 
-    // Root ignores the mode, so the case cannot be expressed in that environment.
-    let probe = store_root.join("probe");
-    if fs::File::create(&probe).is_ok() {
-        let _ = fs::remove_file(&probe);
-        let _ = fs::set_permissions(&store_root, fs::Permissions::from_mode(0o700));
-        let _ = fs::remove_dir_all(&root);
-        eprintln!("skipped: this user can write to a 0o500 directory");
-        return;
-    }
+    require_mode_is_enforced(&store_root, &root);
 
     let store = BackupStore::new(store_root.clone());
     let error = save_with_backup(&destination, NEW, &store)
@@ -605,15 +620,7 @@ fn a_read_only_directory_reports_permission_denied() {
     fs::set_permissions(&subs, fs::Permissions::from_mode(0o500))
         .expect("the mode should be settable");
 
-    // Root ignores the mode, so the case cannot be expressed in that environment.
-    let probe = subs.join("probe");
-    if fs::File::create(&probe).is_ok() {
-        let _ = fs::remove_file(&probe);
-        let _ = fs::set_permissions(&subs, fs::Permissions::from_mode(0o700));
-        let _ = fs::remove_dir_all(&root);
-        eprintln!("skipped: this user can write to a 0o500 directory");
-        return;
-    }
+    require_mode_is_enforced(&subs, &root);
 
     let error = write_atomic(&destination, NEW).expect_err("a read-only directory refuses a save");
 

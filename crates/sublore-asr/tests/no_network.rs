@@ -1,27 +1,32 @@
 //! M3.2's first acceptance criterion, stated as a test: no network request happens unless the
 //! user asks for a download (CONTRIBUTING.md §1).
 //!
-//! Two independent proofs. A fetcher that fails the test if it is ever called, driven through the
-//! whole model and transcription workflow; and a real listener that counts connections, so the
-//! zero is a measured zero rather than the absence of a call this test knew to look for. The
-//! listener is then used once, on purpose, to show it would have caught a stray request.
+//! Two proofs, and each says what it reaches. A real listener counts connections while the app
+//! does everything it does before anyone presses Download, and it is then used once, on purpose,
+//! to show it would have caught a stray request. A grep guard goes red on a second address
+//! anywhere in the crate's source, which is what a new call to the network looks like when
+//! somebody writes one.
+//!
+//! A third "proof" stood here until 2026-09-02: a fetcher that failed the test if it was ever
+//! called. It was never handed to the workflow it claimed to be driven through, and it could not
+//! have been. `download` is the only function in the crate that takes a fetcher, and nothing on
+//! the pre-download path takes a URL either, so its count could not have read anything but zero.
+//! That shape is the guarantee, and the two proofs below are what stand behind it.
 //!
 //! See BACKLOG.md M3.2.
 
 mod common;
 
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use common::{test_model_body, FakeServer, Policy, Sandbox, TEST_MODEL_SHA256};
 use sublore_asr::error::AsrErrorKind;
 use sublore_asr::model::catalog::{self, ModelSpec};
+use sublore_asr::model::download;
 use sublore_asr::model::http::HttpFetcher;
 use sublore_asr::model::store::ModelStore;
-use sublore_asr::model::{download, Fetched, RangeFetcher};
 use sublore_asr::sidecar::{transcribe, Cancel, Compute, Language, TranscribeRequest};
-use sublore_asr::AsrError;
 
 const SPEC: ModelSpec = ModelSpec {
     id: "test",
@@ -29,23 +34,6 @@ const SPEC: ModelSpec = ModelSpec {
     bytes: 300,
     sha256: TEST_MODEL_SHA256,
 };
-
-/// A transport that must never be reached. Counting rather than panicking, because a panic on a
-/// worker thread could be swallowed; the count is checked on the test's own thread.
-#[derive(Default)]
-struct NeverFetcher {
-    calls: AtomicUsize,
-}
-
-impl RangeFetcher for NeverFetcher {
-    fn get(&self, _url: &str, _from: u64) -> Result<Fetched, AsrError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Err(AsrError::new(
-            AsrErrorKind::NetworkFailed,
-            "must not be called",
-        ))
-    }
-}
 
 /// Everything the app does before anyone presses Download: list the models, try to use one, run a
 /// transcription and cancel it.
@@ -80,21 +68,6 @@ fn ordinary_workflow(sandbox: &Sandbox, store: &ModelStore) {
     let error = transcribe(&sandbox.tools(), &request, &Cancel::new(), &|_, _| {})
         .expect_err("the fake writes no JSON");
     assert_eq!(error.kind, AsrErrorKind::NoOutput);
-}
-
-#[test]
-fn the_whole_workflow_never_reaches_the_transport() {
-    let sandbox = Sandbox::new("never-fetcher");
-    let store = ModelStore::new(sandbox.path("models"));
-    let fetcher = NeverFetcher::default();
-
-    ordinary_workflow(&sandbox, &store);
-
-    assert_eq!(
-        fetcher.calls.load(Ordering::SeqCst),
-        0,
-        "nothing in the model store or the sidecar may fetch anything"
-    );
 }
 
 #[test]
