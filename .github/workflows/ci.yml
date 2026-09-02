@@ -206,29 +206,36 @@ jobs:
 
       - name: Smoke test (window title, video surface)
         continue-on-error: true
+        timeout-minutes: 25
         run: .github/scripts/e2e-check.sh smoke e2e
 
       - name: Shutdown test (clean exit, no survivors)
         continue-on-error: true
+        timeout-minutes: 3
         run: .github/scripts/e2e-check.sh shutdown e2e:shutdown
 
       - name: Close gate test (unsaved edits are never dropped silently)
         continue-on-error: true
+        timeout-minutes: 4
         run: .github/scripts/e2e-check.sh close-gate e2e:close-gate
 
       - name: Late-edit gate test (an edit made while the answer is in flight is asked about again)
         continue-on-error: true
+        timeout-minutes: 4
         run: .github/scripts/e2e-check.sh late-edit e2e:close-gate-late-edit
 
       - name: Quit gate test (a quit that is not a window close asks the same question)
         continue-on-error: true
+        timeout-minutes: 6
         run: .github/scripts/e2e-check.sh quit-gate e2e:quit-gate
 
       - name: Startup args test (a name the command line cannot carry costs that name, not the launch)
         continue-on-error: true
+        timeout-minutes: 4
         run: .github/scripts/e2e-check.sh startup-args e2e:startup-args
       - name: mpv context test (a gpu-context mpv refuses costs the request, not the app)
         continue-on-error: true
+        timeout-minutes: 3
         run: .github/scripts/e2e-check.sh mpv-context e2e:mpv-context
 
       # The one check that must not have a display, so it cannot go through e2e-check.sh: that
@@ -237,6 +244,7 @@ jobs:
       # otherwise abandon the step at the failure, before the exit file is written.
       - name: No-display test (a launch with nowhere to draw is a message, not a panic)
         continue-on-error: true
+        timeout-minutes: 2
         run: |
           mkdir -p ci-logs
           status=0
@@ -255,6 +263,7 @@ jobs:
 
       - name: Picker thread test (choosing a path starts no second GTK thread)
         continue-on-error: true
+        timeout-minutes: 4
         run: .github/scripts/e2e-check.sh picker-thread e2e:picker-thread
 
       # The only automated check that catches N2c's fix being removed: every other job misses it
@@ -262,6 +271,7 @@ jobs:
       # than the screen, which this bare X server serves without clamping (verified locally).
       - name: Scaled surface test (an integer display scale is applied exactly once)
         continue-on-error: true
+        timeout-minutes: 4
         run: .github/scripts/e2e-check.sh scale e2e:scale
 
       # Two behavioural checks are deliberately not steps here, and this is the record of that
@@ -286,8 +296,10 @@ jobs:
       # A verdict built on the shape of somebody else's output is a verdict that guesses. The
       # previous one read log text, so it could not tell a check that failed from one that never
       # ran, and a WebdriverIO run that executed no specs read as green. Exit codes say both.
+      # Not always(): a run the concurrency group cancelled reaches here with no check reported and
+      # turns the job red, so a superseded run reads as a failure. A cancellation is not a verdict.
       - name: Verdict (red unless every check ran and returned zero)
-        if: always()
+        if: ${{ !cancelled() }}
         run: .github/scripts/e2e-verdict.sh
 
   package:

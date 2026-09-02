@@ -13,7 +13,7 @@ import { passedTests, recordPassedTest, resetTally } from "./lib/tally.js";
  * Every spec that exists must run. WebdriverIO does not reliably fail a run that executed nothing,
  * so the count is asserted here. Bump it when you add a test; see e2e/README.md.
  */
-const EXPECTED_TESTS = 77;
+const EXPECTED_TESTS = 80;
 
 // Keeps a run out of the real data dir. Created once in the launcher; workers inherit the value.
 process.env.SUBLORE_E2E_DATA_HOME ??= mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-"));
@@ -41,7 +41,9 @@ export const config = {
   capabilities: [{ "tauri:options": { application: requireAppBinary() } }],
   framework: "mocha",
   mochaOpts: { ui: "bdd", timeout: 60000 },
-  reporters: ["spec"],
+  // The spec reporter prints a file's whole tick list only when that file ends, so a long spec is
+  // minutes of silence. Realtime sends one line per test to the launcher as each test finishes.
+  reporters: [["spec", { realtimeReporting: true }]],
   logLevel: "warn",
   waitforTimeout: 20000,
 
