@@ -16,6 +16,16 @@ use std::time::Duration;
 
 use sublore_asr::tools::Tools;
 
+/// How many entries a directory holds. Absent is zero, which is the pass these callers want; any
+/// other read failure is a failure rather than a clean directory. See BACKLOG.md N9, S13.
+pub fn entries_in(dir: &Path) -> usize {
+    match fs::read_dir(dir) {
+        Ok(entries) => entries.count(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(error) => panic!("{} should be readable or absent: {error}", dir.display()),
+    }
+}
+
 /// A directory the test owns, removed when the test ends however it ends.
 pub struct Sandbox {
     root: PathBuf,
@@ -110,6 +120,16 @@ pub fn ffmpeg() -> PathBuf {
         })
 }
 
+/// As much of a process name as `comm` can hold: Linux truncates it to `TASK_COMM_LEN - 1`, so a
+/// longer needle matches nothing and the negative checks below pass forever. See BACKLOG.md N9, S14.
+pub fn comm_prefix(name: &str) -> &str {
+    const COMM_MAX: usize = 15;
+    match name.char_indices().nth(COMM_MAX) {
+        Some((end, _)) => &name[..end],
+        None => name,
+    }
+}
+
 /// Whether a process id still has an entry in the process table, zombies included. A killed child
 /// that was never waited for is a zombie, and a zombie is exactly what the M3.1 criterion forbids.
 pub fn process_present(pid: u32, name: &str) -> bool {
@@ -121,7 +141,7 @@ pub fn process_present(pid: u32, name: &str) -> bool {
             .expect("ps should be runnable on a unix machine");
         let text = String::from_utf8_lossy(&output.stdout);
         // The name check makes a recycled pid read as gone rather than as a survivor.
-        text.contains(name)
+        text.contains(comm_prefix(name))
     }
     #[cfg(windows)]
     {

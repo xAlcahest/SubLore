@@ -83,7 +83,9 @@ async function main() {
     check("the app window appeared", toplevel !== null);
 
     // Sampled while the app closes, because a dialog that appeared and went would leave no trace
-    // to look for afterwards.
+    // to look for afterwards. The primary witness is the exit wait below: the gate is modal and a
+    // real one would hold the process past its timeout. This sampler is the diagnostic, and a
+    // dialog between two samples is what it can miss. See BACKLOG.md N9, S17.
     dialogWatch = setInterval(() => {
       if (allWindows().some((window) => window.name === UNSAVED_DIALOG_TITLE)) {
         dialogSeen = true;
