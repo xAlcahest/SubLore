@@ -71,13 +71,22 @@ function Test-Binary($binary) {
   return $named
 }
 
+# Counted, not assumed. This step runs only when the tests already failed, and a build that failed
+# to link leaves neither binary on disk, which is exactly when the sentence below used to be printed
+# after inspecting nothing.
 $named = $false
+$inspected = @()
 $exe = Get-ChildItem target\debug\deps\video_playback-*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($exe) { if (Test-Binary $exe.FullName) { $named = $true } }
+if ($exe) { $inspected += $exe.FullName; if (Test-Binary $exe.FullName) { $named = $true } }
 $mpv = "target\debug\deps\libmpv-2.dll"
-if (Test-Path $mpv) { if (Test-Binary (Resolve-Path $mpv).Path) { $named = $true } }
+if (Test-Path $mpv) { $inspected += $mpv; if (Test-Binary (Resolve-Path $mpv).Path) { $named = $true } }
 
-if (-not $named) {
-  Write-Host "`nEvery named import of both binaries resolves through the loader. The missing entry"
-  Write-Host "point is reached some other way: an ordinal import, or a DLL further down the graph."
+if ($inspected.Count -eq 0) {
+  Write-Host "`nNothing was inspected: neither target\debug\deps\video_playback-*.exe nor"
+  Write-Host "target\debug\deps\libmpv-2.dll is on disk. The run failed before it linked them, so"
+  Write-Host "this says nothing about any entry point."
+} elseif (-not $named) {
+  $what = ($inspected | ForEach-Object { Split-Path $_ -Leaf }) -join " and "
+  Write-Host "`nEvery named import of $what resolves through the loader. The missing entry point is"
+  Write-Host "reached some other way: an ordinal import, or a DLL further down the graph."
 }

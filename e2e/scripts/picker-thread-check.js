@@ -78,13 +78,19 @@ let checksRun = 0;
 /**
  * The one point this script clicks, relative to the toplevel origin, measured rather than guessed.
  *
- * It is the transcription status line, which is a paragraph nothing can focus, spanning the whole
- * window inside the chrome. Measured from a screenshot of this check's own window at 1024x700: the
- * band runs y 119 to 148, so this is its middle. When this check reports that no chooser opened,
- * this is what to re-measure, from a screenshot of this check's own window. T3 moved it up 35 px by
- * replacing two command bars with a menu bar and a toolbar.
+ * It is the rail's own heading, an `h2` nothing can focus and nothing listens to, and it is the last
+ * thing before the rail's first focusable in `ProjectRail.tsx`. That is why it is this point and not
+ * another: the tab counts below are one and two because the heading sits immediately above the
+ * project node, so they hold by construction rather than by luck. Measured from a screenshot of this
+ * check's own window at 1024x700: the heading's glyphs run y 76 to 83 and the project node's start
+ * at y 99, so 80 is inside the heading with room either side. When this check reports that no
+ * chooser opened, this is what to re-measure, from a screenshot of this check's own window.
+ *
+ * It used to be the transcription status line at y 134. T4 moved transcription into a panel the menu
+ * opens, so that paragraph is no longer on screen and the point fell into the empty tools column,
+ * which the DOM orders after the rail: every tab from there walked past the rail instead of into it.
  */
-const CHROME_TEXT = { x: 900, y: 134 };
+const CHROME_TEXT = { x: 52, y: 80 };
 
 /**
  * Tab stops from `CHROME_TEXT` into the rail, in ProjectRail.tsx's own DOM order: the project node

@@ -18,9 +18,14 @@ command -v ffmpeg >/dev/null 2>&1 || {
 }
 
 mkdir -p fixtures/audio
+# Through a file rather than a pipe: this is `#!/bin/sh`, where `set -e` reads only the last status
+# in a pipeline, so espeak-ng dying part way through would hand ffmpeg a shorter recording and
+# ffmpeg would encode it happily. The fixture would be quietly too short.
+raw=$(mktemp)
+trap 'rm -f "$raw"' EXIT
 espeak-ng -v en-us -s 145 -p 40 --stdout \
-	"Sublore keeps your terminology consistent across every episode. The translator opens a subtitle file, and the memory follows." |
-	ffmpeg -y -hide_banner -loglevel error -i - -ac 1 -ar 16000 -c:a pcm_s16le fixtures/audio/speech-en.wav
+	"Sublore keeps your terminology consistent across every episode. The translator opens a subtitle file, and the memory follows." > "$raw"
+ffmpeg -y -hide_banner -loglevel error -i "$raw" -ac 1 -ar 16000 -c:a pcm_s16le fixtures/audio/speech-en.wav
 
 echo "make-speech: wrote fixtures/audio/speech-en.wav"
 ffprobe -hide_banner -loglevel error -show_entries format=duration,size -of default=noprint_wrappers=1 fixtures/audio/speech-en.wav

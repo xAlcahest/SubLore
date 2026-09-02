@@ -10,10 +10,15 @@
 //! job in a child process, so a broken file cannot take the app with it. The shape of that child
 //! is `sublore-asr`'s and none of its code (decision 12). See BACKLOG.md M2.4.
 
+pub mod cache;
 pub mod error;
 pub mod extract;
 pub mod peaks;
 
+pub use cache::{
+    peaks_cached, CacheError, CacheErrorKind, CacheKey, Lookup, PeakRun, PeaksCache,
+    CACHE_CAP_BYTES, PEAK_FORMAT_VERSION,
+};
 pub use error::{AudioError, AudioErrorKind};
 pub use extract::{extract_peaks, Cancel, PeakRequest, STALL_TIMEOUT};
 pub use peaks::{Bucket, Peaks, CHUNK_BUCKETS, SAMPLES_PER_BUCKET, SAMPLE_RATE};
