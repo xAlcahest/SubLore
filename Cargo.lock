@@ -3182,6 +3182,10 @@ dependencies = [
 [[package]]
 name = "sublore-audio"
 version = "0.1.0"
+dependencies = [
+ "sha2 0.11.0",
+ "sublore-io",
+]
 
 [[package]]
 name = "sublore-edit"
