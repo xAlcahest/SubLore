@@ -41,7 +41,9 @@ export const config = {
   capabilities: [{ "tauri:options": { application: requireAppBinary() } }],
   framework: "mocha",
   mochaOpts: { ui: "bdd", timeout: 60000 },
-  reporters: ["spec"],
+  // The spec reporter prints a file's whole tick list only when that file ends, so a long spec is
+  // minutes of silence. Realtime sends one line per test to the launcher as each test finishes.
+  reporters: [["spec", { realtimeReporting: true }]],
   logLevel: "warn",
   waitforTimeout: 20000,
 
