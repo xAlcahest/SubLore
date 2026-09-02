@@ -142,3 +142,7 @@ body {
   color: var(--ink-error);
   overflow-wrap: anywhere;
 }
+
+.statusbar__waveform-error {
+  color: var(--ink-error);
+}

@@ -8,9 +8,11 @@ import MenuBar from "./components/MenuBar";
 import ProjectRail from "./components/ProjectRail";
 import StatusBar from "./components/StatusBar";
 import Toolbar from "./components/Toolbar";
+import Waveform from "./components/Waveform";
 import TranscribePanel from "./components/TranscribePanel";
 import VideoControls from "./components/VideoControls";
 import VideoStage from "./components/VideoStage";
+import { useAudioPeaks } from "./hooks/useAudioPeaks";
 import { useCueSelection } from "./hooks/useCueSelection";
 import { LayerContext, useLayerRegistry } from "./hooks/useLayers";
 import { useProject } from "./hooks/useProject";
@@ -47,6 +49,7 @@ export default function App() {
   // Every HTML layer registers here while it is open, and the video surface hides for as long as
   // the set is not empty (decision 1, T8).
   const layers = useLayerRegistry();
+  const peaks = useAudioPeaks();
   const { state, position, errorCode, open, togglePlayback, seek, setRegion } = useVideoPlayer(
     layers.covered,
   );
@@ -327,6 +330,14 @@ export default function App() {
             {/* The current line, and nothing above it: the waveform's provider arrives with M2.4 and
               a panel with no provider takes no space, so there is no empty box here (T5). */}
             <section className="shell__tools">
+              {/* Absent until the first chunk arrives, never an empty panel waiting for one. */}
+              {peaks.filled > 0 && (
+                <Waveform
+                  peaks={peaks}
+                  positionMs={Math.round(position * 1000)}
+                  durationMs={Math.round((state.duration ?? 0) * 1000)}
+                />
+              )}
               <CurrentLine
                 key={subtitle.openId}
                 index={selection.active}
@@ -377,6 +388,7 @@ export default function App() {
           projectDeleted={project.deleted}
           projectError={project.error}
           chromeError={quitError}
+          waveformFailed={peaks.error !== null}
         />
         {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       </div>

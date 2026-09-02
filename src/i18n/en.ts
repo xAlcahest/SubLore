@@ -144,6 +144,12 @@ export const en = {
       commandFailed: "Sublore could not finish that action. Restart Sublore if it happens again.",
     },
   },
+  waveform: {
+    label: "Waveform",
+    /** Shown in the status bar when a peak job fails. The detail is technical and stays in the log. */
+    failed: "The waveform could not be read for this file. The video is unaffected.",
+  },
+
   subtitle: {
     /** Appended to the status line while the document differs from the file on disk. */
     dirty: "Unsaved changes",

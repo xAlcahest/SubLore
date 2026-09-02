@@ -64,6 +64,13 @@ export function requireVideoFixture() {
   return requireFile(videoFixture, "sh fixtures/video/make-sample.sh");
 }
 
+/** The M2.4 fixture whose audio is known: six ten-second blocks, tone first. Generated, not committed. */
+export const waveformFixture = path.join(repoRoot, "fixtures", "video", "waveform-60s.mkv");
+
+export function requireWaveformFixture() {
+  return requireFile(waveformFixture, "sh fixtures/video/make-waveform-fixtures.sh");
+}
+
 /** A command the harness drives the app with. Missing means one sentence, never a cryptic error. */
 export function requireTool(name, what) {
   try {

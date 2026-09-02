@@ -26,6 +26,7 @@ use crate::video::player::{AudioTrack, Player};
 use crate::video::VideoState;
 use error::{AudioError, AudioErrorCode};
 
+const EVENT_STARTED: &str = "audio://started";
 const EVENT_PEAKS: &str = "audio://peaks";
 const EVENT_DONE: &str = "audio://done";
 const EVENT_ERROR: &str = "audio://error";
@@ -357,6 +358,10 @@ fn start_job(app: &AppHandle, media: PathBuf, ff_index: u32) -> Result<u64, Audi
         ff_index,
     };
     let job_id = state.begin(target, cancel.clone())?;
+    // Announced before the first chunk: a job started by `video_open` is nobody's return value, so
+    // without this the page sees chunks carrying an id it has never been told about and cannot say
+    // which job is the current one. See W5.
+    let _ = app.emit(EVENT_STARTED, AudioJobStarted { job_id });
 
     let ffmpeg = ffmpeg_binary();
     let request = PeakRequest::new(media, ff_index);
