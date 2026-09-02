@@ -157,6 +157,36 @@ function present(selector) {
   return browser.execute((css) => document.querySelector(css) !== null, selector);
 }
 
+/** The rail's project node, whichever of the two states it is in, and its menu. */
+async function openProjectMenu(toplevel) {
+  await clickElement(
+    toplevel,
+    (await present(".rail__project")) ? ".rail__project" : ".rail__empty",
+  );
+  await waitFor(() => present(".railmenu"), {
+    timeout: 20000,
+    message: "the rail's project menu to open",
+  });
+}
+
+/**
+ * Every spec shares one data home and a launch reopens the project that was open (decision 24 D5),
+ * so an earlier spec's project is on screen here and `create-project` is not in the menu while one
+ * is. This closes whatever is open, so the block below starts from nothing either way.
+ */
+async function closeAnyOpenProject(toplevel) {
+  if (!(await present(".rail__project"))) {
+    return;
+  }
+  await openProjectMenu(toplevel);
+  await clickElement(toplevel, ".railmenu__item--close-project");
+  await clickElement(toplevel, ".raildialog__confirm");
+  await waitFor(() => present(".rail__empty"), {
+    timeout: 20000,
+    message: "the rail to empty once another spec's project is closed",
+  });
+}
+
 /**
  * Replace whatever a text field holds. `e2e/lib/input.js` is shared with the M0 and M1 specs and
  * stays frozen, so the ctrl+a lives here, as it does in subtitle.spec.js.
@@ -650,10 +680,11 @@ describe("cue list editing", () => {
     // The one text box outside the cue editor is the field the rail's Add episode question opens
     // with, so that is where a typed ctrl+z can still be taken by the document's handler. It needs
     // a project open, and it is reached the way T7 left the rail: through the rail's own menu.
-    await clickElement(toplevel, ".rail__empty");
+    await closeAnyOpenProject(toplevel);
+    await openProjectMenu(toplevel);
     await waitFor(() => present(".railmenu__item--create-project"), {
       timeout: 20000,
-      message: "the rail's project menu to open",
+      message: "the rail's project menu to offer Create project",
     });
     await clickElement(toplevel, ".railmenu__item--create-project");
     const folderChooser = await waitForChooser("Choose a project folder");
