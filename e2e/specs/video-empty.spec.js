@@ -124,7 +124,10 @@ describe("video surface with no video open", () => {
     focusWindow(toplevel.id);
 
     await waitFor(
-      () => browser.execute(() => document.querySelector(".app__error")?.textContent ?? null),
+      () =>
+        browser.execute(
+          () => document.querySelector(".statusbar__video-error")?.textContent ?? null,
+        ),
       { timeout: 20000, message: "the open to fail with a message" },
     );
 

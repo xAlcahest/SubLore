@@ -212,16 +212,15 @@ are the contract. Renaming one breaks the harness. T1 took three of them away wi
 belonged to — `.bar__input`, `.subbar__input` and `.subbar__dest` — and nothing here uses them any
 more.
 
-`.bar__button`, `.app__error`, `.stage__surface`, `.stage__empty`, `.controls__button`,
-`.controls__slider`, `.subbar__open`, `.subbar__save-copy`, `.subbar__status`, `.subbar__error`,
+`.bar__button`, `.stage__surface`, `.stage__empty`, `.controls__button`,
+`.controls__slider`, `.subbar__open`, `.subbar__save-copy`,
 `.project__path`, `.project__choose-folder`, `.project__create`, `.project__open`, `.project__delete`,
 `.project__status`, `.project__error`, `.project__episodes`, `.project__episode`,
 `.project__episode--selected`, `.project__episode-title`, `.project__files`, `.project__file`,
 `.project__new-episode`, `.project__add-episode`, `.project__file-path`, `.project__choose-file`,
 `.project__role-media`, `.project__role-source`, `.project__role-target`, `.project__attach`
 
-Added by M2.3: `.subbar__save`, `.subbar__undo`, `.subbar__redo`, `.subbar__discard`, `.subbar__dirty`,
-`.subbar__truncated`, `.cuelist`, `.cuelist__sizer`, `.cuelist__row`, `.cuelist__row--selected`,
+Added by M2.3: `.subbar__save`, `.subbar__undo`, `.subbar__redo`, `.subbar__discard`, `.cuelist`, `.cuelist__sizer`, `.cuelist__row`, `.cuelist__row--selected`,
 `.cuelist__row--comment`, `.cuelist__pos`, `.cuelist__number`, `.cuelist__start`, `.cuelist__end`,
 `.cuelist__text`, `.cuelist__editor`, `.cuelist__empty`
 
@@ -231,9 +230,17 @@ Added by M3.4: `.asrbar__model`, `.asrbar__download`, `.asrbar__gpu`, `.asrbar__
 `.asrbar__cue` carries `data-start` and `data-end` in milliseconds, which is how the spec checks cue
 times without parsing the timecodes it renders.
 
+Added by T2, the five regions and the status bar outside them: `.shell__chrome`, `.shell__rail`,
+`.shell__video`, `.shell__tools`, `.shell__grid`, `.statusbar__document`, `.statusbar__dirty`,
+`.statusbar__truncated`, `.statusbar__message`, `.statusbar__error`, `.statusbar__video-error`.
+The last six carry copy that used to live in the subtitle bar and in the loose video error band:
+`.subbar__status` and `.subbar__dirty` are now `.statusbar__document` and `.statusbar__dirty`, the
+saved line is `.statusbar__message` on its own, `.subbar__error` is `.statusbar__error` and
+`.app__error` is `.statusbar__video-error`.
+
 Readiness has no dedicated signal: a video is loaded when `.stage__empty` is gone **and**
-`.controls__button` is enabled. A subtitle file is open when `.subbar__status` stops saying
-"No subtitle file open."; `.subbar__error` is absent from the DOM when there is nothing wrong.
+`.controls__button` is enabled. A subtitle file is open when `.statusbar__document` stops saying
+"No subtitle file open."; `.statusbar__error` is absent from the DOM when there is nothing wrong.
 
 ## The project spec
 

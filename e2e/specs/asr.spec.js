@@ -191,7 +191,7 @@ async function editRow(toplevel, position, text) {
 async function waitForSubtitleStatus(prefix) {
   return waitFor(
     async () => {
-      const status = await textOf(".subbar__status");
+      const status = await textOf(".statusbar__document");
       return status !== null && status.startsWith(prefix) ? status : null;
     },
     { timeout: 20000, message: `the subtitle status line to start with ${JSON.stringify(prefix)}` },
@@ -208,6 +208,11 @@ async function startRun(toplevel) {
   });
 }
 
+/** The folder the media lives in, and what was in it before any run: the read-only guarantee is
+ * about what a transcription adds, not about the list being frozen. See CONTRIBUTING.md §3.1. */
+const videoDir = path.join(repoRoot, "fixtures", "video");
+let mediaFolderBefore = [];
+
 describe("transcription", () => {
   let toplevel = null;
   let fixture = null;
@@ -220,6 +225,7 @@ describe("transcription", () => {
   let saved = null;
 
   before(async () => {
+    mediaFolderBefore = readdirSync(videoDir).sort();
     fixture = requireVideoFixture();
     saveDir = saveDirectory("transcription-save");
     firstSaveDir = saveDirectory("first-save");
@@ -279,7 +285,6 @@ describe("transcription", () => {
 
     // CONTRIBUTING.md §3.1: the user's media is read only. Snapshot what is beside it, and its own
     // metadata, and compare after the run.
-    const videoDir = path.join(repoRoot, "fixtures", "video");
     const before = { listing: readdirSync(videoDir).sort(), stat: statSync(fixture) };
 
     setStubMode("fast");
@@ -326,24 +331,23 @@ describe("transcription", () => {
     expect(status).toContain(`${cues.length} cues`);
     expect(words(await rowText(1))).toBe(words(cues[0].text));
     // Unsaved from the first moment: these bytes exist nowhere but in the session.
-    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await present(".statusbar__dirty")).toBe(true);
     // Both saves are offered: Save asks where a document with no file goes (decision 24, B2).
     expect(await propertyOf(".subbar__save", "disabled")).toBe(false);
     expect(await propertyOf(".subbar__save-copy", "disabled")).toBe(false);
-    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await textOf(".statusbar__error")).toBe(null);
 
     // The transcription wrote nothing at all: not beside the media, and nowhere Sublore saves.
+    // Compared against what was there when the run started, not against a list written here: a
+    // fixture added to that folder is not a defect, and a frozen list would call it one.
     expect(readdirSync(saveDir)).toEqual([]);
-    expect(readdirSync(path.join(repoRoot, "fixtures", "video")).sort()).toEqual([
-      "make-sample.sh",
-      "sample.mkv",
-    ]);
+    expect(readdirSync(videoDir).sort()).toEqual(mediaFolderBefore);
   });
 
   it("edits a cue of the result, saves it, and reopens the file with the edit in it", async () => {
     const cues = await shownCues();
     await editRow(toplevel, 1, CORRECTION);
-    expect(await present(".subbar__error")).toBe(false);
+    expect(await present(".statusbar__error")).toBe(false);
     // The document's own undo took it, which is the undo the editor uses everywhere else.
     expect(await propertyOf(".subbar__undo", "disabled")).toBe(false);
 
@@ -352,12 +356,15 @@ describe("transcription", () => {
     const chooser = await waitForChooser("Save a copy of the subtitle");
     await answerChooser(chooser, destination, "save a copy");
     focusWindow(toplevel.id);
-    await waitFor(async () => (await textOf(".subbar__status"))?.includes(destination) === true, {
-      timeout: 20000,
-      message: `the status line to report the file written at ${destination}`,
-    });
+    await waitFor(
+      async () => (await textOf(".statusbar__message"))?.includes(destination) === true,
+      {
+        timeout: 20000,
+        message: `the status line to report the file written at ${destination}`,
+      },
+    );
     // Its bytes are on disk now, so a document that had never been saved is not unsaved work.
-    expect(await present(".subbar__dirty")).toBe(false);
+    expect(await present(".statusbar__dirty")).toBe(false);
 
     saved = readFileSync(destination);
     expect(saved.toString("utf8")).toContain(CORRECTION);
@@ -369,12 +376,12 @@ describe("transcription", () => {
     focusWindow(toplevel.id);
     await waitForSubtitleStatus(`SRT · ${cues.length} cues · LF`);
     expect(await rowText(1)).toBe(CORRECTION);
-    expect(await present(".subbar__dirty")).toBe(false);
+    expect(await present(".statusbar__dirty")).toBe(false);
   });
 
   it("asks before a transcription replaces unsaved work, and cancel keeps both", async () => {
     await editRow(toplevel, 2, SECOND_EDIT);
-    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await present(".statusbar__dirty")).toBe(true);
 
     setStubMode("fast");
     await startRun(toplevel);
@@ -386,8 +393,8 @@ describe("transcription", () => {
     // The document is untouched: both edits are still on screen and still unsaved.
     expect(await rowText(1)).toBe(CORRECTION);
     expect(await rowText(2)).toBe(SECOND_EDIT);
-    expect(await present(".subbar__dirty")).toBe(true);
-    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await present(".statusbar__dirty")).toBe(true);
+    expect(await textOf(".statusbar__error")).toBe(null);
     // And so is the result: the run's cues are still listed, and still on offer.
     expect((await shownCues()).length).toBeGreaterThan(0);
     expect(await propertyOf(".asrbar__use", "tagName")).toBe("BUTTON");
@@ -404,7 +411,7 @@ describe("transcription", () => {
 
     await waitForSubtitleStatus(`SRT · ${cues.length} cues · LF`);
     expect(words(await rowText(1))).toBe(words(cues[0].text));
-    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await present(".statusbar__dirty")).toBe(true);
     expect(await propertyOf(".subbar__save", "disabled")).toBe(false);
     // The result is the document now, so there is nothing left to offer.
     expect(await propertyOf(".asrbar__use", "tagName")).toBe(null);
@@ -490,7 +497,7 @@ describe("transcription", () => {
   // Decision 24, B2: the document on screen is the transcription the CPU run left, and it has
   // never had a file. These four drive its first save through the window.
   it("asks a document with no file where it goes, and cancelling writes nothing", async () => {
-    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await present(".statusbar__dirty")).toBe(true);
 
     await clickElement(toplevel, ".subbar__save");
     const chooser = await waitForChooser(FIRST_SAVE_TITLE);
@@ -499,8 +506,8 @@ describe("transcription", () => {
 
     // Nothing written, nothing lost, and the question can be asked again.
     expect(readdirSync(firstSaveDir)).toEqual([]);
-    expect(await present(".subbar__dirty")).toBe(true);
-    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await present(".statusbar__dirty")).toBe(true);
+    expect(await textOf(".statusbar__error")).toBe(null);
     expect(await propertyOf(".subbar__save", "disabled")).toBe(false);
   });
 
@@ -513,25 +520,25 @@ describe("transcription", () => {
     const chooser = await waitForChooser(FIRST_SAVE_TITLE);
     await answerChooser(chooser, adopted, "first save");
     focusWindow(toplevel.id);
-    await waitFor(async () => (await textOf(".subbar__status"))?.includes(adopted) === true, {
+    await waitFor(async () => (await textOf(".statusbar__message"))?.includes(adopted) === true, {
       timeout: 20000,
       message: `the status line to report the file written at ${adopted}`,
     });
 
-    expect(await present(".subbar__dirty")).toBe(false);
+    expect(await present(".statusbar__dirty")).toBe(false);
     // Saved, not "saved a copy to": this file is the document's own from now on.
-    expect(await textOf(".subbar__status")).toContain(`Saved ${adopted}`);
+    expect(await textOf(".statusbar__message")).toContain(`Saved ${adopted}`);
     expect(readdirSync(firstSaveDir)).toEqual(["first-save.srt"]);
     expect(words(readFileSync(adopted, "utf8"))).toContain(words(firstCue));
   });
 
   it("writes to that same file on Ctrl+S afterwards, with no chooser", async () => {
     await editRow(toplevel, 1, AFTER_FIRST_SAVE);
-    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await present(".statusbar__dirty")).toBe(true);
 
     focusWindow(toplevel.id);
     pressKey("ctrl+s");
-    await waitFor(async () => ((await present(".subbar__dirty")) === false ? true : null), {
+    await waitFor(async () => ((await present(".statusbar__dirty")) === false ? true : null), {
       timeout: 20000,
       message: "the dirty marker to clear after Ctrl+S wrote the file the document adopted",
     });
@@ -540,7 +547,7 @@ describe("transcription", () => {
     expect(findChooser(FIRST_SAVE_TITLE)).toBe(null);
     expect(readFileSync(adopted, "utf8")).toContain(AFTER_FIRST_SAVE);
     expect(readdirSync(firstSaveDir)).toEqual(["first-save.srt"]);
-    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await textOf(".statusbar__error")).toBe(null);
   });
 
   it("holds the window open when the close gate's Save is asked and the chooser is cancelled", async () => {
@@ -549,7 +556,7 @@ describe("transcription", () => {
     setStubMode("fast");
     await startRun(toplevel);
     await waitForStatus(" cues");
-    await waitFor(async () => ((await present(".subbar__dirty")) === true ? true : null), {
+    await waitFor(async () => ((await present(".statusbar__dirty")) === true ? true : null), {
       timeout: 30000,
       message: "the new transcription to become the open document",
     });
@@ -566,7 +573,7 @@ describe("transcription", () => {
     await cancelChooser(chooser, "the close gate's first save");
     focusWindow(toplevel.id);
 
-    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await present(".statusbar__dirty")).toBe(true);
     expect((await shownCues()).length).toBeGreaterThan(0);
     expect(readdirSync(firstSaveDir)).toEqual(before);
     expect(readFileSync(adopted, "utf8")).toContain(AFTER_FIRST_SAVE);
@@ -576,7 +583,7 @@ describe("transcription", () => {
   // left, and it has never had a file either, so Save here has to ask the same question.
   it("asks where the work in the way goes, and cancelling that chooser replaces nothing", async () => {
     await editRow(toplevel, 1, IN_THE_WAY);
-    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await present(".statusbar__dirty")).toBe(true);
     const before = readdirSync(firstSaveDir);
 
     setStubMode("fast");
@@ -592,8 +599,8 @@ describe("transcription", () => {
     // Nothing written, nothing replaced, and the work that was in the way is still on screen.
     expect(readdirSync(firstSaveDir)).toEqual(before);
     expect(await rowText(1)).toBe(IN_THE_WAY);
-    expect(await present(".subbar__dirty")).toBe(true);
-    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await present(".statusbar__dirty")).toBe(true);
+    expect(await textOf(".statusbar__error")).toBe(null);
     // And the result is still there to be taken on a second answer.
     expect(await propertyOf(".asrbar__use", "tagName")).toBe("BUTTON");
   });
@@ -621,9 +628,9 @@ describe("transcription", () => {
     expect(readFileSync(replaced, "utf8")).toContain(IN_THE_WAY);
     // The new cues are the document, unsaved and with no file of their own.
     expect(words(await rowText(1))).toBe(words(cues[0].text));
-    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await present(".statusbar__dirty")).toBe(true);
     expect(await propertyOf(".asrbar__use", "tagName")).toBe(null);
-    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await textOf(".statusbar__error")).toBe(null);
     // The file an earlier first save adopted was not touched by any of this.
     expect(readFileSync(adopted, "utf8")).toContain(AFTER_FIRST_SAVE);
   });

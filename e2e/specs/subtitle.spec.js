@@ -130,12 +130,12 @@ async function savesIdenticalCopy(toplevel, source, saveDir) {
   const destination = path.join(saveDir, path.basename(source));
 
   await saveCopyTo(toplevel, destination);
-  await waitFor(async () => (await textOf(".subbar__status"))?.includes(destination) === true, {
+  await waitFor(async () => (await textOf(".statusbar__message"))?.includes(destination) === true, {
     timeout: 20000,
     message: `the status line to report the copy at ${destination}`,
   });
 
-  expect(await textOf(".subbar__error")).toBe(null);
+  expect(await textOf(".statusbar__error")).toBe(null);
   // The point of the whole milestone: what came back out is what went in, byte for byte.
   expect(Buffer.compare(readFileSync(source), readFileSync(destination))).toBe(0);
 }
@@ -143,7 +143,7 @@ async function savesIdenticalCopy(toplevel, source, saveDir) {
 async function waitForStatus(expected) {
   return waitFor(
     async () => {
-      const status = await textOf(".subbar__status");
+      const status = await textOf(".statusbar__document");
       return status !== null && status.startsWith(expected) ? status : null;
     },
     {
@@ -174,7 +174,7 @@ describe("subtitle open and save", () => {
     await openSubtitle(toplevel, fixture("srt", "clean", "basic-lf.srt"));
 
     expect(await waitForStatus(LF_STATUS)).toBe(LF_STATUS);
-    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await textOf(".statusbar__error")).toBe(null);
   });
 
   it("saves a byte-identical copy", async () => {
@@ -193,7 +193,7 @@ describe("subtitle open and save", () => {
 
     await openSubtitle(toplevel, source);
     expect(await waitForStatus(ASS_STATUS)).toBe(ASS_STATUS);
-    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await textOf(".statusbar__error")).toBe(null);
 
     await savesIdenticalCopy(toplevel, source, saveDir);
   });
@@ -203,7 +203,7 @@ describe("subtitle open and save", () => {
 
     await openSubtitle(toplevel, source);
     expect(await waitForStatus(VTT_STATUS)).toBe(VTT_STATUS);
-    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await textOf(".statusbar__error")).toBe(null);
 
     await savesIdenticalCopy(toplevel, source, saveDir);
   });
@@ -213,18 +213,18 @@ describe("subtitle open and save", () => {
 
     const message = await waitFor(
       async () => {
-        const text = await textOf(".subbar__error");
+        const text = await textOf(".statusbar__error");
         return text !== null && text.trim() !== "" ? text : null;
       },
       { timeout: 20000, message: "the subtitle error line to appear" },
     );
     expect(message).toContain(MALFORMED_LINE);
-    expect(await textOf(".subbar__status")).toBe(NO_FILE_STATUS);
+    expect(await textOf(".statusbar__document")).toBe(NO_FILE_STATUS);
 
     // Still usable: the clean fixture opens straight afterwards, with the error line gone.
     await openSubtitle(toplevel, fixture("srt", "clean", "basic-lf.srt"));
     expect(await waitForStatus(LF_STATUS)).toBe(LF_STATUS);
-    expect(await textOf(".subbar__error")).toBe(null);
+    expect(await textOf(".statusbar__error")).toBe(null);
   });
 
   it("throws an unsaved edit away and writes nothing when the edit is discarded", async () => {
@@ -251,7 +251,7 @@ describe("subtitle open and save", () => {
       timeout: 20000,
       message: `row ${DISCARD_POSITION} to hold the edit`,
     });
-    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await present(".statusbar__dirty")).toBe(true);
 
     // Discard is offered only where it is meant: an open the unsaved edit refused. Reopening the
     // same file is that refusal at its plainest, and what comes back is the file on disk.
@@ -269,9 +269,9 @@ describe("subtitle open and save", () => {
       message: `row ${DISCARD_POSITION} to go back to the text it was opened with`,
     });
     expect(await waitForStatus(LF_STATUS)).toBe(LF_STATUS);
-    expect(await present(".subbar__dirty")).toBe(false);
+    expect(await present(".statusbar__dirty")).toBe(false);
     expect(await present(".subbar__discard")).toBe(false);
-    expect(await present(".subbar__error")).toBe(false);
+    expect(await present(".statusbar__error")).toBe(false);
     // Discarding is not a write: the file is still every byte it was opened with.
     expect(readFileSync(file).equals(opened)).toBe(true);
   });

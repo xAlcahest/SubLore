@@ -29,12 +29,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { appEnv } from "../lib/env.js";
 import { doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import { answerDialog } from "../lib/gtk-dialog.js";
-import { closeWindowTool, repoRoot, requireAppBinary } from "../lib/paths.js";
+import { closeWindowTool, firstCueText, repoRoot, requireAppBinary } from "../lib/paths.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { allWindows, findToplevel } from "../lib/x11.js";
 
-/** Point in the current shell, relative to the toplevel origin. M2.0 must revisit this. */
-const FIRST_CUE_TEXT = { x: 750, y: 540 };
 /** Frozen contract with src-tauri/src/strings.rs, same as the close gate check's. */
 const DIALOG_TITLE = "Unsaved changes";
 const EDIT_MARK = "SUBLORE_N1B";
@@ -79,7 +77,7 @@ try {
   // observable to wait on here. A wait that turns out too short shows up as a phase, not as a pass.
   await sleep(3500);
   focusWindow(toplevel.id);
-  doubleClickAt(toplevel.absX + FIRST_CUE_TEXT.x, toplevel.absY + FIRST_CUE_TEXT.y);
+  doubleClickAt(toplevel.absX + firstCueText.x, toplevel.absY + firstCueText.y);
   await sleep(600);
   typeText(EDIT_MARK);
   pressKey("Return");

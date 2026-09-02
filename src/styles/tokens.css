@@ -1,0 +1,28 @@
+/*
+ * Every colour in the interface, named for the job it does. No other file writes a value: T3 to T9
+ * name a token or they name nothing (decision 22).
+ *
+ * The values are the shell mockup's palette. v1 is dark only (decision 24), so there is no light
+ * set and no theme switch; a light theme, if it ever ships, is a second set of values here.
+ */
+:root {
+  color-scheme: dark;
+
+  --bg-window: #131317;
+  --bg-panel: #202026;
+  --bg-sunken: #17171b;
+  --bg-media: #0c0c0e;
+
+  --line: #2a2a31;
+  --line-strong: #34343c;
+
+  --ink: #e6e6ea;
+  --ink-muted: #b6b6c0;
+  --ink-dim: #9a9aa6;
+  --ink-faint: #71717f;
+  /* The mockup draws no error state, so this one is the dark palette Sublore already shipped. */
+  --ink-error: #ff8a80;
+
+  --accent: #4fb3d9;
+  --accent-bg: #2d4a5c;
+}

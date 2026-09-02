@@ -1,0 +1,132 @@
+/*
+ * The chrome region: the command bars M0 to M4 bolted on, waiting to become the menu bar and the
+ * toolbar (T3) and the transcription dialog (T4). The project rail still borrows `.bar__label`
+ * until T7 reshapes it.
+ */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.bar__brand {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.bar__label {
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.bar__button {
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.subbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.subbar__open,
+.subbar__save,
+.subbar__save-copy,
+.subbar__undo,
+.subbar__redo,
+.subbar__discard {
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.asrbar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.asrbar__model {
+  min-width: 12rem;
+  padding: 0.3rem 0.4rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.asrbar__gpu-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.asrbar__download,
+.asrbar__download-cancel,
+.asrbar__start,
+.asrbar__cancel,
+.asrbar__use {
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.asrbar__status,
+.asrbar__error {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.asrbar__error {
+  color: var(--ink-error);
+}
+
+.asrbar__progress,
+.asrbar__download-progress {
+  display: block;
+  flex: none;
+  width: 100%;
+  height: 0.4rem;
+}
+
+/* Bounded on purpose: a transcript must not push the video or the cue list off the window. */
+.asrbar__cues {
+  flex: 0 1 auto;
+  max-height: 6rem;
+  margin: 0;
+  padding: 0.25rem 0.75rem;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--line);
+  list-style: none;
+  font-size: 0.8125rem;
+}
+
+.asrbar__cue {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.1rem 0;
+}
+
+.asrbar__cue-time {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}

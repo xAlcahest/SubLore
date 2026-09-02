@@ -63,6 +63,9 @@ function centreOf(selector) {
     if (element === null) {
       return null;
     }
+    // The rail is only as tall as the top block, so a control further down it has to be brought
+    // into view before a pointer can reach it. See T2's full-width grid.
+    element.scrollIntoView({ block: "nearest", inline: "nearest" });
     const rect = element.getBoundingClientRect();
     const dpr = window.devicePixelRatio;
     return { x: (rect.x + rect.width / 2) * dpr, y: (rect.y + rect.height / 2) * dpr };
@@ -139,7 +142,7 @@ describe("the chooser is the only way in", () => {
     // A document and a project, so every field the interface can hold is in the DOM and every one
     // of the five choosers can be raised.
     await chooseFrom(toplevel, ".subbar__open", "Choose a subtitle", subtitle, "subtitle");
-    await waitFor(async () => (await textOf(".subbar__status"))?.startsWith("SRT") === true, {
+    await waitFor(async () => (await textOf(".statusbar__document"))?.startsWith("SRT") === true, {
       timeout: 20000,
       message: "the status line to report the open subtitle",
     });
@@ -189,17 +192,17 @@ describe("the chooser is the only way in", () => {
     await cancelFrom(toplevel, ".bar__button", "Choose a video", "video");
 
     expect(await textOf(".stage__empty")).toBe(empty);
-    expect(await textOf(".app__error")).toBe(null);
+    expect(await textOf(".statusbar__video-error")).toBe(null);
   });
 
   it("leaves the open document alone when the subtitle chooser is dismissed", async () => {
-    const status = await textOf(".subbar__status");
+    const status = await textOf(".statusbar__document");
 
     await cancelFrom(toplevel, ".subbar__open", "Choose a subtitle", "subtitle");
 
-    expect(await textOf(".subbar__status")).toBe(status);
-    expect(await textOf(".subbar__error")).toBe(null);
-    expect(await textOf(".subbar__dirty")).toBe(null);
+    expect(await textOf(".statusbar__document")).toBe(status);
+    expect(await textOf(".statusbar__error")).toBe(null);
+    expect(await textOf(".statusbar__dirty")).toBe(null);
   });
 
   it("writes nothing when the save chooser is dismissed", async () => {
@@ -213,8 +216,8 @@ describe("the chooser is the only way in", () => {
     );
 
     expect(readdirSync(saveFolder)).toEqual([]);
-    expect(await textOf(".subbar__error")).toBe(null);
-    expect(await textOf(".subbar__dirty")).toBe(null);
+    expect(await textOf(".statusbar__error")).toBe(null);
+    expect(await textOf(".statusbar__dirty")).toBe(null);
   });
 
   it("leaves the project alone when the folder chooser is dismissed", async () => {

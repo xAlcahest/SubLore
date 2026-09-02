@@ -40,9 +40,16 @@ import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSyn
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { appLog, waitForLog } from "../lib/applog.js";
-import { acceptChooser, answerChooser, cancelChooser, clickUntilChooser } from "../lib/chooser.js";
+import {
+  acceptChooser,
+  answerChooser,
+  cancelChooser,
+  findChooser,
+  waitForChooser,
+} from "../lib/chooser.js";
 import { appEnv } from "../lib/env.js";
 import { clickAt, focusWindow, pressKey } from "../lib/input.js";
 import {
@@ -61,15 +68,32 @@ const EXPECTED_CHECKS = 14;
 let checksRun = 0;
 
 /**
- * Points in the current shell, relative to the toplevel origin, measured rather than guessed.
+ * The one point this script clicks, relative to the toplevel origin, measured rather than guessed.
  *
- * This script has no DOM, so it reaches the buttons by pixel. Every layout change moves them, and
- * M2.0's remaining tasks will move them again. When this check reports "no chooser after 8 clicks",
- * the clicks are landing on nothing and these are what to re-measure.
+ * It is the transcription status line, which is a paragraph nothing can focus, spanning the whole
+ * window inside the chrome. Measured from a screenshot of this check's own window at 1024x700: the
+ * band runs y 154 to 183, so this is its middle. When this check reports that no chooser opened,
+ * this is what to re-measure, from a screenshot of this check's own window.
  */
-const CHOOSE_FOLDER = { x: 52, y: 85 };
-const CREATE_PROJECT = { x: 136, y: 85 };
-const CHOOSE_FILE = { x: 52, y: 291 };
+const CHROME_TEXT = { x: 900, y: 168 };
+
+/**
+ * Tab stops from `CHROME_TEXT` to each rail control, in ProjectPanel.tsx's own order: Choose,
+ * Create, Open, Delete project, the episode field, Add episode, Choose again.
+ *
+ * The rail is reached by the keyboard rather than by pixel because it scrolls and its viewport is
+ * 13.5rem tall whatever the window is (src/styles/shell.css) — so no window size brings the file
+ * row above its fold, and the row's pixel is a dozen font-dependent line heights the harness does
+ * not choose. A tab stop is the app's own DOM order. Clicking a paragraph outside the rail puts the
+ * focus navigation starting point there, so these counts hold wherever the rail happens to sit.
+ *
+ * A disabled control is not a tab stop: Add episode is skipped throughout because this check never
+ * types an episode title, and Create and Open are skipped until a folder has been chosen — which is
+ * why Choose is one stop in from the chrome whether or not a project is open.
+ */
+const CHOOSE_FOLDER_TABS = 1;
+const CREATE_PROJECT_TABS = 2;
+const CHOOSE_FILE_TABS = 6;
 
 /** The two chooser titles. Frozen contract with src-tauri/src/strings.rs. */
 const FOLDER_TITLE = "Choose a project folder";
@@ -252,6 +276,49 @@ function describeThreads(others) {
     .join("\n");
 }
 
+/**
+ * Put the keyboard focus on the rail control this many tab stops past the chrome's status line.
+ * `at` turns a point in the window into the point on the screen it is drawn at.
+ */
+async function focusRailControl(toplevel, at, tabs) {
+  focusWindow(toplevel.id);
+  clickAt(at(CHROME_TEXT).x, at(CHROME_TEXT).y);
+  await sleep(300);
+  for (let step = 0; step < tabs; step += 1) {
+    pressKey("Tab");
+    await sleep(80);
+  }
+}
+
+/**
+ * Press a rail control until a chooser answers, because a button exists before the webview has
+ * wired it up. The whole walk is repeated on each attempt rather than the last keystroke: a Tab
+ * that missed would otherwise leave every later press on a control nobody chose.
+ */
+async function pressUntilChooser(toplevel, at, tabs, title, { attempts = 8, alive } = {}) {
+  let last = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    // A chooser the last attempt opened just too late to be seen is the one being asked for, and it
+    // covers the point the walk below clicks: retrying over it would type into the dialog.
+    const late = attempt === 0 ? null : findChooser(title);
+    if (late !== null) {
+      return late;
+    }
+    await focusRailControl(toplevel, at, tabs);
+    pressKey("space");
+    try {
+      return await waitForChooser(title, { timeout: 4000, alive });
+    } catch (error) {
+      last = error;
+    }
+  }
+  throw new Error(
+    `no chooser named "${title}" after ${attempts} presses of the control ${tabs} tab stops past ` +
+      `${JSON.stringify(CHROME_TEXT)}. Either that point is no longer the chrome's status line, or ` +
+      `the rail's focus order changed.\n${last?.message ?? ""}`,
+  );
+}
+
 function launch(dataHome) {
   const app = spawn(requireAppBinary(), [], {
     detached: true,
@@ -347,9 +414,9 @@ async function main() {
       describeThreads(before.others),
     );
 
-    // The folder half. `clickUntilChooser` throws unless a chooser is on screen, so a `check` here
+    // The folder half. `pressUntilChooser` throws unless a chooser is on screen, so a `check` here
     // would only ever be true and would inflate the counter.
-    const folderChooser = await clickUntilChooser(toplevel, at(CHOOSE_FOLDER), FOLDER_TITLE, {
+    const folderChooser = await pressUntilChooser(toplevel, at, CHOOSE_FOLDER_TABS, FOLDER_TITLE, {
       alive,
     });
     await answerChooser(folderChooser, projectFolder, "folder");
@@ -362,8 +429,8 @@ async function main() {
       `${projectFolder} never came back. The app's log held:\n${appLog(dataHome)}`,
     );
 
-    focusWindow(toplevel.id);
-    clickAt(at(CREATE_PROJECT).x, at(CREATE_PROJECT).y);
+    await focusRailControl(toplevel, at, CREATE_PROJECT_TABS);
+    pressKey("space");
     const projectFile = path.join(projectFolder, "project.sublore");
     const created = await waitFor(() => existsSync(projectFile), {
       timeout: 20000,
@@ -378,9 +445,11 @@ async function main() {
         `Create had nothing to work with. The app's log held:\n${appLog(dataHome)}`,
     );
 
-    // The file half. Its row exists only once a project is open (ProjectPanel.tsx).
-    focusWindow(toplevel.id);
-    const fileChooser = await clickUntilChooser(toplevel, at(CHOOSE_FILE), FILE_TITLE, { alive });
+    // The file half. Its row exists only once a project is open (ProjectPanel.tsx), and since T2 it
+    // sits below the rail's fold, which is why it is reached by focus rather than by pixel.
+    const fileChooser = await pressUntilChooser(toplevel, at, CHOOSE_FILE_TABS, FILE_TITLE, {
+      alive,
+    });
     await answerChooser(fileChooser, subtitle, "file");
     check(
       "the file chooser handed back the file it was given",
@@ -392,7 +461,9 @@ async function main() {
     // from before the Escape: matching the whole log would pass on a cancellation from earlier.
     const CANCELLED = /chooser: the project-file choice was cancelled/g;
     const before_escape = (appLog(dataHome).match(CANCELLED) ?? []).length;
-    const cancelled = await clickUntilChooser(toplevel, at(CHOOSE_FILE), FILE_TITLE, { alive });
+    const cancelled = await pressUntilChooser(toplevel, at, CHOOSE_FILE_TABS, FILE_TITLE, {
+      alive,
+    });
     await cancelChooser(cancelled, "file");
     check(
       "a chooser dismissed with Escape comes back as a cancellation",
@@ -434,7 +505,9 @@ async function main() {
     // cancellation never touched.
     const FOLDER_CANCELLED = /chooser: the project-folder choice was cancelled/g;
     const cancelledBefore = (appLog(dataHome).match(FOLDER_CANCELLED) ?? []).length;
-    const browsed = await clickUntilChooser(toplevel, at(CHOOSE_FOLDER), FOLDER_TITLE, { alive });
+    const browsed = await pressUntilChooser(toplevel, at, CHOOSE_FOLDER_TABS, FOLDER_TITLE, {
+      alive,
+    });
     // Alt+Home is GTK's own "go to the home folder", so this cancellation happens somewhere other
     // than the folder that was chosen. A memory written from where the chooser was browsing would
     // be the home folder, and the second run would say so.
@@ -472,7 +545,9 @@ async function main() {
     const alive = () => second.exit === null;
 
     // Accepted with nothing chosen in it, so the folder it hands back is the folder it opened at.
-    const reopened = await clickUntilChooser(toplevel, at(CHOOSE_FOLDER), FOLDER_TITLE, { alive });
+    const reopened = await pressUntilChooser(toplevel, at, CHOOSE_FOLDER_TABS, FOLDER_TITLE, {
+      alive,
+    });
     await acceptChooser(reopened, "folder");
     check(
       "the folder chooser opened at the folder chosen before the app was closed",
@@ -489,7 +564,9 @@ async function main() {
 
     // A remembered folder that is gone is a folder the user moved or deleted between sessions.
     rmSync(projectFolder, { recursive: true, force: true });
-    const defaulted = await clickUntilChooser(toplevel, at(CHOOSE_FOLDER), FOLDER_TITLE, { alive });
+    const defaulted = await pressUntilChooser(toplevel, at, CHOOSE_FOLDER_TABS, FOLDER_TITLE, {
+      alive,
+    });
     check(
       "a remembered folder that is no longer there is dropped instead of handed to the chooser",
       await said(
