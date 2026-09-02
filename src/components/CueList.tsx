@@ -25,11 +25,6 @@ const CPS_LIMIT = 21;
 const MARKUP = /\{[^}]*\}|<[^>]*>/g;
 /** Line breaks in both spellings a cue holds: a real one, and the `\N` of an ASS field. */
 const LINE_BREAKS = /\r\n|[\r\n]|\\[Nn]/g;
-/**
- * Owed to src/i18n/en.ts as `subtitle.cueList.cps`; T3 owns that file this wave. See m2-0-tasks T6.
- */
-const CPS_HEADER = "CPS";
-
 /** Input types that hold typed text, and so keep their own undo. A range slider holds none. */
 const TEXT_INPUT_TYPES = ["text", "search", "url", "email", "tel", "password", "number"];
 
@@ -366,7 +361,7 @@ export default function CueList({
           {en.subtitle.cueList.start}
         </span>
         <span className="cuelist__headcell cuelist__headcell--time">{en.subtitle.cueList.end}</span>
-        <span className="cuelist__headcell cuelist__headcell--cps">{CPS_HEADER}</span>
+        <span className="cuelist__headcell cuelist__headcell--cps">{en.subtitle.cueList.cps}</span>
         <span className="cuelist__headcell">{en.subtitle.cueList.text}</span>
       </div>
       <div

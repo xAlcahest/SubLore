@@ -91,9 +91,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Over the 21 cps of decision 24 A8. It borrows the error ink: the palette has no warning token. */
+/* Over the 21 cps of decision 24 A8: a line to look at, not a fault, so not the error ink. */
 .cuelist__cps--over {
-  color: var(--ink-error);
+  color: var(--ink-warn);
 }
 
 .cuelist__text {

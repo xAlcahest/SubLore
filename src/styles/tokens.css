@@ -22,6 +22,8 @@
   --ink-faint: #71717f;
   /* The mockup draws no error state, so this one is the dark palette Sublore already shipped. */
   --ink-error: #ff8a80;
+  /* Over a limit but not wrong, which is what a line past 21 cps is (decision 24 A8). */
+  --ink-warn: #f2c14e;
 
   --accent: #4fb3d9;
   --accent-bg: #2d4a5c;
