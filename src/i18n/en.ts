@@ -200,6 +200,8 @@ export const en = {
       start: "Start",
       end: "End",
       text: "Text",
+      /** Characters per second, the reading rate of decision 24 A8. */
+      cps: "CPS",
       /** Marks an ASS Comment: event, which a player does not draw. */
       comment: "Comment",
     },

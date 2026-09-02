@@ -47,8 +47,15 @@
   left: 0;
 }
 
+/* Membership in the selection (decision 5). The cursor is the outline below, never this fill. */
 .cuelist__row--selected {
   background: var(--accent-bg);
+}
+
+/* The cursor, one row at a time. Drawn apart from membership so the two states are never one. */
+.cuelist__row--active {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .cuelist__row--comment .cuelist__text {
@@ -74,6 +81,19 @@
 .cuelist__headcell--time {
   flex: 0 0 7rem;
   font-variant-numeric: tabular-nums;
+}
+
+.cuelist__cps,
+.cuelist__headcell--cps {
+  flex: 0 0 2.5rem;
+  color: var(--ink-faint);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Over the 21 cps of decision 24 A8: a line to look at, not a fault, so not the error ink. */
+.cuelist__cps--over {
+  color: var(--ink-warn);
 }
 
 .cuelist__text {
