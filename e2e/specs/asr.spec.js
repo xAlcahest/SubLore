@@ -168,6 +168,20 @@ function present(selector) {
   return browser.execute((css) => document.querySelector(css) !== null, selector);
 }
 
+/** The command the menu cursor is on, by id, or null when no item carries it. */
+function cursorCommand() {
+  return browser.execute(
+    () => document.querySelector(".menubar__item--cursor")?.id.replace("menuitem-", "") ?? null,
+  );
+}
+
+/** The title of the open dropdown, or null when none is open. */
+function openDropdown() {
+  return browser.execute(
+    () => document.querySelector(".menubar__menu")?.getAttribute("aria-label") ?? null,
+  );
+}
+
 /** Type over a cue in the grid and commit it, which is the editor the milestone promises. */
 async function editRow(toplevel, position, text) {
   const centre = await centreOfRow(position);
@@ -196,6 +210,39 @@ async function waitForSubtitleStatus(prefix) {
     },
     { timeout: 20000, message: `the subtitle status line to start with ${JSON.stringify(prefix)}` },
   );
+}
+
+/**
+ * Open the transcription panel the way T4 says it opens: from the menu, driven as keys.
+ *
+ * Keys and not clicks because a dropdown hangs over the video rectangle, and a click there lands on
+ * the native surface instead of the webview — measured on Linux, and what decision 1's occlusion
+ * (T8) is for. Alt opens File, Right moves to Edit, and Up wraps to its last enabled item rather
+ * than counting Downs, because Undo and Redo are enabled in some of these tests and not in others.
+ * The wait on the cursor is what makes the route explicit: it fails loudly if the item moves.
+ */
+async function openPanelFromMenu(toplevel) {
+  focusWindow(toplevel.id);
+  pressKey("alt");
+  await waitFor(async () => ((await openDropdown()) === "File" ? true : null), {
+    timeout: 15000,
+    message: "the File dropdown to open on Alt",
+  });
+  pressKey("Right");
+  await waitFor(async () => ((await openDropdown()) === "Edit" ? true : null), {
+    timeout: 15000,
+    message: "the Edit dropdown to be the open one",
+  });
+  pressKey("Up");
+  await waitFor(async () => ((await cursorCommand()) === "transcribe" ? true : null), {
+    timeout: 15000,
+    message: "the menu cursor to sit on Transcribe, the last item in Edit",
+  });
+  pressKey("Return");
+  return waitFor(() => present(".asrbar__model"), {
+    timeout: 15000,
+    message: "the transcription panel the menu item opens",
+  });
 }
 
 /** Start a run and wait until the sidecar has actually been spawned. */
@@ -235,10 +282,25 @@ describe("transcription", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => browser.execute(() => document.querySelector(".asrbar__model") !== null), {
-      timeout: 30000,
-      message: "the transcription bar to render",
-    });
+    // The transcription controls are not here to be waited on any more (T4), so the gate is the
+    // chrome that is: the panel is opened by the first test, from the menu.
+    await waitFor(
+      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      { timeout: 30000, message: "the app UI to render" },
+    );
+  });
+
+  // T4: nothing transcription-shaped is on screen until the menu is asked for it.
+  it("draws no transcription control until the menu opens the panel", async () => {
+    expect(await present(".asrpanel")).toBe(false);
+    expect(await propertyOf(".asrbar__model", "tagName")).toBe(null);
+    expect(await propertyOf(".asrbar__start", "tagName")).toBe(null);
+    expect(await textOf(".asrbar__status")).toBe(null);
+
+    await openPanelFromMenu(toplevel);
+
+    expect(await present(".asrpanel")).toBe(true);
+    expect(await propertyOf(".asrbar__model", "tagName")).toBe("SELECT");
   });
 
   it("offers the models it knows and a compute choice", async () => {
@@ -633,6 +695,32 @@ describe("transcription", () => {
     expect(await textOf(".statusbar__error")).toBe(null);
     // The file an earlier first save adopted was not touched by any of this.
     expect(readFileSync(adopted, "utf8")).toContain(AFTER_FIRST_SAVE);
+  });
+
+  // T4's criterion in the state it is written for: a video open, nothing asked for, and no
+  // transcription control anywhere. The run outlives the panel, so the same menu route brings back
+  // the cues that were on screen before it closed.
+  it("leaves nothing on screen when it is closed, with the video still open", async () => {
+    expect(await present(".stage__empty")).toBe(false);
+    const cues = await shownCues();
+    expect(cues.length).toBeGreaterThan(0);
+
+    await clickElement(toplevel, ".asrpanel__close");
+    await waitFor(async () => ((await present(".asrpanel")) === false ? true : null), {
+      timeout: 15000,
+      message: "the transcription panel to close",
+    });
+
+    expect(await propertyOf(".asrbar__model", "tagName")).toBe(null);
+    expect(await propertyOf(".asrbar__start", "tagName")).toBe(null);
+    expect(await propertyOf(".asrbar__gpu", "tagName")).toBe(null);
+    expect(await textOf(".asrbar__status")).toBe(null);
+    expect(await shownCues()).toEqual([]);
+
+    await openPanelFromMenu(toplevel);
+
+    expect(await propertyOf(".asrbar__start", "tagName")).toBe("BUTTON");
+    expect(await shownCues()).toEqual(cues);
   });
 
   it("refuses a damaged model and never hands it to the sidecar", async () => {

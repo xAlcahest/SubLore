@@ -7,7 +7,7 @@ import MenuBar from "./components/MenuBar";
 import ProjectRail from "./components/ProjectRail";
 import StatusBar from "./components/StatusBar";
 import Toolbar from "./components/Toolbar";
-import TranscribeBar from "./components/TranscribeBar";
+import TranscribePanel from "./components/TranscribePanel";
 import VideoControls from "./components/VideoControls";
 import VideoStage from "./components/VideoStage";
 import { useProject } from "./hooks/useProject";
@@ -57,6 +57,8 @@ export default function App() {
   // them all.
   const [choosing, setChoosing] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  // Absent until the menu asks for it, and gone again on Close: T4 takes the band off the screen.
+  const [transcribeOpen, setTranscribeOpen] = useState(false);
   const [quitError, setQuitError] = useState<string | null>(null);
 
   async function pick(
@@ -181,6 +183,12 @@ export default function App() {
       enabled: true,
       run: () => void quit(),
     },
+    transcribe: {
+      id: "transcribe",
+      label: en.menu.edit.transcribe,
+      enabled: !transcribeOpen,
+      run: () => setTranscribeOpen(true),
+    },
     undo: {
       id: "undo",
       label: en.menu.edit.undo,
@@ -219,7 +227,13 @@ export default function App() {
         commands.quit,
       ],
     },
-    { id: "edit", title: en.menu.edit.title, items: [commands.undo, commands.redo] },
+    // Transcribe waits in Edit for the Audio title, which arrives with the milestone that fills it
+    // (decision 24 A2). File has no room: two keyboard routes pin its walk and its last item.
+    {
+      id: "edit",
+      title: en.menu.edit.title,
+      items: [commands.undo, commands.redo, commands.transcribe],
+    },
     { id: "help", title: en.menu.help.title, items: [commands.about] },
   ];
   const toolbar = [
@@ -257,13 +271,6 @@ export default function App() {
       <header className="shell__chrome">
         <MenuBar menus={menus} />
         <Toolbar groups={toolbar} />
-        {/* T4 takes this off the screen and opens it from the menu. */}
-        <TranscribeBar
-          mediaPath={state.path}
-          transcription={transcription}
-          adoptedRunId={subtitle.adoptedRunId}
-          onUse={(runId) => void adoptTranscription(runId)}
-        />
       </header>
       <div className="shell__body">
         <aside className="shell__rail">
@@ -300,6 +307,17 @@ export default function App() {
           onSave={saveDocument}
         />
       </section>
+      {/* Under the grid, which is the one region that gives up space: the top block's height is
+          fixed, so opening the panel never moves the video surface. See T4. */}
+      {transcribeOpen && (
+        <TranscribePanel
+          mediaPath={state.path}
+          transcription={transcription}
+          adoptedRunId={subtitle.adoptedRunId}
+          onUse={(runId) => void adoptTranscription(runId)}
+          onClose={() => setTranscribeOpen(false)}
+        />
+      )}
       <StatusBar
         summary={subtitle.summary}
         dirty={dirty}

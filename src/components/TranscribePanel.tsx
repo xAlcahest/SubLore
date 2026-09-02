@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useLayoutEffect, useRef } from "react";
 
 import {
   asrErrorMessage,
@@ -11,13 +11,14 @@ import {
 } from "../hooks/useTranscription";
 import { en } from "../i18n/en";
 
-type TranscribeBarProps = {
+type TranscribePanelProps = {
   /** The video that is open, or null. Nothing can be transcribed without one. */
   mediaPath: string | null;
   transcription: Transcription;
   /** The run whose cues are the open document, or null. See BACKLOG.md M3.5. */
   adoptedRunId: number | null;
   onUse: (runId: number) => void;
+  onClose: () => void;
 };
 
 /** m:ss, the same shape the playback controls use. Punctuation, not translatable copy. */
@@ -53,14 +54,20 @@ function progressValue({ running, phase, percent, download }: Transcription): nu
 /**
  * Choose a model, start a transcription, watch it, stop it. The cue list underneath is what the run
  * produced; the document those cues became is the grid. See BACKLOG.md M3.4 and M3.5.
+ *
+ * T4 took it off the screen: it is absent until the menu opens it, and it takes space rather than
+ * covering anything. The class names stay `asrbar__*`, which e2e/README.md freezes.
  */
-export default function TranscribeBar({
+export default function TranscribePanel({
   mediaPath,
   transcription,
   adoptedRunId,
   onUse,
-}: TranscribeBarProps) {
+  onClose,
+}: TranscribePanelProps) {
   const modelFieldId = useId();
+  const titleId = useId();
+  const panelRef = useRef<HTMLElement>(null);
   const { models, modelId, useGpu, running, result, error, damagedModelId, download } =
     transcription;
 
@@ -78,8 +85,32 @@ export default function TranscribeBar({
   // guards unsaved work was answered with Cancel.
   const unused = !running && result !== null && result.runId !== adoptedRunId;
 
+  // Opened on purpose, so it takes the keyboard: Escape hands it back by closing the panel.
+  useLayoutEffect(() => {
+    panelRef.current?.focus();
+  }, []);
+
   return (
-    <>
+    <section
+      className="asrpanel"
+      aria-labelledby={titleId}
+      tabIndex={-1}
+      ref={panelRef}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onClose();
+        }
+      }}
+    >
+      <header className="asrpanel__head">
+        <h2 className="asrpanel__title" id={titleId}>
+          {en.asr.panelTitle}
+        </h2>
+        <button className="asrpanel__close" type="button" onClick={onClose}>
+          {en.asr.close}
+        </button>
+      </header>
       <div className="asrbar">
         <label className="bar__label" htmlFor={modelFieldId}>
           {en.asr.modelLabel}
@@ -187,6 +218,6 @@ export default function TranscribeBar({
           ))}
         </ol>
       )}
-    </>
+    </section>
   );
 }

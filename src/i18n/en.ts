@@ -19,6 +19,8 @@ export const en = {
       title: "Edit",
       undo: "Undo",
       redo: "Redo",
+      /** Here until the Audio title arrives with the milestone that fills it (decision 24 A2). */
+      transcribe: "Transcribe…",
     },
     help: {
       title: "Help",
@@ -218,6 +220,9 @@ export const en = {
     },
   },
   asr: {
+    /** Over the panel the menu opens, which is absent until it is asked for (T4). */
+    panelTitle: "Transcription",
+    close: "Close",
     modelLabel: "Model",
     /** `{size}` is whole megabytes; the separator is punctuation, not copy. */
     modelOption: "{id} · {size} MB · {state}",

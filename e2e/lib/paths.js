@@ -30,14 +30,16 @@ export const windowHeight = 700;
  * put the grid under a fixed-height top block instead of under a stack of them, and T3 replaced
  * two command bars with a menu bar and a toolbar, which are 35 px shorter together.
  *
+ * T4 took the transcription band off the screen, which moved the row up 87 px: measured off two
+ * screenshots of the launch below, where the highlighted first row sat at y 393..420 before and at
+ * 306..333 after.
+ *
  * It belongs to those scripts and to the N1b probe beside them, which launches the app the same
  * way and had been carrying a copy of its own two layouts out of date. They start the app on an
- * empty data home, so the
- * transcribe bar carries a Download button for the model that is not there, and the window is not
- * the one a spec drives. Re-measure it the way it was measured — a screenshot of a launch made the
- * way those scripts make it — and never from a spec.
+ * empty data home and the window is not the one a spec drives. Re-measure it the way it was
+ * measured — a screenshot of a launch made the way those scripts make it — and never from a spec.
  */
-export const firstCueText = { x: 840, y: 407 };
+export const firstCueText = { x: 840, y: 320 };
 
 /**
  * Missing prerequisites are failures with an actionable message, never skips (design section 10).
