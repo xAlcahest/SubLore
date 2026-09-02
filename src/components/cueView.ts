@@ -26,6 +26,10 @@ export function isDocumentEditor(element: HTMLElement): boolean {
 /**
  * Characters per second: spaces counted, line breaks not, over text with its markup stripped.
  * Null when the cue has no duration to divide by. Decision 24 A8.
+ *
+ * CodeQL reads the strip below as an incomplete HTML sanitizer and is wrong about what it is: the
+ * stripped string is never bound, `.length` consumes it here, and nothing renders it. Dismissed
+ * twice, once per address it has lived at; the measurements are in #49.
  */
 export function readingRate(cue: CueRow): number | null {
   const seconds = (cue.endMs - cue.startMs) / 1000;
