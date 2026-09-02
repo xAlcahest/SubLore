@@ -8,7 +8,10 @@ $sha  = "0af22b28e920620036d3ae08fd9283156dc9af0420bf4df84b0e02282094599c"
 $dir  = "$env:RUNNER_TEMP\mpv-dev"
 Invoke-WebRequest -Uri "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/$tag/$file" -OutFile mpv-dev.7z
 if ((Get-FileHash mpv-dev.7z -Algorithm SHA256).Hash -ne $sha.ToUpper()) { throw "libmpv archive checksum mismatch" }
+# $ErrorActionPreference does not cover a native command's exit code, so a failed extraction
+# would surface below as "found 0 mpv_* exports", which names the wrong thing.
 7z x mpv-dev.7z -o"$dir" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "7z could not extract $file (exit $LASTEXITCODE)" }
 
 # MSVC import library: the archive ships only a MinGW .dll.a, so build mpv.lib from the DLL exports.
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"

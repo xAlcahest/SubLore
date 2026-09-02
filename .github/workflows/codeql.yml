@@ -40,6 +40,9 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: none
 
+      # One upload per language, and the pull request check is evaluated on the first to arrive,
+      # so it reads "1 configuration not found" for the few minutes rust takes, then flips itself
+      # green in place. Combining the three uploads was measured and rejected: CONTRIBUTING.md §5.
       - name: Analyse
         uses: github/codeql-action/analyze@v4
         with:
