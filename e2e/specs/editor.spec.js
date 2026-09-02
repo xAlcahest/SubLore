@@ -279,9 +279,9 @@ describe("cue list editing", () => {
     console.log(`M2.3 open to first row: ${elapsed.toFixed(1)} ms`);
     expect(elapsed).toBeLessThan(OPEN_BUDGET_MS);
 
-    expect(await textOf(".subbar__status")).toContain(STATUS_PREFIX);
-    expect(await present(".subbar__error")).toBe(false);
-    expect(await present(".subbar__dirty")).toBe(false);
+    expect(await textOf(".statusbar__document")).toContain(STATUS_PREFIX);
+    expect(await present(".statusbar__error")).toBe(false);
+    expect(await present(".statusbar__dirty")).toBe(false);
     expect(await rowText(1)).toBe("Keep the camera on the door.");
   });
 
@@ -496,8 +496,8 @@ describe("cue list editing", () => {
 
     expect(await present(".cuelist__editor")).toBe(false);
     expect(await rowText(EDITED_POSITION)).toBe(EDITED_TEXT);
-    expect(await present(".subbar__dirty")).toBe(true);
-    expect(await present(".subbar__error")).toBe(false);
+    expect(await present(".statusbar__dirty")).toBe(true);
+    expect(await present(".statusbar__error")).toBe(false);
     // The list did not move: the edit replaced one row, it did not renumber or reorder anything.
     expect(await rowText(EDITED_POSITION - 1)).toBe("He said the same thing last week.");
     expect(await rowText(EDITED_POSITION + 1)).toBe("That is not what the manifest says.");
@@ -544,23 +544,23 @@ describe("cue list editing", () => {
 
     expect(await rowText(EDITED_POSITION)).toBe(ORIGINAL_TEXT);
     // Undone back to the file as it was opened, so there is nothing unsaved any more.
-    expect(await present(".subbar__dirty")).toBe(false);
+    expect(await present(".statusbar__dirty")).toBe(false);
 
     await clickElement(toplevel, ".subbar__redo");
     await waitFor(async () => (await rowText(EDITED_POSITION)) === EDITED_TEXT, {
       timeout: 20000,
       message: "the redone text to come back",
     });
-    expect(await present(".subbar__dirty")).toBe(true);
+    expect(await present(".statusbar__dirty")).toBe(true);
   });
 
   it("saves the edit, and every other byte of the file is the byte that was there", async () => {
     await clickElement(toplevel, ".subbar__save");
-    await waitFor(async () => (await present(".subbar__dirty")) === false, {
+    await waitFor(async () => (await present(".statusbar__dirty")) === false, {
       timeout: 20000,
       message: "the dirty marker to clear after a save",
     });
-    expect(await present(".subbar__error")).toBe(false);
+    expect(await present(".statusbar__error")).toBe(false);
 
     // Block by block, because this fixture repeats its lines: only the edited cue may differ, and
     // it may differ only in its text.
@@ -579,16 +579,19 @@ describe("cue list editing", () => {
 
   it("reopens the saved file with the edit in it", async () => {
     await openSubtitle(toplevel, copy);
-    await waitFor(async () => (await textOf(".subbar__status"))?.includes(STATUS_PREFIX) === true, {
-      timeout: 20000,
-      message: "the status line to report the reopened file",
-    });
+    await waitFor(
+      async () => (await textOf(".statusbar__document"))?.includes(STATUS_PREFIX) === true,
+      {
+        timeout: 20000,
+        message: "the status line to report the reopened file",
+      },
+    );
 
     expect(await rowText(1)).toBe("Keep the camera on the door.");
     await scrollTo(EDITED_POSITION);
     expect(await rowText(EDITED_POSITION)).toBe(EDITED_TEXT);
-    expect(await present(".subbar__dirty")).toBe(false);
-    expect(await present(".subbar__error")).toBe(false);
+    expect(await present(".statusbar__dirty")).toBe(false);
+    expect(await present(".statusbar__error")).toBe(false);
   });
 
   it("saves the text still sitting in an open editor", async () => {
@@ -612,11 +615,11 @@ describe("cue list editing", () => {
     // Save without pressing Enter first: the click blurs the editor, so the commit it causes and
     // the save must both land, in that order.
     await clickElement(toplevel, ".subbar__save");
-    await waitFor(async () => (await present(".subbar__dirty")) === false, {
+    await waitFor(async () => (await present(".statusbar__dirty")) === false, {
       timeout: 20000,
       message: "the dirty marker to clear after saving an open editor",
     });
-    expect(await present(".subbar__error")).toBe(false);
+    expect(await present(".statusbar__error")).toBe(false);
     expect(await rowText(SECOND_POSITION)).toBe(SECOND_TEXT);
 
     const blocks = readFileSync(copy).toString("utf8").split("\n\n");
@@ -670,6 +673,6 @@ describe("cue list editing", () => {
 
     await scrollTo(SECOND_POSITION);
     expect(await rowText(SECOND_POSITION)).toBe(SECOND_TEXT);
-    expect(await present(".subbar__error")).toBe(false);
+    expect(await present(".statusbar__error")).toBe(false);
   });
 });

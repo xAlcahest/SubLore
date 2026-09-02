@@ -1,0 +1,60 @@
+/* The video panel: the stage the native surface covers, and the transport under it. */
+
+/* Takes the panel's height minus the transport. The panel never scrolls, so this only ever
+   resizes, which is what the surface's placement depends on. See M0.2. */
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-media);
+}
+
+.stage__surface {
+  width: 100%;
+  height: 100%;
+}
+
+.stage__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.875rem;
+}
+
+/* Wraps rather than clips: the panel is a third of the window wide and the transport has to fit
+   inside it at 1024x700. */
+.controls {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border-top: 1px solid var(--line);
+  background: var(--bg-panel);
+}
+
+.controls__label {
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.controls__button {
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.controls__slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.controls__time {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+}
