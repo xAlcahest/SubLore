@@ -3195,6 +3195,10 @@ name = "sublore-io"
 version = "0.1.0"
 
 [[package]]
+name = "sublore-module-api"
+version = "0.1.0"
+
+[[package]]
 name = "sublore-project"
 version = "0.1.0"
 dependencies = [

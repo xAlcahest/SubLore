@@ -5,6 +5,7 @@ members = [
   "crates/sublore-edit",
   "crates/sublore-formats",
   "crates/sublore-io",
+  "crates/sublore-module-api",
   "crates/sublore-project",
   "src-tauri",
 ]
