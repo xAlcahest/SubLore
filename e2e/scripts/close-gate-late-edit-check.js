@@ -39,7 +39,7 @@ import {
   windowHeight,
   windowWidth,
 } from "../lib/paths.js";
-import { SUBTITLE_OPENED, waitForLog } from "../lib/applog.js";
+import { SUBTITLE_OPENED, waitForEditedLength, waitForLog } from "../lib/applog.js";
 import { appEnv } from "../lib/env.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { allWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
@@ -55,6 +55,21 @@ const DIALOG_TITLE = "Unsaved changes";
 const EDIT_EARLY = "SUBLORE_EARLY";
 /** The edit committed after that Save was answered. This is the one the defect threw away. */
 const EDIT_LATE = "SUBLORE_LATE";
+
+// The wait below reads the cue's length as its witness, so two marks of one length would leave the
+// second edit unwitnessed. See BACKLOG.md N9, S16.
+if (EDIT_EARLY.length === EDIT_LATE.length) {
+  throw new Error("EDIT_EARLY and EDIT_LATE must differ in length");
+}
+
+/** The fixture both phases open, and its first cue's length as committed. See N9, S15. */
+const SOURCE_FIXTURE = path.join(repoRoot, "fixtures", "subtitles", "srt", "clean", "basic-lf.srt");
+const UNEDITED_FIRST_CUE_CHARS = readFileSync(SOURCE_FIXTURE)
+  .toString("utf8")
+  .split("\n\n")[0]
+  .split("\n")
+  .slice(2)
+  .join("\n").length;
 
 /**
  * How long the app holds the answer before the close it asks for. It has to outlast the editing
@@ -176,7 +191,10 @@ async function editFirstCue(toplevel, mark, settleMs, dataHome) {
   // Attempted rather than assumed: the cue list paints after the backend has parsed the file, and
   // a click that lands early leaves the document clean while every later assertion still runs. The
   // app writes a line when an edit is committed, so this retries until it does (CI run 33341052061).
-  const before = (appLog(dataHome).match(/subtitle: edit committed/g) ?? []).length;
+  // Not "an edit was committed" but "the text changed": a field committed unchanged bumps the
+  // revision while leaving the document identical, which counting commits accepts. This is the
+  // guard its two sibling scripts already carry. See BACKLOG.md N9, S16.
+  const unchanged = lastEditedLength(dataHome);
   for (let attempt = 1; ; attempt += 1) {
     focusWindow(toplevel.id);
     doubleClickAt(cue.x, cue.y);
@@ -184,7 +202,7 @@ async function editFirstCue(toplevel, mark, settleMs, dataHome) {
     typeText(mark);
     // Enter commits the inline edit into the backend session. Without it only the frontend knows.
     pressKey("Return");
-    const landed = await waitForCount(dataHome, before + 1, 4000);
+    const landed = await waitForEditedLength(dataHome, unchanged, { timeout: 4000 });
     if (landed) {
       break;
     }
@@ -198,18 +216,12 @@ async function editFirstCue(toplevel, mark, settleMs, dataHome) {
   await sleep(settleMs);
 }
 
-/** True once the app has logged at least `wanted` committed edits. */
-async function waitForCount(dataHome, wanted, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if ((appLog(dataHome).match(/subtitle: edit committed/g) ?? []).length >= wanted) {
-      return true;
-    }
-    if (Date.now() >= deadline) {
-      return false;
-    }
-    await sleep(100);
-  }
+/** The length the first cue last logged, or the fixture's own before any edit landed. */
+function lastEditedLength(dataHome) {
+  const seen = [...appLog(dataHome).matchAll(/edit committed[^\n]*now (\d+) chars/g)].map((match) =>
+    Number(match[1]),
+  );
+  return seen.length === 0 ? UNEDITED_FIRST_CUE_CHARS : seen[seen.length - 1];
 }
 
 function requestClose(toplevel) {
@@ -248,7 +260,7 @@ async function main() {
   requireAppBinary();
   requireCloseWindowTool();
 
-  const source = path.join(repoRoot, "fixtures", "subtitles", "srt", "clean", "basic-lf.srt");
+  const source = SOURCE_FIXTURE;
   const original = readFileSync(source);
 
   const dataHome = mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-lateedit-"));
