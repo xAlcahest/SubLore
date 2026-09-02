@@ -11,7 +11,7 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { clickAt, focusWindow, pressKey, typeText } from "./input.js";
+import { focusWindow, pressKey, typeText } from "./input.js";
 import { waitFor } from "./proc.js";
 import { allWindows, mapState, rootTree } from "./x11.js";
 
@@ -52,27 +52,6 @@ export async function waitForChooser(title, { timeout = 20000, alive } = {}) {
   ).catch((error) => {
     throw new Error(`${error.message}\nwindows on the display were:\n${rootTree()}`);
   });
-}
-
-/**
- * Click until a chooser answers, because a window exists before the webview has painted it.
- *
- * A fixed wait before the first click is a number measured on one machine: 2500 ms was enough here
- * and a coin toss on a loaded runner, where it failed late and read as the picker being broken.
- * Clicking again costs nothing when the button is already there.
- */
-export async function clickUntilChooser(toplevel, point, title, { attempts = 8, alive } = {}) {
-  let last = null;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    focusWindow(toplevel.id);
-    clickAt(point.x, point.y);
-    try {
-      return await waitForChooser(title, { timeout: 4000, alive });
-    } catch (error) {
-      last = error;
-    }
-  }
-  throw new Error(`no chooser named "${title}" after ${attempts} clicks.\n${last?.message ?? ""}`);
 }
 
 /** An answered chooser is destroyed by the app's own one and merely unmapped by the plugin's. */

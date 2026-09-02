@@ -177,16 +177,6 @@ export function doubleClickAt(x, y) {
 }
 
 /**
- * Turn the wheel over a point. The rail is only as tall as the top block since T2, so a control
- * further down it has to be scrolled to before a pointer can reach it.
- */
-export function wheelAt(x, y, direction, clicks) {
-  const button = direction === "up" ? "4" : "5";
-  moveTo({ x: Math.round(x), y: Math.round(y) });
-  xdotool(["click", "--repeat", String(clicks), "--delay", "30", button]);
-}
-
-/**
  * Press at one point, travel to another and release: the gesture a click cannot stand in for.
  *
  * A range input reads the motion between the two ends, so the pointer is walked there in steps
