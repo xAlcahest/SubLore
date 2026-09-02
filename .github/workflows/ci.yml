@@ -303,7 +303,10 @@ jobs:
         # this job is a file that exists, not an install that works; MW.3 is where that is answered.
         # A file nobody runs is not worth a release build on every pull request, so on a pull
         # request only Linux packages, which is the half the smoke below actually starts.
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
+        # Pinned rather than ubuntu-latest: an AppImage starts only on the glibc it was built
+        # against or newer, so this must not drift away from the smoke job's container tag.
+        # Built on glibc 2.43 and started on 24.04 it dies before main (measured 2026-09-02).
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-24.04"]') || fromJSON('["ubuntu-24.04", "windows-latest"]') }}
     defaults:
       run:
         shell: bash
@@ -399,7 +402,7 @@ jobs:
     timeout-minutes: 20
     # A clean image rather than the runner: the runner already carries most of what the .deb has to
     # declare, so a dependency it forgot would install and start there and fail on a user's machine.
-    # The tag tracks the image the package job builds on.
+    # This tag and the packaging job's ubuntu-24.04 are one decision: see the comment there.
     container: ubuntu:24.04
     steps:
       # The image carries neither, and the checkout needs both.
