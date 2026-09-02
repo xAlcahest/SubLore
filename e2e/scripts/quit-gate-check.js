@@ -1,0 +1,422 @@
+/**
+ * The exit that is not a window close (BACKLOG N6).
+ *
+ * The close gate hangs off `CloseRequested`, so it only ever saw the window's X button. A quit
+ * asked for programmatically — `AppHandle::exit`, which is what a menu's Quit item and Ctrl+Q call
+ * — reached `ExitRequested`, where nothing prevented the exit, and the unsaved work left with the
+ * process in silence (CONTRIBUTING.md §3).
+ *
+ * AC: "quitting through every route the app offers asks the same question the window's X button
+ * asks, proved by a check that drives the non-X route." So this script never touches the X button:
+ * `close-gate-check.js` owns that route, and this one drives the quit.
+ *
+ * There is no menu yet, so the app carries a debug-only hook for the route a menu will use:
+ * `SUBLORE_QUIT_ON_FILE` names a file this script owns, and the file appearing makes the app call
+ * `AppHandle::exit(0)` from a thread of its own. It is not a feature and no interface reaches it; a
+ * release binary never reads the variable. That the quit really went that way is check 1 — without
+ * it the run could prove nothing while looking green, which WORKFLOW §4c names as the worst
+ * available outcome.
+ *
+ * Not a WebDriver spec, for close-gate-check.js's reason: two of the three answers end the process,
+ * and the W3C protocol reports neither the exit status nor the survivors. Here Node is the parent.
+ */
+import { spawn } from "node:child_process";
+import console from "node:console";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+import { setTimeout as sleep } from "node:timers/promises";
+
+import { SUBTITLE_OPENED, appLog, waitForEditedLength, waitForLog } from "../lib/applog.js";
+import { appEnv } from "../lib/env.js";
+import { answerDialog, findUnsavedDialog, waitForUnsavedDialogGone } from "../lib/gtk-dialog.js";
+import { doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
+import {
+  firstCueText,
+  repoRoot,
+  requireAppBinary,
+  requireDisplay,
+  windowHeight,
+  windowWidth,
+} from "../lib/paths.js";
+import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
+import { findToplevel, rootTree } from "../lib/x11.js";
+
+/** Gutting an assertion has to be as red as failing one, so the checks count themselves. */
+const EXPECTED_CHECKS = 17;
+let checksRun = 0;
+
+/** The lines `arm_quit_hook` writes. Frozen contract with src-tauri/src/lib.rs. */
+const QUIT_ARMED = "armed, this build quits when";
+const QUIT_TAKEN = "quitting through AppHandle::exit";
+
+/** The fixture's first cue before anything touches it: 'The harbour was empty when we got there.' */
+const UNEDITED_FIRST_CUE_CHARS = 40;
+
+/** The text committed into cue 1, which the save branch then looks for in the file. */
+const EDIT_MARK = "SUBLORE_N6";
+
+function check(label, ok, detail = "") {
+  checksRun += 1;
+  if (!ok) {
+    throw new Error(`quit gate check failed: ${label}${detail === "" ? "" : `\n${detail}`}`);
+  }
+  console.log(`  ok  ${label}`);
+}
+
+/**
+ * Wait for the gate, and tell the two failures apart: an app that exited on the quit is the defect
+ * this script exists to catch, and an app that is still up with no dialog is a setup that never
+ * dirtied the document. Only the first is a defect in the product.
+ */
+async function waitForDialog(state, what) {
+  return waitFor(
+    () => {
+      if (state.exit !== null) {
+        throw new Error(
+          `the app exited (code ${state.exit.code}) on the quit instead of ${what}. The quit route ` +
+            "carried the unsaved edit away with the process, which is BACKLOG N6 itself. If the " +
+            "app log holds no committed edit, the setup never dirtied the document and the run " +
+            "proved nothing instead.",
+        );
+      }
+      return findUnsavedDialog();
+    },
+    { timeout: 20000, message: `the unsaved-changes dialog (${what})` },
+  ).catch((error) => {
+    throw new Error(`${error.message}\nwindows on the display were:\n${rootTree()}`);
+  });
+}
+
+/**
+ * Launch the app on `file`, armed with the quit hook. The subtitle is passed as an argument, never
+ * typed: see `startup_files`.
+ */
+function launch(dataHome, file, trigger) {
+  const app = spawn(requireAppBinary(), [file], {
+    detached: true,
+    stdio: ["ignore", "inherit", "inherit"],
+    env: appEnv({ XDG_DATA_HOME: dataHome, SUBLORE_QUIT_ON_FILE: trigger }),
+  });
+  const state = { app, pgid: app.pid, exit: null, spawnError: null };
+  app.on("error", (error) => {
+    state.spawnError = error;
+  });
+  app.on("exit", (code, signal) => {
+    state.exit = { code, signal };
+  });
+  return state;
+}
+
+async function waitForWindow(state) {
+  return waitFor(
+    () => {
+      if (state.spawnError !== null) {
+        throw new Error(`the app failed to start: ${state.spawnError.message}`);
+      }
+      if (state.exit !== null) {
+        throw new Error(`the app exited before its window appeared (code ${state.exit.code})`);
+      }
+      return findToplevel();
+    },
+    { timeout: 30000, message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel` },
+  );
+}
+
+/** Commit a marked edit into the first cue of the file the app opened, leaving it dirty. */
+async function openAndDirty(toplevel, dataHome) {
+  const at = (point) => ({ x: toplevel.absX + point.x, y: toplevel.absY + point.y });
+  // The app says when the document is open, so this waits for that rather than for a number of
+  // milliseconds someone measured on their own machine (gate 2, run 33339776169).
+  await waitForLog(dataHome, SUBTITLE_OPENED, { what: "the subtitle to be open" });
+
+  // Attempted rather than assumed: the cue list paints after the backend has parsed the file, and
+  // a click that lands early leaves the document clean while every later assertion still runs.
+  const cue = at(firstCueText);
+  for (let attempt = 1; ; attempt += 1) {
+    focusWindow(toplevel.id);
+    doubleClickAt(cue.x, cue.y);
+    await sleep(600);
+    typeText(EDIT_MARK);
+    // Enter commits the inline edit into the document. Without it only the frontend knows about
+    // the change and the backend session is still clean, which is a different case.
+    pressKey("Return");
+    // Not "an edit happened" but "the text changed": a field committed unchanged bumps the
+    // revision and dirties the session while leaving the document identical (gate 2, run
+    // 33363671401).
+    if (await waitForEditedLength(dataHome, UNEDITED_FIRST_CUE_CHARS)) {
+      return;
+    }
+    if (attempt >= 6) {
+      throw new Error(
+        `the edit never changed the first cue in ${attempt} attempts. The app's log is the ` +
+          `evidence: look for "edit committed ... now N chars" with N still ` +
+          `${UNEDITED_FIRST_CUE_CHARS}.`,
+      );
+    }
+    // Escape first: a half-open inline editor would take the next attempt's keystrokes and the
+    // mark would end up in the document twice.
+    pressKey("Escape");
+    await sleep(500);
+  }
+}
+
+/**
+ * Quit the way a menu item will. The file is the whole gesture: the app polls for it and calls
+ * `AppHandle::exit` when it appears. One file is one quit, so the file goes away first and the
+ * hook says when it is listening again — waiting on the app's own line rather than on a sleep,
+ * because at 100 ms of polling a remove and a rewrite in the same millisecond are invisible to it.
+ */
+async function requestQuit(dataHome, trigger, nth) {
+  rmSync(trigger, { force: true });
+  await waitFor(() => (occurrences(dataHome, QUIT_ARMED) >= nth ? true : null), {
+    timeout: 20000,
+    message: `the quit hook to be armed for quit ${nth}`,
+  });
+  writeFileSync(trigger, "quit\n");
+}
+
+/** How many times a line the app writes has appeared in its log. */
+function occurrences(dataHome, line) {
+  return appLog(dataHome).split(line).length - 1;
+}
+
+/** How many quits the app has taken through `AppHandle::exit` so far, from its own log. */
+function quitsTaken(dataHome) {
+  return occurrences(dataHome, QUIT_TAKEN);
+}
+
+/** Positive proof the non-X route was the one driven, and not something else closing the window. */
+async function waitForQuitTaken(dataHome, wanted) {
+  return waitFor(() => (quitsTaken(dataHome) >= wanted ? true : null), {
+    timeout: 20000,
+    message: `the app to log "${QUIT_TAKEN}" ${wanted} time(s)`,
+  }).catch((error) => {
+    throw new Error(
+      `${error.message}\nThe quit hook never fired, so nothing drove the route this check is ` +
+        "about. A release build carries no hook: use `pnpm e2e:build`.\n" +
+        `the app's log held:\n${appLog(dataHome) || "(nothing yet)"}`,
+    );
+  });
+}
+
+async function reap(state, label) {
+  await waitFor(() => state.exit !== null, { timeout: 15000, message: label });
+  return waitFor(
+    () => {
+      const alive = processGroupMembers(state.pgid);
+      return alive.length === 0 ? [] : null;
+    },
+    { timeout: 10000, message: `process group ${state.pgid} to be empty` },
+  ).catch(() => processGroupMembers(state.pgid));
+}
+
+function cleanup(state) {
+  try {
+    if (processGroupMembers(state.pgid).length > 0) {
+      killGroup(state.pgid);
+    }
+  } catch {
+    // Teardown must not mask the failure that got us here.
+  }
+}
+
+async function main() {
+  requireDisplay();
+  requireAppBinary();
+
+  const source = path.join(repoRoot, "fixtures", "subtitles", "srt", "clean", "basic-lf.srt");
+  const original = readFileSync(source);
+
+  // Phase one: cancel, then discard, on the same instance. The second quit is the point of doing
+  // both here: an answered gate must not wave a later quit through.
+  const dataHome = mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-quitgate-"));
+  const workFile = path.join(dataHome, "cancel-then-discard.srt");
+  const trigger = path.join(dataHome, "quit-now");
+  copyFileSync(source, workFile);
+
+  let state = launch(dataHome, workFile, trigger);
+  try {
+    const toplevel = await waitForWindow(state);
+    await openAndDirty(toplevel, dataHome);
+
+    await requestQuit(dataHome, trigger, 1);
+    await waitForQuitTaken(dataHome, 1);
+    check(
+      "the quit went through AppHandle::exit and not through the window",
+      quitsTaken(dataHome) === 1,
+      "the route this check exists for was never driven",
+    );
+
+    const dialog = await waitForDialog(state, "asking about the unsaved edit");
+    check(
+      "the quit raised the same unsaved-changes dialog the X button raises",
+      dialog !== null,
+      "the quit did not ask, and the edit would have gone with the process",
+    );
+
+    // GTK answers Escape with the delete response and the app reads that as Cancel: deterministic,
+    // and free of the button geometry the other answers reach through mnemonics.
+    answerDialog(dialog, "cancel");
+    await waitForUnsavedDialogGone("cancel");
+    // The dialog is gone, so the answer landed; give the app the same grace the exit paths get
+    // before calling it alive, or a late exit would pass for a survivor.
+    await sleep(1000);
+    check(
+      "cancel kept the app the quit asked to end",
+      state.exit === null,
+      `the app exited with ${JSON.stringify(state.exit)} after cancel`,
+    );
+    check(
+      "cancel left the file on disk untouched",
+      readFileSync(workFile).equals(original),
+      "the file changed even though nothing was saved",
+    );
+
+    await requestQuit(dataHome, trigger, 2);
+    await waitForQuitTaken(dataHome, 2);
+    const again = await waitForDialog(state, "asking about the second quit");
+    check(
+      "a second quit asks again instead of closing on the answer that was cancelled",
+      again !== null,
+      "the gate waved the second quit through, and the edit is gone with it",
+    );
+
+    answerDialog(again, "discard");
+    await waitForUnsavedDialogGone("discard");
+
+    const survivors = await reap(state, "the app to exit after discard");
+    check(
+      "discard exited the app with status 0",
+      state.exit.code === 0 && state.exit.signal === null,
+      `exit was ${JSON.stringify(state.exit)}`,
+    );
+    check(
+      "discard left the file on disk untouched",
+      readFileSync(workFile).equals(original),
+      "discard wrote to the file it was told to abandon",
+    );
+    check(
+      "no process survived discard",
+      survivors.length === 0,
+      survivors.length === 0 ? "" : `survivors: ${survivors.join(", ")}`,
+    );
+  } finally {
+    cleanup(state);
+  }
+
+  // Phase two: save, on a fresh instance and a fresh copy.
+  const saveHome = mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-quitgate-save-"));
+  const saveFile = path.join(saveHome, "save-on-quit.srt");
+  const saveTrigger = path.join(saveHome, "quit-now");
+  copyFileSync(source, saveFile);
+
+  state = launch(saveHome, saveFile, saveTrigger);
+  try {
+    const toplevel = await waitForWindow(state);
+    await openAndDirty(toplevel, saveHome);
+
+    await requestQuit(saveHome, saveTrigger, 1);
+    await waitForQuitTaken(saveHome, 1);
+    check(
+      "the save branch's quit went through AppHandle::exit as well",
+      quitsTaken(saveHome) === 1,
+      "the route this check exists for was never driven",
+    );
+
+    const dialog = await waitForDialog(state, "asking before the save");
+    check(
+      "the quit raised the dialog on a second instance too",
+      dialog !== null,
+      "the quit did not ask, and the edit would have gone with the process",
+    );
+
+    answerDialog(dialog, "save");
+    await waitForUnsavedDialogGone("save");
+
+    const saveSurvivors = await reap(state, "the app to exit after save");
+    check(
+      "no process survived save",
+      saveSurvivors.length === 0,
+      saveSurvivors.length === 0 ? "" : `survivors: ${saveSurvivors.join(", ")}`,
+    );
+    check(
+      "save exited the app with status 0",
+      state.exit.code === 0 && state.exit.signal === null,
+      `exit was ${JSON.stringify(state.exit)}`,
+    );
+
+    // Not "the bytes changed": a truncated or corrupted file passes that. The saved file has to be
+    // the original with the edit in it and nothing else moved (CONTRIBUTING.md §3).
+    const savedBlocks = readFileSync(saveFile).toString("utf8").split("\n\n");
+    const beforeBlocks = original.toString("utf8").split("\n\n");
+    const differing = beforeBlocks
+      .map((block, index) => (block === savedBlocks[index] ? null : index))
+      .filter((index) => index !== null);
+    check(
+      "the save the quit asked for wrote the edit and moved nothing else",
+      savedBlocks.length === beforeBlocks.length &&
+        differing.length === 1 &&
+        savedBlocks[differing[0]].includes(EDIT_MARK),
+      `blocks before ${beforeBlocks.length}, after ${savedBlocks.length}, differing ${JSON.stringify(differing)}`,
+    );
+  } finally {
+    cleanup(state);
+  }
+
+  // Phase three: a quit with nothing unsaved. The route now holds every quit long enough to route
+  // it through a window close, so a quit that should just go has to be proved to still just go.
+  const cleanHome = mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-quitgate-clean-"));
+  const cleanFile = path.join(cleanHome, "nothing-to-ask-about.srt");
+  const cleanTrigger = path.join(cleanHome, "quit-now");
+  copyFileSync(source, cleanFile);
+
+  state = launch(cleanHome, cleanFile, cleanTrigger);
+  try {
+    await waitForWindow(state);
+    // Opened and left alone: a document on screen with nothing unsaved in it.
+    await waitForLog(cleanHome, SUBTITLE_OPENED, { what: "the subtitle to be open" });
+
+    await requestQuit(cleanHome, cleanTrigger, 1);
+    await waitForQuitTaken(cleanHome, 1);
+    check(
+      "the clean branch's quit went through AppHandle::exit as well",
+      quitsTaken(cleanHome) === 1,
+      "the route this check exists for was never driven",
+    );
+
+    const cleanSurvivors = await reap(state, "the app to exit on a quit with nothing unsaved");
+    check(
+      "a quit with nothing unsaved exited the app with status 0",
+      state.exit.code === 0 && state.exit.signal === null,
+      `exit was ${JSON.stringify(state.exit)}. The quit is held while the window is asked to ` +
+        "close, and a quit with nothing to ask about must come out the other side of that.",
+    );
+    check(
+      "no process survived the clean quit",
+      cleanSurvivors.length === 0,
+      cleanSurvivors.length === 0 ? "" : `survivors: ${cleanSurvivors.join(", ")}`,
+    );
+    check(
+      "the clean quit left the file on disk untouched",
+      readFileSync(cleanFile).equals(original),
+      "a quit nobody was asked about wrote to the file",
+    );
+  } finally {
+    cleanup(state);
+  }
+
+  if (checksRun < EXPECTED_CHECKS) {
+    throw new Error(
+      `quit gate guard: expected ${EXPECTED_CHECKS} checks, only ${checksRun} ran. ` +
+        "Removing an assertion here is a CI failure. See e2e/README.md.",
+    );
+  }
+  console.log(`quit gate check passed (${checksRun}/${EXPECTED_CHECKS} checks)`);
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});

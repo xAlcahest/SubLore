@@ -159,6 +159,7 @@ pub fn run() -> tauri::Result<()> {
                 log::warn!("command line: ignored {argument}");
             }
             crash::force::trip(ForcePoint::Startup);
+            arm_quit_hook(app.handle().clone());
             app.manage(asr::AsrState::default());
             // A killed process cannot run its own cleanup, so abandoned run directories are swept
             // here, off the main thread. See BACKLOG.md M3.1.
@@ -209,12 +210,21 @@ pub fn run() -> tauri::Result<()> {
                 }
             }
         }
-        RunEvent::ExitRequested { .. } | RunEvent::Exit => {
-            // A transcription outlives the window that started it unless it is stopped here.
-            asr::shutdown(app_handle);
-            shutdown_video(app_handle);
-            shutdown_project(app_handle);
+        // A quit asked for programmatically — what a menu's Quit item calls — reaches no window
+        // event, so it is turned into the window's own close and meets that gate. See BACKLOG.md N6.
+        RunEvent::ExitRequested {
+            code: Some(_), api, ..
+        } => {
+            // With no window left to ask in, holding the quit would hold it for the life of the
+            // process, and the close that took the window has already asked.
+            if request_close_of_every_window(app_handle) {
+                api.prevent_exit();
+            } else {
+                shutdown_all(app_handle);
+            }
         }
+        // The exit the last window's close asks for, and the loop's own last event.
+        RunEvent::ExitRequested { .. } | RunEvent::Exit => shutdown_all(app_handle),
         _ => {}
     });
 
@@ -491,6 +501,41 @@ fn stall_after_answer() {
 #[inline(always)]
 fn stall_after_answer() {}
 
+/// Test hook: quit through `AppHandle::exit`, the call a menu's Quit item will make and the one no
+/// interface of the app's own reaches yet, so `e2e/scripts/quit-gate-check.js` has a route to drive.
+/// Debug builds only, like `crash::force`. It is a harness affordance and never a way to quit
+/// Sublore: no menu item, shortcut or command reaches it, and a release binary reads no variable.
+///
+/// The variable names a file the harness owns and Sublore never writes: the file appearing is one
+/// quit, and the harness taking it away is what arms the hook again.
+#[cfg(debug_assertions)]
+fn arm_quit_hook(app: AppHandle) {
+    const ENV_VAR: &str = "SUBLORE_QUIT_ON_FILE";
+    const POLL: std::time::Duration = std::time::Duration::from_millis(100);
+
+    let Some(trigger) = std::env::var_os(ENV_VAR).map(std::path::PathBuf::from) else {
+        return;
+    };
+    std::thread::spawn(move || loop {
+        // Said out loud every time, because the harness has to know the hook is listening again
+        // before it asks for the next quit; a sleep there would be a race it could not see.
+        log::warn!("{ENV_VAR}: armed, this build quits when {trigger:?} appears");
+        while !trigger.exists() {
+            std::thread::sleep(POLL);
+        }
+        log::warn!("{ENV_VAR}: quitting through AppHandle::exit");
+        app.exit(0);
+        while trigger.exists() {
+            std::thread::sleep(POLL);
+        }
+    });
+}
+
+/// Release builds carry no hook: the environment variable is never read.
+#[cfg(not(debug_assertions))]
+#[inline(always)]
+fn arm_quit_hook(_app: AppHandle) {}
+
 /// Save the open file. A failed save keeps the window open: closing anyway would lose exactly the
 /// work the user asked us to keep. The refusal is shown, not only logged (CONTRIBUTING.md §6).
 fn save_open_file(app: &AppHandle) -> Answered {
@@ -647,6 +692,38 @@ fn report_close_failure(app: &AppHandle, reason: &str) {
     ) {
         log::error!("close gate: could not report the failed close: {posting:?}");
     }
+}
+
+/// Ask every window to close, and say whether any of them took the request. This is the whole of
+/// the quit route: the close it asks for runs the gate above, so a quit and an X are one body and
+/// cannot drift apart. See BACKLOG.md N6.
+///
+/// `close`, not `destroy`, for the reason `close_window` gives: the gate's own close goes the same
+/// way, and a window that refuses this one is reported rather than assumed gone.
+fn request_close_of_every_window(app_handle: &AppHandle) -> bool {
+    let mut asked = Vec::new();
+    for (label, window) in app_handle.webview_windows() {
+        match window.close() {
+            Ok(()) => asked.push(label),
+            Err(error) => {
+                log::error!("close gate: {label} would not take the quit's close: {error:?}");
+            }
+        }
+    }
+    if asked.is_empty() {
+        return false;
+    }
+    log::info!("close gate: a quit was asked for, closing {asked:?} to ask about it");
+    true
+}
+
+/// Everything that has to stop before the process does. Idempotent, like each of its parts: more
+/// than one of the exit events can fire on the way out.
+fn shutdown_all(app_handle: &AppHandle) {
+    // A transcription outlives the window that started it unless it is stopped here.
+    asr::shutdown(app_handle);
+    shutdown_video(app_handle);
+    shutdown_project(app_handle);
 }
 
 /// Idempotent: every one of the events above may fire, and only the first does the work.
@@ -815,6 +892,35 @@ mod tests {
             held.is_empty(),
             "a gate guard taken in the close handler is held for every arm, and the arms re-enter \
              it: line {held:?} of the handler"
+        );
+    }
+
+    /// The quit route must never grow a gate of its own. Two of them drift apart, and the one that
+    /// is not on screen is the one that loses the work. See BACKLOG.md N6.
+    #[test]
+    fn the_exit_handler_asks_through_the_window_close_and_decides_nothing_itself() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("RunEvent::ExitRequested")
+            .expect("the exit handler is in this file");
+        let end = start
+            + source[start..]
+                .find("fn log_plugin")
+                .expect("the log plugin follows the run loop");
+        let handler = &source[start..end];
+
+        assert!(
+            handler.contains("request_close_of_every_window(app_handle)"),
+            "the quit no longer reaches the close gate through the window's own close:\n{handler}"
+        );
+        let second_gate: Vec<_> = ["decide_close", "session_now", "ask_before_closing"]
+            .into_iter()
+            .filter(|name| handler.contains(name))
+            .collect();
+        assert!(
+            second_gate.is_empty(),
+            "the exit handler decides the quit itself instead of asking through the close gate: \
+             {second_gate:?}"
         );
     }
 
