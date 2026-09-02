@@ -10,19 +10,19 @@
  * asks, proved by a check that drives the non-X route." So this script never touches the X button:
  * `close-gate-check.js` owns that route, and this one drives the quit.
  *
- * There is no menu yet, so the app carries a debug-only hook for the route a menu will use:
- * `SUBLORE_QUIT_ON_FILE` names a file this script owns, and the file appearing makes the app call
- * `AppHandle::exit(0)` from a thread of its own. It is not a feature and no interface reaches it; a
- * release binary never reads the variable. That the quit really went that way is check 1 — without
- * it the run could prove nothing while looking green, which WORKFLOW §4c names as the worst
- * available outcome.
+ * T3 built the caller this check was written for, so the debug-only hook it used to drive
+ * (`SUBLORE_QUIT_ON_FILE`) is gone and the routes here are the app's own: the File menu's Quit item,
+ * driven from the keyboard the way shell-layout.md says a menu is driven, and Ctrl+Q in the save
+ * branch. That the quit really went that way is check 1 — the app writes one line from the `quit`
+ * command and nowhere else — because without it the run could prove nothing while looking green,
+ * which WORKFLOW §4c names as the worst available outcome.
  *
  * Not a WebDriver spec, for close-gate-check.js's reason: two of the three answers end the process,
  * and the W3C protocol reports neither the exit status nor the survivors. Here Node is the parent.
  */
 import { spawn } from "node:child_process";
 import console from "node:console";
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -47,9 +47,11 @@ import { findToplevel, rootTree } from "../lib/x11.js";
 const EXPECTED_CHECKS = 17;
 let checksRun = 0;
 
-/** The lines `arm_quit_hook` writes. Frozen contract with src-tauri/src/lib.rs. */
-const QUIT_ARMED = "armed, this build quits when";
+/** The line the `quit` command writes, and nothing else does. Contract with src-tauri/src/lib.rs. */
 const QUIT_TAKEN = "quitting through AppHandle::exit";
+
+/** How long the menu is given to open before the keys that walk it are sent. */
+const MENU_MS = 600;
 
 /** The fixture's first cue before anything touches it: 'The harbour was empty when we got there.' */
 const UNEDITED_FIRST_CUE_CHARS = 40;
@@ -90,14 +92,14 @@ async function waitForDialog(state, what) {
 }
 
 /**
- * Launch the app on `file`, armed with the quit hook. The subtitle is passed as an argument, never
- * typed: see `startup_files`.
+ * Launch the app on `file`. The subtitle is passed as an argument, never typed: see
+ * `startup_files`.
  */
-function launch(dataHome, file, trigger) {
+function launch(dataHome, file) {
   const app = spawn(requireAppBinary(), [file], {
     detached: true,
     stdio: ["ignore", "inherit", "inherit"],
-    env: appEnv({ XDG_DATA_HOME: dataHome, SUBLORE_QUIT_ON_FILE: trigger }),
+    env: appEnv({ XDG_DATA_HOME: dataHome }),
   });
   const state = { app, pgid: app.pid, exit: null, spawnError: null };
   app.on("error", (error) => {
@@ -163,18 +165,27 @@ async function openAndDirty(toplevel, dataHome) {
 }
 
 /**
- * Quit the way a menu item will. The file is the whole gesture: the app polls for it and calls
- * `AppHandle::exit` when it appears. One file is one quit, so the file goes away first and the
- * hook says when it is listening again — waiting on the app's own line rather than on a sleep,
- * because at 100 ms of polling a remove and a rewrite in the same millisecond are invisible to it.
+ * Quit through the File menu, from the keyboard: Alt opens the first dropdown, Up puts the cursor
+ * on its last enabled item, which is Quit, and Enter activates it (shell-layout.md's key table).
+ * Up rather than a count of Downs, because Save is enabled in one phase here and disabled in
+ * another and the item above Quit is not the same one in both.
+ *
+ * There is no DOM to wait on from here, so the menu is given a moment and the proof that the route
+ * was driven is the app's own line, which `waitForQuitTaken` reads.
  */
-async function requestQuit(dataHome, trigger, nth) {
-  rmSync(trigger, { force: true });
-  await waitFor(() => (occurrences(dataHome, QUIT_ARMED) >= nth ? true : null), {
-    timeout: 20000,
-    message: `the quit hook to be armed for quit ${nth}`,
-  });
-  writeFileSync(trigger, "quit\n");
+async function quitFromTheMenu(toplevel) {
+  focusWindow(toplevel.id);
+  pressKey("alt");
+  await sleep(MENU_MS);
+  pressKey("Up");
+  await sleep(200);
+  pressKey("Return");
+}
+
+/** The same command through its accelerator, which is the other route a person has to it. */
+function quitWithCtrlQ(toplevel) {
+  focusWindow(toplevel.id);
+  pressKey("ctrl+q");
 }
 
 /** How many times a line the app writes has appeared in its log. */
@@ -194,8 +205,9 @@ async function waitForQuitTaken(dataHome, wanted) {
     message: `the app to log "${QUIT_TAKEN}" ${wanted} time(s)`,
   }).catch((error) => {
     throw new Error(
-      `${error.message}\nThe quit hook never fired, so nothing drove the route this check is ` +
-        "about. A release build carries no hook: use `pnpm e2e:build`.\n" +
+      `${error.message}\nThe app never reached its quit command, so nothing drove the route this ` +
+        "check is about: either the File menu did not open on Alt, or its last enabled item is no " +
+        "longer Quit.\n" +
         `the app's log held:\n${appLog(dataHome) || "(nothing yet)"}`,
     );
   });
@@ -233,18 +245,17 @@ async function main() {
   // both here: an answered gate must not wave a later quit through.
   const dataHome = mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-quitgate-"));
   const workFile = path.join(dataHome, "cancel-then-discard.srt");
-  const trigger = path.join(dataHome, "quit-now");
   copyFileSync(source, workFile);
 
-  let state = launch(dataHome, workFile, trigger);
+  let state = launch(dataHome, workFile);
   try {
     const toplevel = await waitForWindow(state);
     await openAndDirty(toplevel, dataHome);
 
-    await requestQuit(dataHome, trigger, 1);
+    await quitFromTheMenu(toplevel);
     await waitForQuitTaken(dataHome, 1);
     check(
-      "the quit went through AppHandle::exit and not through the window",
+      "the menu's Quit item went through AppHandle::exit and not through the window",
       quitsTaken(dataHome) === 1,
       "the route this check exists for was never driven",
     );
@@ -274,7 +285,7 @@ async function main() {
       "the file changed even though nothing was saved",
     );
 
-    await requestQuit(dataHome, trigger, 2);
+    await quitFromTheMenu(toplevel);
     await waitForQuitTaken(dataHome, 2);
     const again = await waitForDialog(state, "asking about the second quit");
     check(
@@ -309,18 +320,17 @@ async function main() {
   // Phase two: save, on a fresh instance and a fresh copy.
   const saveHome = mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-quitgate-save-"));
   const saveFile = path.join(saveHome, "save-on-quit.srt");
-  const saveTrigger = path.join(saveHome, "quit-now");
   copyFileSync(source, saveFile);
 
-  state = launch(saveHome, saveFile, saveTrigger);
+  state = launch(saveHome, saveFile);
   try {
     const toplevel = await waitForWindow(state);
     await openAndDirty(toplevel, saveHome);
 
-    await requestQuit(saveHome, saveTrigger, 1);
+    quitWithCtrlQ(toplevel);
     await waitForQuitTaken(saveHome, 1);
     check(
-      "the save branch's quit went through AppHandle::exit as well",
+      "the save branch's Ctrl+Q went through AppHandle::exit as well",
       quitsTaken(saveHome) === 1,
       "the route this check exists for was never driven",
     );
@@ -369,19 +379,18 @@ async function main() {
   // it through a window close, so a quit that should just go has to be proved to still just go.
   const cleanHome = mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-quitgate-clean-"));
   const cleanFile = path.join(cleanHome, "nothing-to-ask-about.srt");
-  const cleanTrigger = path.join(cleanHome, "quit-now");
   copyFileSync(source, cleanFile);
 
-  state = launch(cleanHome, cleanFile, cleanTrigger);
+  state = launch(cleanHome, cleanFile);
   try {
-    await waitForWindow(state);
+    const toplevel = await waitForWindow(state);
     // Opened and left alone: a document on screen with nothing unsaved in it.
     await waitForLog(cleanHome, SUBTITLE_OPENED, { what: "the subtitle to be open" });
 
-    await requestQuit(cleanHome, cleanTrigger, 1);
+    await quitFromTheMenu(toplevel);
     await waitForQuitTaken(cleanHome, 1);
     check(
-      "the clean branch's quit went through AppHandle::exit as well",
+      "the clean branch's menu quit went through AppHandle::exit as well",
       quitsTaken(cleanHome) === 1,
       "the route this check exists for was never driven",
     );

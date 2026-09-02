@@ -310,13 +310,16 @@ describe("the shell layout", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => browser.execute(() => document.querySelector(".bar__button") !== null), {
-      timeout: 30000,
-      message: "the app UI to render",
-    });
+    await waitFor(
+      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      {
+        timeout: 30000,
+        message: "the app UI to render",
+      },
+    );
 
     // The criterion is stated with a video and a subtitle open, so both are open before it is read.
-    await clickElement(toplevel, ".bar__button");
+    await clickElement(toplevel, ".toolbar__open-video");
     const videoChooser = await waitForChooser("Choose a video");
     await answerChooser(videoChooser, requireVideoFixture(), "video");
     focusWindow(toplevel.id);
@@ -330,7 +333,7 @@ describe("the shell layout", () => {
       { timeout: 30000, timeoutMsg: "the video fixture never reached the ready state" },
     );
 
-    await clickElement(toplevel, ".subbar__open");
+    await clickElement(toplevel, ".toolbar__open-subtitle");
     const subtitleChooser = await waitForChooser("Choose a subtitle");
     await answerChooser(subtitleChooser, SUBTITLE, "subtitle");
     focusWindow(toplevel.id);

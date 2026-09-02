@@ -134,14 +134,23 @@ describe("the chooser is the only way in", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => browser.execute(() => document.querySelector(".subbar__open") !== null), {
-      timeout: 30000,
-      message: "the app UI to render",
-    });
+    await waitFor(
+      () => browser.execute(() => document.querySelector(".toolbar__open-subtitle") !== null),
+      {
+        timeout: 30000,
+        message: "the app UI to render",
+      },
+    );
 
     // A document and a project, so every field the interface can hold is in the DOM and every one
     // of the five choosers can be raised.
-    await chooseFrom(toplevel, ".subbar__open", "Choose a subtitle", subtitle, "subtitle");
+    await chooseFrom(
+      toplevel,
+      ".toolbar__open-subtitle",
+      "Choose a subtitle",
+      subtitle,
+      "subtitle",
+    );
     await waitFor(async () => (await textOf(".statusbar__document"))?.startsWith("SRT") === true, {
       timeout: 20000,
       message: "the status line to report the open subtitle",
@@ -189,7 +198,7 @@ describe("the chooser is the only way in", () => {
     const empty = await textOf(".stage__empty");
     expect(empty).not.toBe(null);
 
-    await cancelFrom(toplevel, ".bar__button", "Choose a video", "video");
+    await cancelFrom(toplevel, ".toolbar__open-video", "Choose a video", "video");
 
     expect(await textOf(".stage__empty")).toBe(empty);
     expect(await textOf(".statusbar__video-error")).toBe(null);
@@ -198,7 +207,7 @@ describe("the chooser is the only way in", () => {
   it("leaves the open document alone when the subtitle chooser is dismissed", async () => {
     const status = await textOf(".statusbar__document");
 
-    await cancelFrom(toplevel, ".subbar__open", "Choose a subtitle", "subtitle");
+    await cancelFrom(toplevel, ".toolbar__open-subtitle", "Choose a subtitle", "subtitle");
 
     expect(await textOf(".statusbar__document")).toBe(status);
     expect(await textOf(".statusbar__error")).toBe(null);
@@ -210,7 +219,7 @@ describe("the chooser is the only way in", () => {
 
     await cancelFrom(
       toplevel,
-      ".subbar__save-copy",
+      ".toolbar__save-copy",
       "Save a copy of the subtitle",
       "subtitle-save",
     );

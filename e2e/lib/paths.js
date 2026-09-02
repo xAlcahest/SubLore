@@ -26,8 +26,9 @@ export const windowHeight = 700;
  * Where the first cue's text sits inside the window the close-gate scripts launch.
  *
  * Those scripts click a cue without a WebDriver session, so the point has to be a number rather
- * than a lookup, and every layout change moves it: T1 took the path boxes out of both bars, and T2
- * put the grid under a fixed-height top block instead of under a stack of them.
+ * than a lookup, and every layout change moves it: T1 took the path boxes out of both bars, T2
+ * put the grid under a fixed-height top block instead of under a stack of them, and T3 replaced
+ * two command bars with a menu bar and a toolbar, which are 35 px shorter together.
  *
  * It belongs to those scripts and to the N1b probe beside them, which launches the app the same
  * way and had been carrying a copy of its own two layouts out of date. They start the app on an
@@ -36,7 +37,7 @@ export const windowHeight = 700;
  * the one a spec drives. Re-measure it the way it was measured — a screenshot of a launch made the
  * way those scripts make it — and never from a spec.
  */
-export const firstCueText = { x: 840, y: 442 };
+export const firstCueText = { x: 840, y: 407 };
 
 /**
  * Missing prerequisites are failures with an actionable message, never skips (design section 10).

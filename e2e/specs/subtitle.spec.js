@@ -111,7 +111,7 @@ function present(selector) {
 
 /** Open a subtitle through the system chooser, which is the only route since T1. */
 async function openSubtitle(toplevel, file) {
-  await clickElement(toplevel, ".subbar__open");
+  await clickElement(toplevel, ".toolbar__open-subtitle");
   const chooser = await waitForChooser("Choose a subtitle");
   await answerChooser(chooser, file, "subtitle");
   focusWindow(toplevel.id);
@@ -119,7 +119,7 @@ async function openSubtitle(toplevel, file) {
 
 /** Name the copy in the save chooser. Its filename field is what the destination box used to be. */
 async function saveCopyTo(toplevel, destination) {
-  await clickElement(toplevel, ".subbar__save-copy");
+  await clickElement(toplevel, ".toolbar__save-copy");
   const chooser = await waitForChooser("Save a copy of the subtitle");
   await answerChooser(chooser, destination, "save a copy");
   focusWindow(toplevel.id);
@@ -164,10 +164,13 @@ describe("subtitle open and save", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => browser.execute(() => document.querySelector(".subbar__open") !== null), {
-      timeout: 30000,
-      message: "the subtitle bar to render",
-    });
+    await waitFor(
+      () => browser.execute(() => document.querySelector(".toolbar__open-subtitle") !== null),
+      {
+        timeout: 30000,
+        message: "the subtitle bar to render",
+      },
+    );
   });
 
   it("opens an SRT fixture and shows its format and cue count", async () => {
@@ -255,22 +258,22 @@ describe("subtitle open and save", () => {
 
     // Discard is offered only where it is meant: an open the unsaved edit refused. Reopening the
     // same file is that refusal at its plainest, and what comes back is the file on disk.
-    expect(await present(".subbar__discard")).toBe(false);
+    expect(await present(".toolbar__discard")).toBe(false);
     await openSubtitle(toplevel, file);
-    await waitFor(() => present(".subbar__discard"), {
+    await waitFor(() => present(".toolbar__discard"), {
       timeout: 20000,
       message: "the discard button to appear once the edit refused an open",
     });
     expect(await rowText(DISCARD_POSITION)).toBe(DISCARD_TEXT);
 
-    await clickElement(toplevel, ".subbar__discard");
+    await clickElement(toplevel, ".toolbar__discard");
     await waitFor(async () => (await rowText(DISCARD_POSITION)) === original, {
       timeout: 20000,
       message: `row ${DISCARD_POSITION} to go back to the text it was opened with`,
     });
     expect(await waitForStatus(LF_STATUS)).toBe(LF_STATUS);
     expect(await present(".statusbar__dirty")).toBe(false);
-    expect(await present(".subbar__discard")).toBe(false);
+    expect(await present(".toolbar__discard")).toBe(false);
     expect(await present(".statusbar__error")).toBe(false);
     // Discarding is not a write: the file is still every byte it was opened with.
     expect(readFileSync(file).equals(opened)).toBe(true);
