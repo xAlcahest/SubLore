@@ -57,36 +57,12 @@ jobs:
             libxdo-dev \
             wget
 
+      # Moved to a script when the package job below needed the same libmpv (M0.3): two copies of
+      # this would have drifted, and the checksum is the half that must not.
       - name: Install libmpv (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $tag  = "20260814"
-          $file = "mpv-dev-x86_64-20260814-git-7b8915bc1d.7z"
-          $sha  = "0af22b28e920620036d3ae08fd9283156dc9af0420bf4df84b0e02282094599c"
-          $dir  = "$env:RUNNER_TEMP\mpv-dev"
-          Invoke-WebRequest -Uri "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/$tag/$file" -OutFile mpv-dev.7z
-          if ((Get-FileHash mpv-dev.7z -Algorithm SHA256).Hash -ne $sha.ToUpper()) { throw "libmpv archive checksum mismatch" }
-          7z x mpv-dev.7z -o"$dir" | Out-Null
-
-          # MSVC import library: the archive ships only a MinGW .dll.a, so build mpv.lib from the DLL exports.
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vs    = & $vswhere -latest -products * -property installationPath
-          $tools = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64" | Select-Object -Last 1
-          $dumpbin = Join-Path $tools.FullName "dumpbin.exe"
-          $libexe  = Join-Path $tools.FullName "lib.exe"
-          $names = & $dumpbin /exports "$dir\libmpv-2.dll" |
-            Select-String -Pattern '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(mpv_\S+)' |
-            ForEach-Object { $_.Matches[0].Groups[1].Value }
-          if ($names.Count -lt 50) { throw "expected at least 50 mpv_* exports, found $($names.Count)" }
-          if ($names -notcontains "mpv_create") { throw "mpv_create missing from libmpv-2.dll exports" }
-          @("EXPORTS") + $names | Set-Content "$dir\mpv.def"
-          & $libexe /def:"$dir\mpv.def" /name:libmpv-2.dll /out:"$dir\mpv.lib" /MACHINE:X64
-          if (-not (Test-Path "$dir\mpv.lib")) { throw "failed to generate mpv.lib" }
-
-          "LIBMPV_LIB_DIR=$dir" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          "$dir" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+        run: .github/scripts/install-libmpv-windows.ps1
 
       - name: Install ffmpeg (Windows)
         if: runner.os == 'Windows'
@@ -313,3 +289,126 @@ jobs:
       - name: Verdict (red unless every check ran and returned zero)
         if: always()
         run: .github/scripts/e2e-verdict.sh
+
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # A release build of the workspace and two bundlers, on runners the check job takes 30 minutes
+    # on. Like every job here it carries its own: the default is six hours.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows builds the installers and stops there. Nothing has ever run one, so an msi from
+        # this job is a file that exists, not an install that works; MW.3 is where that is answered.
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The check job's list without ffmpeg, which only the video fixture needs. librsvg2-dev is
+      # not optional here: the AppImage's gtk plugin reads librsvg-2.0.pc and fails the bundle
+      # without it.
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libmpv-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            wget
+
+      - name: Install libmpv (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .github/scripts/install-libmpv-windows.ps1
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the Linux installers
+        if: runner.os == 'Linux'
+        run: pnpm tauri build --bundles deb,appimage
+
+      - name: Build the Windows installers
+        if: runner.os == 'Windows'
+        run: pnpm tauri build --bundles msi,nsis
+
+      # if-no-files-found: error, because a packaging job that uploads nothing and reports success
+      # is the one outcome worse than a red one.
+      - name: Upload the Linux installers
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-installers
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+      - name: Upload the Windows installers
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-installers
+          path: |
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  # M0.3's acceptance criterion, the half that can be automated today: an artifact this workflow
+  # built installs somewhere clean and the app it installs comes up. The Windows half of that
+  # criterion belongs to MW.3, by hand, on a machine nobody has yet.
+  package-smoke:
+    name: package smoke (ubuntu)
+    needs: package
+    runs-on: ubuntu-latest
+    # Two downloads, a handful of packages and two launches. Nothing here compiles.
+    timeout-minutes: 20
+    # A clean image rather than the runner: the runner already carries most of what the .deb has to
+    # declare, so a dependency it forgot would install and start there and fail on a user's machine.
+    # The tag tracks the image the package job builds on.
+    container: ubuntu:24.04
+    steps:
+      # The image carries neither, and the checkout needs both.
+      - name: Install what the checkout needs
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download the Linux installers
+        uses: actions/download-artifact@v7
+        with:
+          name: linux-installers
+          path: installers
+
+      - name: Install the deb and start what it installed
+        run: .github/scripts/package-smoke.sh installers/deb/*.deb installers/appimage/*.AppImage
