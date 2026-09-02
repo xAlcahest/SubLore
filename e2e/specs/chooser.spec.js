@@ -63,6 +63,9 @@ function centreOf(selector) {
     if (element === null) {
       return null;
     }
+    // The rail is only as tall as the top block, so a control further down it has to be brought
+    // into view before a pointer can reach it. See T2's full-width grid.
+    element.scrollIntoView({ block: "nearest", inline: "nearest" });
     const rect = element.getBoundingClientRect();
     const dpr = window.devicePixelRatio;
     return { x: (rect.x + rect.width / 2) * dpr, y: (rect.y + rect.height / 2) * dpr };

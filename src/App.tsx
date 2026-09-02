@@ -129,37 +129,37 @@ export default function App() {
             onChoosePath={project.choosePath}
           />
         </aside>
-        <div className="shell__main">
-          <div className="shell__top">
-            <section className="shell__video">
-              <VideoStage hasVideo={ready} onRegionChange={setRegion} />
-              <VideoControls
-                enabled={ready}
-                paused={state.paused}
-                duration={state.duration ?? 0}
-                position={position}
-                onToggle={() => void togglePlayback()}
-                onSeek={(target) => void seek(target)}
-              />
-            </section>
-            {/* Empty until the waveform (M2.4) and the current line (T5) land beside the video. */}
-            <section className="shell__tools" />
-          </div>
-          <section className="shell__grid">
-            <CueList
-              key={subtitle.openId}
-              cues={subtitle.cues}
-              multiline={subtitle.summary?.format !== "ass"}
-              flushRef={flushEditor}
-              onEditingChange={setEditorOpen}
-              onCommit={subtitle.setText}
-              onUndo={subtitle.undo}
-              onRedo={subtitle.redo}
-              onSave={saveDocument}
+        <div className="shell__top">
+          <section className="shell__video">
+            <VideoStage hasVideo={ready} onRegionChange={setRegion} />
+            <VideoControls
+              enabled={ready}
+              paused={state.paused}
+              duration={state.duration ?? 0}
+              position={position}
+              onToggle={() => void togglePlayback()}
+              onSeek={(target) => void seek(target)}
             />
           </section>
+          {/* Empty until the waveform (M2.4) and the current line (T5) land beside the video. */}
+          <section className="shell__tools" />
         </div>
       </div>
+      {/* Full width, crossing under the rail: the layout drawing, the M2.0 criterion and T2 all
+          say the grid takes everything below. Owner ruling 2026-09-02. */}
+      <section className="shell__grid">
+        <CueList
+          key={subtitle.openId}
+          cues={subtitle.cues}
+          multiline={subtitle.summary?.format !== "ass"}
+          flushRef={flushEditor}
+          onEditingChange={setEditorOpen}
+          onCommit={subtitle.setText}
+          onUndo={subtitle.undo}
+          onRedo={subtitle.redo}
+          onSave={saveDocument}
+        />
+      </section>
       <StatusBar
         summary={subtitle.summary}
         dirty={dirty}

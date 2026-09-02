@@ -44,7 +44,7 @@ import process from "node:process";
 import { appLog, waitForLog } from "../lib/applog.js";
 import { acceptChooser, answerChooser, cancelChooser, clickUntilChooser } from "../lib/chooser.js";
 import { appEnv } from "../lib/env.js";
-import { clickAt, focusWindow, pressKey } from "../lib/input.js";
+import { clickAt, focusWindow, pressKey, wheelAt } from "../lib/input.js";
 import {
   repoRoot,
   requireAppBinary,
@@ -70,7 +70,11 @@ let checksRun = 0;
  */
 const CHOOSE_FOLDER = { x: 52, y: 271 };
 const CREATE_PROJECT = { x: 136, y: 271 };
-const CHOOSE_FILE = { x: 52, y: 477 };
+/** Measured with the rail wound to its end, which is where `railTo("down")` leaves it. */
+const CHOOSE_FILE = { x: 52, y: 225 };
+/** A point inside the rail, and enough wheel clicks to reach its end from anywhere in it. */
+const RAIL = { x: 140, y: 300 };
+const RAIL_CLICKS = 20;
 
 /** The two chooser titles. Frozen contract with src-tauri/src/strings.rs. */
 const FOLDER_TITLE = "Choose a project folder";
@@ -379,8 +383,11 @@ async function main() {
         `Create had nothing to work with. The app's log held:\n${appLog(dataHome)}`,
     );
 
-    // The file half. Its row exists only once a project is open (ProjectPanel.tsx).
+    // The file half. Its row exists only once a project is open (ProjectPanel.tsx), and since T2
+    // the rail is only as tall as the top block, so the row is below its fold.
     focusWindow(toplevel.id);
+    const railTo = (end) => wheelAt(at(RAIL).x, at(RAIL).y, end, RAIL_CLICKS);
+    railTo("down");
     const fileChooser = await clickUntilChooser(toplevel, at(CHOOSE_FILE), FILE_TITLE, { alive });
     await answerChooser(fileChooser, subtitle, "file");
     check(
@@ -393,6 +400,7 @@ async function main() {
     // from before the Escape: matching the whole log would pass on a cancellation from earlier.
     const CANCELLED = /chooser: the project-file choice was cancelled/g;
     const before_escape = (appLog(dataHome).match(CANCELLED) ?? []).length;
+    railTo("down");
     const cancelled = await clickUntilChooser(toplevel, at(CHOOSE_FILE), FILE_TITLE, { alive });
     await cancelChooser(cancelled, "file");
     check(
@@ -435,6 +443,8 @@ async function main() {
     // cancellation never touched.
     const FOLDER_CANCELLED = /chooser: the project-folder choice was cancelled/g;
     const cancelledBefore = (appLog(dataHome).match(FOLDER_CANCELLED) ?? []).length;
+    // Back to the top, where the folder row is and where its point was measured.
+    railTo("up");
     const browsed = await clickUntilChooser(toplevel, at(CHOOSE_FOLDER), FOLDER_TITLE, { alive });
     // Alt+Home is GTK's own "go to the home folder", so this cancellation happens somewhere other
     // than the folder that was chosen. A memory written from where the chooser was browsing would

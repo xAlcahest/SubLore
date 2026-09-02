@@ -42,10 +42,12 @@ body {
   background: var(--bg-panel);
 }
 
+/* The top block: the rail beside the video and the tools column, and nothing else. Fixed height,
+   so the grid below it is the panel that grows with the window. */
 .shell__body {
   display: flex;
-  flex: 1;
-  min-height: 0;
+  flex: none;
+  height: 13.5rem;
 }
 
 .shell__rail {
@@ -59,19 +61,9 @@ body {
   overflow-y: auto;
 }
 
-.shell__main {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-
-/* Fixed height, so the grid below it is the panel that grows with the window. */
 .shell__top {
   display: flex;
-  flex: none;
-  height: 13.5rem;
+  flex: 1;
   min-width: 0;
 }
 

@@ -76,7 +76,13 @@ function clippedAtWindowEdge(slop) {
   return browser.execute((allowed) => {
     const scrollsVertically = (element) => {
       for (let node = element.parentElement; node !== null; node = node.parentElement) {
-        if (node.scrollHeight > node.clientHeight) {
+        // Computed overflow, not scrollHeight: `overflow: hidden` overflows without scrolling, and
+        // reading the height alone excused every box under the window edge.
+        const overflow = window.getComputedStyle(node).overflowY;
+        if (
+          (overflow === "auto" || overflow === "scroll") &&
+          node.scrollHeight > node.clientHeight
+        ) {
           return true;
         }
       }
@@ -259,10 +265,10 @@ async function expectLayoutHolds(size) {
   expect(near(status.right, viewport.width)).toBe(true);
   expect(near(status.bottom, viewport.height)).toBe(true);
 
-  // The rail on the left, under the chrome, down to the status bar.
+  // The rail on the left, under the chrome, beside the top block and no further down than it.
   expect(near(rail.left, 0)).toBe(true);
   expect(near(rail.top, chrome.bottom)).toBe(true);
-  expect(near(rail.bottom, status.top)).toBe(true);
+  expect(near(rail.bottom, video.bottom)).toBe(true);
 
   // The video beside the rail, at the top of the block.
   expect(near(video.left, rail.right)).toBe(true);
@@ -276,9 +282,10 @@ async function expectLayoutHolds(size) {
   expect(near(tools.right, viewport.width)).toBe(true);
   expect(tools.width).toBeLessThan(viewport.width - rail.width);
 
-  // The grid below the top block, taking what is left above the status bar.
+  // The grid below the top block and across the whole width, crossing under the rail, taking what
+  // is left above the status bar. Owner ruling 2026-09-02.
   expect(near(grid.top, video.bottom)).toBe(true);
-  expect(near(grid.left, rail.right)).toBe(true);
+  expect(near(grid.left, 0)).toBe(true);
   expect(near(grid.right, viewport.width)).toBe(true);
   expect(near(grid.bottom, status.top)).toBe(true);
 
@@ -356,6 +363,29 @@ describe("the shell layout", () => {
     expect(await clippedAtWindowEdge(EDGE_SLOP_PX)).toEqual([]);
   });
 
+  it("has a clipping sweep that sees a box hanging under the window edge", async () => {
+    // The downward arm has its own case because it has its own excuse: a box under a scroller is
+    // meant to hang there. The probe sits under an `overflow: hidden` box that overflows, which is
+    // what the sweep used to read as scrolling.
+    await browser.execute(() => {
+      const box = document.createElement("div");
+      box.className = "deep-probe";
+      box.style.cssText = "position:fixed;left:0;bottom:0;width:8px;height:8px;overflow:hidden";
+      const inner = document.createElement("div");
+      inner.className = "deep-probe__inner";
+      inner.style.cssText = "height:64px";
+      box.append(inner);
+      document.body.append(box);
+    });
+    const seen = await clippedAtWindowEdge(EDGE_SLOP_PX);
+    await browser.execute(() => {
+      document.querySelector(".deep-probe")?.remove();
+    });
+
+    expect(seen.filter((entry) => entry.startsWith("div.deep-probe__inner")).length).toBe(1);
+    expect(await clippedAtWindowEdge(EDGE_SLOP_PX)).toEqual([]);
+  });
+
   it("puts the five regions where the layout says, at the size the app opens at", async () => {
     await expectLayoutHolds({ width: windowWidth, height: windowHeight });
   });
@@ -383,5 +413,33 @@ describe("the shell layout", () => {
     }
     await waitForSurfaceOnStage(narrow);
     expect(await scrollableAncestorsOfSurface()).toEqual([]);
+  });
+
+  it("moves the surface when the chrome above it changes height", async () => {
+    // A taller chrome slides the stage down without changing its size, which is the M0.2 constraint
+    // broken by a route that never scrolls and never resizes the panel.
+    const narrow = findToplevel();
+    if (narrow === null) {
+      throw new Error(`no ${windowWidth}x${windowHeight} "Sublore" toplevel.\n${rootTree()}`);
+    }
+    const before = await surfaceRect();
+    await browser.execute(() => {
+      const spacer = document.createElement("div");
+      spacer.className = "chrome-probe";
+      spacer.style.cssText = "height:64px";
+      document.querySelector(".shell__chrome")?.append(spacer);
+    });
+
+    const moved = await surfaceRect();
+    expect(moved.y - before.y).toBeGreaterThan(0);
+    expect(moved.height).toBe(before.height);
+    await waitForSurfaceOnStage(narrow);
+
+    await browser.execute(() => {
+      document.querySelector(".chrome-probe")?.remove();
+    });
+
+    expect(await surfaceRect()).toEqual(before);
+    await waitForSurfaceOnStage(narrow);
   });
 });
