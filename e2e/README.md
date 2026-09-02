@@ -114,7 +114,7 @@ is ready, so the `IsViewable` check is what makes this test meaningful.
 sh fixtures/video/make-sample.sh     # the fixture is generated, never committed
 sh scripts/fetch-model.sh            # ggml-tiny.en.bin, fetched once, never committed
 pnpm e2e:build                       # tauri build --debug --no-bundle
-xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e           # the nine WebDriver spec files
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e           # the WebDriver spec files
 xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:shutdown  # the clean-close check
 xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:close-gate  # the unsaved-edits gate
 xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:close-gate-late-edit  # an edit made while the answer is in flight
@@ -165,14 +165,39 @@ Environment knobs:
 Neither entry point builds anything. A missing binary or fixture fails immediately with the command
 to run, because a silent four-minute rebuild inside a test hook is worse than a red line.
 
+## Reading a CI run that looks stopped
+
+Each check streams its output while it runs. `.github/scripts/e2e-check.sh` runs the check into
+`ci-logs/<name>.log` and follows that file rather than piping the check into `tee`: node's stdout is
+asynchronous to a pipe and synchronous to a file, so a runner that calls `process.exit()` after a
+burst drops whatever is still buffered, which is the end of a failing check's output. Measured on a
+stand-in that writes 300,022 bytes and exits: all of it reaches a file, 65,558 bytes reach a pipe.
+
+A check that has written nothing for 20 seconds says so, then again every 15, and each step ends
+with what the check returned:
+
+```
+smoke: 3m20s elapsed, no output for 21s
+smoke: exit 0 after 7m37s
+```
+
+Both lines come from the wrapper, not from the check. A quiet stretch is normal: an app launch under
+Xvfb is silent for about half a minute, and there is one per spec file.
+
+Each check step also carries a `timeout-minutes` of roughly three times what it takes today, so a
+check that hangs costs minutes rather than the job's whole 45. A step killed that way writes no
+`ci-logs/<name>.exit`, so the verdict reports it as a check that never reported, which is what it is.
+
+GitHub hides per-line timestamps behind `Shift+T`, per viewer, so a workflow cannot turn them on.
+`gh run view <id> --log` always has them, and is the fastest way to find where a run spent its time.
+
 ## The anti-zero-test guard
 
 A harness that runs nothing must not report success. WebdriverIO does not reliably fail a run with no
-specs, so `wdio.conf.js` asserts the count itself:
+specs, so `wdio.conf.js` asserts the count itself, in `EXPECTED_TESTS` at the top of that file.
 
-```js
-const EXPECTED_TESTS = 82;
-```
+The number is not repeated here. A second copy in a document nobody runs goes stale, and this one
+had: it said 71 while the suite had grown to 77.
 
 `onComplete` throws if fewer than that many tests passed, which covers a deleted spec file, an
 `it.skip`, and a spec filter that matches nothing. **Update the number when you add or remove a
