@@ -12,6 +12,7 @@ import TranscribePanel from "./components/TranscribePanel";
 import VideoControls from "./components/VideoControls";
 import VideoStage from "./components/VideoStage";
 import { useCueSelection } from "./hooks/useCueSelection";
+import { LayerContext, useLayerRegistry } from "./hooks/useLayers";
 import { useProject } from "./hooks/useProject";
 import { useStartupFiles } from "./hooks/useStartupFiles";
 import { useSubtitleFile } from "./hooks/useSubtitleFile";
@@ -43,7 +44,12 @@ function acceleratorFor(
 }
 
 export default function App() {
-  const { state, position, errorCode, open, togglePlayback, seek, setRegion } = useVideoPlayer();
+  // Every HTML layer registers here while it is open, and the video surface hides for as long as
+  // the set is not empty (decision 1, T8).
+  const layers = useLayerRegistry();
+  const { state, position, errorCode, open, togglePlayback, seek, setRegion } = useVideoPlayer(
+    layers.covered,
+  );
   const subtitle = useSubtitleFile();
   const project = useProject();
   // A finished transcription becomes the open document, and the backend asks about unsaved work on
@@ -296,82 +302,84 @@ export default function App() {
   }, []);
 
   return (
-    <div className="shell">
-      <header className="shell__chrome">
-        <MenuBar menus={menus} />
-        <Toolbar groups={toolbar} />
-      </header>
-      <div className="shell__body">
-        <aside className="shell__rail">
-          <ProjectRail project={project} onOpenFile={openAttachedFile} />
-        </aside>
-        <div className="shell__top">
-          <section className="shell__video">
-            <VideoStage hasVideo={ready} onRegionChange={setRegion} />
-            <VideoControls
-              enabled={ready}
-              paused={state.paused}
-              duration={state.duration ?? 0}
-              position={position}
-              onToggle={() => void togglePlayback()}
-              onSeek={(target) => void seek(target)}
-            />
-          </section>
-          {/* The current line, and nothing above it: the waveform's provider arrives with M2.4 and
+    <LayerContext.Provider value={layers.registrar}>
+      <div className="shell">
+        <header className="shell__chrome">
+          <MenuBar menus={menus} />
+          <Toolbar groups={toolbar} />
+        </header>
+        <div className="shell__body">
+          <aside className="shell__rail">
+            <ProjectRail project={project} onOpenFile={openAttachedFile} />
+          </aside>
+          <div className="shell__top">
+            <section className="shell__video">
+              <VideoStage hasVideo={ready} onRegionChange={setRegion} />
+              <VideoControls
+                enabled={ready}
+                paused={state.paused}
+                duration={state.duration ?? 0}
+                position={position}
+                onToggle={() => void togglePlayback()}
+                onSeek={(target) => void seek(target)}
+              />
+            </section>
+            {/* The current line, and nothing above it: the waveform's provider arrives with M2.4 and
               a panel with no provider takes no space, so there is no empty box here (T5). */}
-          <section className="shell__tools">
-            <CurrentLine
-              key={subtitle.openId}
-              index={selection.active}
-              cue={activeCue}
-              multiline={subtitle.summary?.format !== "ass"}
-              flushRef={flushLine}
-              onDraftChange={setLineEdited}
-              onCommit={subtitle.setText}
-            />
-          </section>
+            <section className="shell__tools">
+              <CurrentLine
+                key={subtitle.openId}
+                index={selection.active}
+                cue={activeCue}
+                multiline={subtitle.summary?.format !== "ass"}
+                flushRef={flushLine}
+                onDraftChange={setLineEdited}
+                onCommit={subtitle.setText}
+              />
+            </section>
+          </div>
         </div>
-      </div>
-      {/* Full width, crossing under the rail: the layout drawing, the M2.0 criterion and T2 all
+        {/* Full width, crossing under the rail: the layout drawing, the M2.0 criterion and T2 all
           say the grid takes everything below. Owner ruling 2026-09-02. */}
-      <section className="shell__grid">
-        <CueList
-          key={subtitle.openId}
-          cues={subtitle.cues}
-          selection={selection}
-          multiline={subtitle.summary?.format !== "ass"}
-          flushRef={flushGrid}
-          onEditingChange={setEditorOpen}
-          onCommit={subtitle.setText}
-          onUndo={undoDocument}
-          onRedo={redoDocument}
-          onSave={saveDocument}
-        />
-      </section>
-      {/* Under the grid, which is the one region that gives up space: the top block's height is
+        <section className="shell__grid">
+          <CueList
+            key={subtitle.openId}
+            cues={subtitle.cues}
+            selection={selection}
+            multiline={subtitle.summary?.format !== "ass"}
+            flushRef={flushGrid}
+            onEditingChange={setEditorOpen}
+            onCommit={subtitle.setText}
+            onUndo={undoDocument}
+            onRedo={redoDocument}
+            onSave={saveDocument}
+          />
+        </section>
+        {/* Under the grid, which is the one region that gives up space: the top block's height is
           fixed, so opening the panel never moves the video surface. See T4. */}
-      {transcribeOpen && (
-        <TranscribePanel
-          mediaPath={state.path}
-          transcription={transcription}
-          adoptedRunId={subtitle.adoptedRunId}
-          onUse={(runId) => void adoptTranscription(runId)}
-          onClose={() => setTranscribeOpen(false)}
+        {transcribeOpen && (
+          <TranscribePanel
+            mediaPath={state.path}
+            transcription={transcription}
+            adoptedRunId={subtitle.adoptedRunId}
+            onUse={(runId) => void adoptTranscription(runId)}
+            onClose={() => setTranscribeOpen(false)}
+          />
+        )}
+        <StatusBar
+          summary={subtitle.summary}
+          dirty={dirty}
+          truncated={subtitle.truncated}
+          saved={subtitle.saved}
+          savedInPlace={subtitle.savedInPlace}
+          subtitleError={subtitle.error}
+          videoErrorCode={errorCode}
+          projectDeleted={project.deleted}
+          projectError={project.error}
+          chromeError={quitError}
         />
-      )}
-      <StatusBar
-        summary={subtitle.summary}
-        dirty={dirty}
-        truncated={subtitle.truncated}
-        saved={subtitle.saved}
-        savedInPlace={subtitle.savedInPlace}
-        subtitleError={subtitle.error}
-        videoErrorCode={errorCode}
-        projectDeleted={project.deleted}
-        projectError={project.error}
-        chromeError={quitError}
-      />
-      {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
-    </div>
+        {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
+      </div>
+    </LayerContext.Provider>
   );
 }

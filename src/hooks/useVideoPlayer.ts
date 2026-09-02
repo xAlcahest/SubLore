@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -42,10 +42,19 @@ export type VideoPlayer = {
   setRegion: (region: VideoRegion) => void;
 };
 
-export function useVideoPlayer(): VideoPlayer {
+/**
+ * @param covered whether an HTML layer is open over the page. The surface hides while it is, and
+ * the backend derives that from the flag: the frontend never shows or hides it (decision 1, T8).
+ */
+export function useVideoPlayer(covered: boolean): VideoPlayer {
   const [state, setState] = useState<VideoPlayerState>(IDLE_STATE);
   const [position, setPosition] = useState(0);
   const [errorCode, setErrorCode] = useState<VideoErrorCode | null>(null);
+  // The rectangle keeps being measured while a layer is open; it stops being sent, so no `raise`
+  // can restack the surface over the layer. It goes back with the uncover. See T8.
+  const held = useRef<VideoRegion | null>(null);
+  const covering = useRef(covered);
+  const transitions = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     // The backend never assumes the frontend is listening: the idle state above is the default.
@@ -110,11 +119,33 @@ export function useVideoPlayer(): VideoPlayer {
   }, []);
 
   const setRegion = useCallback((region: VideoRegion) => {
+    held.current = region;
+    // Held while a layer is open, and sent again when the last one closes (T8).
+    if (covering.current) {
+      return;
+    }
     // Fire and forget: a region update the backend rejects must not block layout.
     void invoke("video_set_region", { region }).catch((error: unknown) => {
       setErrorCode(toErrorCode(error));
     });
   }, []);
+
+  useEffect(() => {
+    covering.current = covered;
+    // One at a time and in this order: the held rectangle first, so the frame is placed before it
+    // may be shown, and no stale answer can leave the picture hidden with no layer open (T8).
+    transitions.current = transitions.current
+      .then(async () => {
+        const region = held.current;
+        if (!covered && region !== null) {
+          await invoke("video_set_region", { region });
+        }
+        await invoke("video_set_layers", { open: covered });
+      })
+      .catch((error: unknown) => {
+        setErrorCode(toErrorCode(error));
+      });
+  }, [covered]);
 
   return { state, position, errorCode, open, togglePlayback, seek, setRegion };
 }

@@ -1,6 +1,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { useLayer } from "../hooks/useLayers";
 import { en } from "../i18n/en";
 import { fill } from "../i18n/format";
 
@@ -12,6 +13,8 @@ type AboutDialogProps = {
 export default function AboutDialog({ onClose }: AboutDialogProps) {
   const [version, setVersion] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  // Mounted only while the panel is open (decision 1, T8).
+  useLayer(true);
 
   useEffect(() => {
     let showing = true;
