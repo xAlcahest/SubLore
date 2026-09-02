@@ -95,6 +95,16 @@ fn startup_files_command(state: tauri::State<'_, StartupFiles>) -> StartupFiles 
     state.inner().clone()
 }
 
+/// What the menu's Quit item and Ctrl+Q call. `AppHandle::exit` is the one quit route, and the run
+/// loop turns it into the window's own close so it meets the gate. See BACKLOG.md N6.
+#[tauri::command]
+fn quit(app: AppHandle) {
+    // The line `e2e/scripts/quit-gate-check.js` waits for: without it the check could not tell the
+    // menu route from something else closing the window.
+    log::info!("quit: asked for from the chrome, quitting through AppHandle::exit");
+    app.exit(0);
+}
+
 /// Build and run the app. Startup errors propagate to `main` so a failed launch is reported.
 pub fn run() -> tauri::Result<()> {
     crash::install();
@@ -138,7 +148,8 @@ pub fn run() -> tauri::Result<()> {
             video::video_pause,
             video::video_seek,
             video::video_set_region,
-            startup_files_command
+            startup_files_command,
+            quit
         ])
         .setup(move |app| {
             crash::attach(app);
@@ -159,7 +170,6 @@ pub fn run() -> tauri::Result<()> {
                 log::warn!("command line: ignored {argument}");
             }
             crash::force::trip(ForcePoint::Startup);
-            arm_quit_hook(app.handle().clone());
             app.manage(asr::AsrState::default());
             // A killed process cannot run its own cleanup, so abandoned run directories are swept
             // here, off the main thread. See BACKLOG.md M3.1.
@@ -500,41 +510,6 @@ fn stall_after_answer() {
 #[cfg(not(debug_assertions))]
 #[inline(always)]
 fn stall_after_answer() {}
-
-/// Test hook: quit through `AppHandle::exit`, the call a menu's Quit item will make and the one no
-/// interface of the app's own reaches yet, so `e2e/scripts/quit-gate-check.js` has a route to drive.
-/// Debug builds only, like `crash::force`. It is a harness affordance and never a way to quit
-/// Sublore: no menu item, shortcut or command reaches it, and a release binary reads no variable.
-///
-/// The variable names a file the harness owns and Sublore never writes: the file appearing is one
-/// quit, and the harness taking it away is what arms the hook again.
-#[cfg(debug_assertions)]
-fn arm_quit_hook(app: AppHandle) {
-    const ENV_VAR: &str = "SUBLORE_QUIT_ON_FILE";
-    const POLL: std::time::Duration = std::time::Duration::from_millis(100);
-
-    let Some(trigger) = std::env::var_os(ENV_VAR).map(std::path::PathBuf::from) else {
-        return;
-    };
-    std::thread::spawn(move || loop {
-        // Said out loud every time, because the harness has to know the hook is listening again
-        // before it asks for the next quit; a sleep there would be a race it could not see.
-        log::warn!("{ENV_VAR}: armed, this build quits when {trigger:?} appears");
-        while !trigger.exists() {
-            std::thread::sleep(POLL);
-        }
-        log::warn!("{ENV_VAR}: quitting through AppHandle::exit");
-        app.exit(0);
-        while trigger.exists() {
-            std::thread::sleep(POLL);
-        }
-    });
-}
-
-/// Release builds carry no hook: the environment variable is never read.
-#[cfg(not(debug_assertions))]
-#[inline(always)]
-fn arm_quit_hook(_app: AppHandle) {}
 
 /// Save the open file. A failed save keeps the window open: closing anyway would lose exactly the
 /// work the user asked us to keep. The refusal is shown, not only logged (CONTRIBUTING.md §6).

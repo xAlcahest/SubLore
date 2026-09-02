@@ -1,51 +1,166 @@
 /*
- * The chrome region: the command bars M0 to M4 bolted on, waiting to become the menu bar and the
- * toolbar (T3) and the transcription dialog (T4). The project rail still borrows `.bar__label`
- * until T7 reshapes it.
+ * The chrome region: the menu bar, the toolbar and the About panel they open. The transcription
+ * band still lives here until T4 makes it a dialog, and the project rail still borrows
+ * `.bar__label` until T7 reshapes it.
  */
-
-.bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.bar__brand {
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
 
 .bar__label {
   font-size: 0.875rem;
   white-space: nowrap;
 }
 
-.bar__button {
-  padding: 0.35rem 0.9rem;
-  font: inherit;
-  font-size: 0.875rem;
-}
-
-.subbar {
+/* CSS chrome, not a native menu: Windows and Linux draw the same bar (decision 1). Only the titles
+   with items behind them are here (decision 24 A2 and A4). */
+.menubar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  align-items: stretch;
+  padding: 0 0.25rem;
   border-bottom: 1px solid var(--line);
 }
 
-.subbar__open,
-.subbar__save,
-.subbar__save-copy,
-.subbar__undo,
-.subbar__redo,
-.subbar__discard {
-  padding: 0.35rem 0.9rem;
+.menubar__group {
+  position: relative;
+}
+
+.menubar__title {
+  padding: 0.3rem 0.6rem;
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
   font: inherit;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
+}
+
+.menubar__title:hover,
+.menubar__title[aria-expanded="true"] {
+  background: var(--bg-sunken);
+  color: var(--ink);
+}
+
+/* Above the panels below it: the regions come later in the document and would paint over it. */
+.menubar__menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  display: flex;
+  min-width: 13rem;
+  flex-direction: column;
+  padding: 0.2rem 0;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-panel);
+}
+
+/* The cursor is drawn on the item under it, so the panel holding the keyboard shows no ring. */
+.menubar__menu:focus {
+  outline: none;
+}
+
+.menubar__item {
+  display: flex;
+  gap: 2rem;
+  justify-content: space-between;
+  padding: 0.25rem 0.75rem;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.menubar__item:disabled {
+  color: var(--ink-faint);
+}
+
+.menubar__item--cursor,
+.menubar__item:hover:enabled {
+  background: var(--accent-bg);
+}
+
+.menubar__accelerator {
+  color: var(--ink-faint);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-panel);
+}
+
+.toolbar__button {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-sunken);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.toolbar__button:disabled {
+  color: var(--ink-faint);
+}
+
+.toolbar__divider {
+  width: 1px;
+  height: 0.9rem;
+  background: var(--line-strong);
+}
+
+/* Help > About. It covers the window rather than dimming it: every colour is a token and the
+   palette has no scrim in it. */
+.about {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inset: 0;
+}
+
+.about__panel {
+  display: flex;
+  max-width: 24rem;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-panel);
+  font-size: 0.8125rem;
+}
+
+/* The panel takes the keyboard so Escape closes it; it is not a control, so it draws no ring. */
+.about__panel:focus {
+  outline: none;
+}
+
+.about__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.about__tagline,
+.about__version,
+.about__licence {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.about__close {
+  align-self: flex-end;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.9rem;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-sunken);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.8125rem;
 }
 
 .asrbar {

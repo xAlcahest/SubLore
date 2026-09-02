@@ -60,10 +60,13 @@ describe("video playback", () => {
     });
     focusWindow(toplevel.id);
     // The toplevel is mapped before React renders into it; interacting earlier is a race.
-    await waitFor(() => browser.execute(() => document.querySelector(".bar__button") !== null), {
-      timeout: 30000,
-      message: "the app UI to render",
-    });
+    await waitFor(
+      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      {
+        timeout: 30000,
+        message: "the app UI to render",
+      },
+    );
   });
 
   it("opens the sample fixture", async () => {
@@ -71,7 +74,7 @@ describe("video playback", () => {
 
     // The path is chosen in the system chooser now: T1 removed every field for typing one, so
     // the route in changed and what is asserted below did not.
-    await clickElement(toplevel, ".bar__button");
+    await clickElement(toplevel, ".toolbar__open-video");
     const chooser = await waitForChooser("Choose a video");
     await answerChooser(chooser, fixture, "video");
     focusWindow(toplevel.id);

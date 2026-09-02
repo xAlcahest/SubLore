@@ -130,7 +130,8 @@ body {
 }
 
 .statusbar__error,
-.statusbar__video-error {
+.statusbar__video-error,
+.statusbar__chrome-error {
   display: flex;
   flex-wrap: wrap;
   gap: 0 0.5rem;

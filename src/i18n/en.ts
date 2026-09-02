@@ -1,8 +1,51 @@
 /** English source strings. All user-facing copy lives here, never inline in components. */
 export const en = {
   appName: "Sublore",
+  /**
+   * The menu bar and the toolbar. Only the titles with items behind them are here: Subtitles,
+   * Timing, Audio and Terms arrive with the milestone that fills each (decision 24 A2 and A4).
+   */
+  menu: {
+    file: {
+      title: "File",
+      openSubtitle: "Open subtitle…",
+      openVideo: "Open video…",
+      save: "Save",
+      saveCopy: "Save a copy…",
+      discard: "Discard changes",
+      quit: "Quit",
+    },
+    edit: {
+      title: "Edit",
+      undo: "Undo",
+      redo: "Redo",
+    },
+    help: {
+      title: "Help",
+      about: "About Sublore",
+    },
+    /** Drawn beside a menu item. Each key is handled by whichever component owns that command. */
+    keys: {
+      openSubtitle: "Ctrl+O",
+      openVideo: "Ctrl+Shift+O",
+      save: "Ctrl+S",
+      saveCopy: "Ctrl+Shift+S",
+      undo: "Ctrl+Z",
+      redo: "Ctrl+Y",
+      quit: "Ctrl+Q",
+    },
+    errors: {
+      quitFailed: "Sublore could not quit. Close the window instead.",
+    },
+  },
+  about: {
+    title: "About Sublore",
+    tagline: "Translation memory for subtitles.",
+    version: "Version {version}",
+    licence: "GNU General Public License, version 3 or later.",
+    close: "Close",
+  },
   video: {
-    open: "Open",
     play: "Play",
     pause: "Pause",
     position: "Position",
@@ -72,12 +115,6 @@ export const en = {
     },
   },
   subtitle: {
-    open: "Open",
-    save: "Save as",
-    saveFile: "Save",
-    undo: "Undo",
-    redo: "Redo",
-    discard: "Discard changes",
     /** Appended to the status line while the document differs from the file on disk. */
     dirty: "Unsaved changes",
     /** Shown once the undo bound has dropped its oldest entries. */

@@ -72,10 +72,11 @@ let checksRun = 0;
  *
  * It is the transcription status line, which is a paragraph nothing can focus, spanning the whole
  * window inside the chrome. Measured from a screenshot of this check's own window at 1024x700: the
- * band runs y 154 to 183, so this is its middle. When this check reports that no chooser opened,
- * this is what to re-measure, from a screenshot of this check's own window.
+ * band runs y 119 to 148, so this is its middle. When this check reports that no chooser opened,
+ * this is what to re-measure, from a screenshot of this check's own window. T3 moved it up 35 px by
+ * replacing two command bars with a menu bar and a toolbar.
  */
-const CHROME_TEXT = { x: 900, y: 168 };
+const CHROME_TEXT = { x: 900, y: 134 };
 
 /**
  * Tab stops from `CHROME_TEXT` to each rail control, in ProjectPanel.tsx's own order: Choose,
