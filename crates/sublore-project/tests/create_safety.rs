@@ -188,9 +188,18 @@ mod links {
             }
         });
 
+        let mut refused = 0;
+        let mut created = 0;
         for attempt in 0..PLANTING_ATTEMPTS {
-            if let Ok(made) = Database::create(&folder, "Kaiba", at(1_756_000_000)) {
-                let _ = made.close();
+            match Database::create(&folder, "Kaiba", at(1_756_000_000)) {
+                Ok(made) => {
+                    created += 1;
+                    let _ = made.close();
+                }
+                // Only this kind says the create found the link in its way; a create whose file
+                // vanished under it comes back as something else. See BACKLOG.md N9, S8.
+                Err(error) if error.kind == ProjectErrorKind::AlreadyAProject => refused += 1,
+                Err(_) => {}
             }
             let _ = fs::remove_file(&database);
             assert_eq!(
@@ -205,6 +214,15 @@ mod links {
         planter
             .join()
             .expect("the planting thread should not panic");
+
+        // Anti-vacuity, after crates/sublore-edit/tests/property.rs: all-refused means no create
+        // ever ran, all-created means the planter never landed. See BACKLOG.md N9, S8.
+        assert!(
+            refused > 0 && created > 0,
+            "{refused} creates found the link in the way and {created} got through, out of \
+             {PLANTING_ATTEMPTS}: with one of those at zero the two threads took turns and the \
+             swap was never raced"
+        );
 
         // The folder still works afterwards: the race left nothing standing in the way. The
         // journals go too, so what is created below is a project and not a recovery.

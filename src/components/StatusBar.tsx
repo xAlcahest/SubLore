@@ -21,6 +21,8 @@ type StatusBarProps = {
   videoErrorCode: VideoErrorCode | null;
   projectDeleted: ProjectDeletedView | null;
   projectError: ProjectError | null;
+  /** What a command from the menu or the toolbar could not do. See T3. */
+  chromeError: string | null;
 };
 
 /**
@@ -38,6 +40,7 @@ export default function StatusBar({
   videoErrorCode,
   projectDeleted,
   projectError,
+  chromeError,
 }: StatusBarProps) {
   const detail = subtitleError === null ? null : subtitleErrorDetail(subtitleError);
 
@@ -63,6 +66,11 @@ export default function StatusBar({
         {videoErrorCode !== null && (
           <p className="statusbar__video-error" role="alert">
             {videoErrorMessage(videoErrorCode)}
+          </p>
+        )}
+        {chromeError !== null && (
+          <p className="statusbar__chrome-error" role="alert">
+            {chromeError}
           </p>
         )}
         {subtitleError !== null && (
