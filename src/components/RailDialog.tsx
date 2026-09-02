@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 
+import { useLayer } from "../hooks/useLayers";
 import { en } from "../i18n/en";
 
 type RailDialogProps = {
@@ -33,6 +34,9 @@ export default function RailDialog({
   const [value, setValue] = useState(initial);
   const field = useRef<HTMLInputElement>(null);
   const confirm = useRef<HTMLButtonElement>(null);
+
+  // Mounted only while the question is up (decision 1, T8).
+  useLayer(true);
 
   useEffect(() => {
     // The field when there is one, so the name can be typed straight away; otherwise the button

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { useLayer } from "../hooks/useLayers";
 import { type Command, type Menu } from "../types/chrome";
 
 type MenuBarProps = {
@@ -41,6 +42,10 @@ export default function MenuBar({ menus }: MenuBarProps) {
   const restoreTo = useRef<HTMLElement | null>(null);
   /** Read by the window listeners, which are registered once and outlive every render. */
   const latest = useRef({ menus, open, cursor });
+
+  // The open dropdown is a layer and the bar itself is not, so the picture gets out of the way only
+  // while one is down. Walking from one title to the next never lets it back (decision 1, T8).
+  useLayer(open !== null);
 
   function openMenu(index: number, item: number) {
     if (restoreTo.current === null && document.activeElement instanceof HTMLElement) {

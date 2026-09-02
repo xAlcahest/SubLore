@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { useLayer } from "../hooks/useLayers";
+
 export type RailMenuItem = {
   /** Stable across renders, and the class the check names: `railmenu__item--<key>`. */
   key: string;
@@ -24,6 +26,9 @@ type RailMenuProps = {
 export default function RailMenu({ x, y, label, items, onClose }: RailMenuProps) {
   const list = useRef<HTMLUListElement>(null);
   const [at, setAt] = useState({ x, y });
+
+  // Mounted only while it is up, so the video surface hides for exactly that long (decision 1, T8).
+  useLayer(true);
 
   // Opened from a pointer or from the keyboard, and either way the first item is where the
   // keyboard starts.

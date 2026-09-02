@@ -1,4 +1,4 @@
-//! The video player module: mpv lifecycle, the native surface, and the five IPC commands.
+//! The video player module: mpv lifecycle, the native surface, and the six IPC commands.
 //! The IPC names and payloads here are a public interface (CONTRIBUTING.md section 6).
 
 pub mod error;
@@ -39,6 +39,8 @@ struct SurfaceState {
     video_open: bool,
     /// The last rectangle the frontend reported had no area: there is nowhere to draw.
     region_empty: bool,
+    /// An HTML layer is open over the page: the picture gets out of the way (decision 1, T8).
+    layer_open: bool,
     /// What the window was last told, so a resize does not re-issue show and raise every frame.
     shown: bool,
     /// Bumped when an open starts, so an older open's error path cannot clear a newer one.
@@ -49,13 +51,15 @@ impl SurfaceState {
     const NEW: Self = Self {
         video_open: false,
         region_empty: true,
+        layer_open: false,
         shown: false,
         generation: 0,
     };
 
-    /// On screen only when there is something to draw and somewhere to draw it.
+    /// On screen only when there is something to draw, somewhere to draw it, and nothing painted
+    /// over it.
     fn wants_shown(self) -> bool {
-        self.video_open && !self.region_empty
+        self.video_open && !self.region_empty && !self.layer_open
     }
 }
 
@@ -243,6 +247,14 @@ pub async fn video_set_region(app: AppHandle, region: VideoRegion) -> Result<(),
     on_main_thread(&app, move || apply_region(region)).await
 }
 
+/// Whether any HTML layer is open over the page. The shell owns the set of open layers and reports
+/// only whether it is empty; this is a third input to the derived state and never a show or a hide
+/// (decision 1, T8).
+#[tauri::command]
+pub async fn video_set_layers(app: AppHandle, open: bool) -> Result<(), VideoError> {
+    on_main_thread(&app, move || settle(|state| state.layer_open = open)).await
+}
+
 /// Run `action` on the main thread and wait for its result. `run_on_main_thread` only queues the
 /// closure, so the channel is what makes the caller see the outcome.
 async fn on_main_thread<F>(app: &AppHandle, action: F) -> Result<(), VideoError>
@@ -288,4 +300,46 @@ fn apply_region(region: VideoRegion) -> Result<(), VideoError> {
         with_surface(|surface| surface.set_region(region))?;
     }
     settle(|state| state.region_empty = region.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SurfaceState;
+
+    /// The three reasons the picture can be absent, each on its own. They are separate reasons and
+    /// must not be folded into each other: a layer closing over an empty stage shows nothing
+    /// (decision 1, T8).
+    #[test]
+    fn the_surface_wants_showing_only_with_a_video_a_rectangle_and_no_layer() {
+        let playing = SurfaceState {
+            video_open: true,
+            region_empty: false,
+            layer_open: false,
+            shown: true,
+            generation: 0,
+        };
+        assert!(playing.wants_shown());
+        assert!(!SurfaceState {
+            layer_open: true,
+            ..playing
+        }
+        .wants_shown());
+        assert!(!SurfaceState {
+            region_empty: true,
+            ..playing
+        }
+        .wants_shown());
+        assert!(!SurfaceState {
+            video_open: false,
+            ..playing
+        }
+        .wants_shown());
+        assert!(!SurfaceState {
+            video_open: false,
+            layer_open: true,
+            ..playing
+        }
+        .wants_shown());
+        assert!(!SurfaceState::NEW.wants_shown());
+    }
 }
