@@ -4,7 +4,7 @@ import { choosePath, type ChooseKind } from "./chooser";
 import AboutDialog from "./components/AboutDialog";
 import CueList from "./components/CueList";
 import MenuBar from "./components/MenuBar";
-import ProjectPanel from "./components/ProjectPanel";
+import ProjectRail from "./components/ProjectRail";
 import StatusBar from "./components/StatusBar";
 import Toolbar from "./components/Toolbar";
 import TranscribeBar from "./components/TranscribeBar";
@@ -18,6 +18,7 @@ import { useVideoPlayer } from "./hooks/useVideoPlayer";
 import { en } from "./i18n/en";
 import { requestQuit } from "./quit";
 import { type Command } from "./types/chrome";
+import { type EpisodeFileView } from "./types/project";
 import "./App.css";
 
 /** The command an accelerator asks for, or null when the chrome does not own that key. */
@@ -102,6 +103,18 @@ export default function App() {
     await pick("subtitle-save", subtitle.summary?.path ?? undefined, (path) => {
       void subtitle.saveAs(path);
     });
+  }
+
+  /**
+   * Activating a file in the rail opens it, through the same commands the chooser route uses: a
+   * video in the player, a subtitle as the document. See BACKLOG.md M4.5.
+   */
+  function openAttachedFile(file: EpisodeFileView) {
+    if (file.role === "media") {
+      void open(file.path);
+      return;
+    }
+    void subtitle.open(file.path);
   }
 
   async function adoptTranscription(runId: number) {
@@ -254,18 +267,7 @@ export default function App() {
       </header>
       <div className="shell__body">
         <aside className="shell__rail">
-          <ProjectPanel
-            busy={project.busy}
-            project={project.project}
-            deleted={project.deleted}
-            error={project.error}
-            onCreate={(folder) => void project.create(folder)}
-            onOpen={(folder) => void project.open(folder)}
-            onDelete={() => void project.remove()}
-            onAddEpisode={(title) => void project.addEpisode(title)}
-            onAttachFile={(episodeId, role, path) => void project.attachFile(episodeId, role, path)}
-            onChoosePath={project.choosePath}
-          />
+          <ProjectRail project={project} onOpenFile={openAttachedFile} />
         </aside>
         <div className="shell__top">
           <section className="shell__video">
@@ -306,6 +308,8 @@ export default function App() {
         savedInPlace={subtitle.savedInPlace}
         subtitleError={subtitle.error}
         videoErrorCode={errorCode}
+        projectDeleted={project.deleted}
+        projectError={project.error}
         chromeError={quitError}
       />
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}

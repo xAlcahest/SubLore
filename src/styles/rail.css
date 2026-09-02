@@ -1,110 +1,221 @@
-/* The project rail. T7 gives it the shape the mockup draws; this is what M4.4 left, re-parented. */
+/*
+ * The project rail: the tree the mockup draws, and the context menu that carries every command
+ * that changes anything (decision 24, A3). Nothing here is resizable (A5).
+ *
+ * The rail holds no fields and no button row any more, which is what lets it sit at the mockup's
+ * width instead of the 18rem T2 left it at.
+ */
 
-.project {
+.rail {
   display: flex;
-  flex: none;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.project__new-episode {
   flex: 1;
-  min-width: 10rem;
-  padding: 0.35rem 0.5rem;
-  font: inherit;
-  font-size: 0.875rem;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0.45rem 0.4rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
 }
 
-/* Bounded and clipped: these hold whatever path the chooser answered, and a long one growing the
-   row moves every button beside it. */
-.project__path,
-.project__file-path {
-  flex: 0 1 16rem;
-  min-width: 8rem;
-  max-width: 16rem;
-  overflow: hidden;
-  padding: 0.35rem 0.5rem;
+.rail__cap {
+  margin: 0 0 0.3rem 0.2rem;
+  color: var(--ink-faint);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Every node is a button: focusable, activated by Enter and Space, and no roving tabindex to get
+   wrong. The tree is the nesting, not an ARIA widget. */
+.rail__project,
+.rail__episode,
+.rail__file,
+.rail__empty {
+  display: block;
+  width: 100%;
+  padding: 0.05rem 0.35rem;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-muted);
   font: inherit;
-  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.project button {
-  padding: 0.35rem 0.9rem;
-  font: inherit;
-  font-size: 0.875rem;
+.rail__project:hover,
+.rail__episode:hover,
+.rail__file:hover,
+.rail__empty:hover {
+  background: var(--bg-sunken);
 }
 
-.project__role {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.875rem;
-  white-space: nowrap;
+.rail__project {
+  color: var(--ink);
 }
 
-.project__status,
-.project__error {
-  display: flex;
-  flex: none;
-  flex-wrap: wrap;
-  gap: 0 0.5rem;
+.rail__empty {
+  color: var(--ink-dim);
+}
+
+/* The one part of the rail that grows: it takes whatever the cap and the folder line leave. */
+.rail__tree {
+  flex: 1;
+  min-height: 0;
   margin: 0;
-  padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid var(--line);
-  font-size: 0.875rem;
-  overflow-wrap: anywhere;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
 }
 
-.project__error {
+.rail__episodes,
+.rail__files {
+  margin: 0;
+  padding-left: 0.6rem;
+  list-style: none;
+}
+
+.rail__episode--selected {
+  background: var(--accent-bg);
+  color: var(--ink);
+}
+
+.rail__file {
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+}
+
+/* Marked, never dropped and never searched for: the record stands and Locate re-points it (D3). */
+.rail__file--missing .rail__file-name {
+  text-decoration: line-through;
+}
+
+/* Under the name rather than beside it: at the rail's width, beside it would push the name out. */
+.rail__missing {
+  display: block;
   color: var(--ink-error);
 }
 
-/* The one part of the rail that grows: it takes whatever the controls above it leave. */
-.project__episodes {
-  flex: 1;
-  min-height: 4rem;
+.rail__none {
   margin: 0;
-  padding: 0.25rem 0.75rem;
-  overflow-y: auto;
-  list-style: none;
-  font-size: 0.875rem;
+  padding-left: 0.95rem;
+  color: var(--ink-faint);
+  font-size: 0.75rem;
 }
 
-.project__episode--selected {
+/*
+ * The context menu and the one question the rail asks. Both are layers in the sense
+ * shell-layout.md gives the word: painted over the panels, transient, dismissed rather than
+ * resized away. T8 is what makes a layer hide the video surface; neither takes part in the layout.
+ */
+.railmenu__backdrop,
+.raildialog__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.raildialog__backdrop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 45%);
+}
+
+.railmenu {
+  position: fixed;
+  z-index: 11;
+  min-width: 11rem;
+  margin: 0;
+  padding: 0.2rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  list-style: none;
+  font-size: 0.8125rem;
+}
+
+.railmenu__item {
+  display: block;
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--ink-muted);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.railmenu__item:hover,
+.railmenu__item:focus {
+  background: var(--accent-bg);
+  color: var(--ink);
+  outline: none;
+}
+
+.raildialog {
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(28rem, calc(100vw - 4rem));
+  padding: 0.9rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--ink);
+  font-size: 0.8125rem;
+}
+
+.raildialog__title {
+  margin: 0;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
-.project__episode-title {
-  padding: 0.1rem 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+.raildialog__message {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-.project__files {
-  margin: 0;
-  padding: 0 0 0.25rem 1rem;
-  list-style: none;
-  font-weight: 400;
-}
-
-.project__file,
-.project__none {
-  margin: 0;
+.raildialog__label {
   color: var(--ink-dim);
-  font-weight: 400;
-  overflow-wrap: anywhere;
 }
 
-.project__none {
-  padding-left: 1rem;
+.raildialog__field {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  color: var(--ink);
+  font: inherit;
+}
+
+.raildialog__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.raildialog__buttons button {
+  padding: 0.3rem 0.9rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.raildialog__confirm:disabled {
+  color: var(--ink-faint);
+  cursor: default;
 }

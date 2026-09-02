@@ -1,3 +1,4 @@
+import { projectDeletedLine, projectErrorMessage } from "../hooks/useProject";
 import {
   subtitleErrorDetail,
   subtitleErrorMessage,
@@ -6,6 +7,7 @@ import {
 } from "../hooks/useSubtitleFile";
 import { videoErrorMessage } from "../hooks/useVideoPlayer";
 import { en } from "../i18n/en";
+import { type ProjectDeletedView, type ProjectError } from "../types/project";
 import { type SubtitleError, type SubtitleSaved, type SubtitleSummary } from "../types/subtitle";
 import { type VideoErrorCode } from "../types/video";
 
@@ -17,6 +19,8 @@ type StatusBarProps = {
   savedInPlace: boolean;
   subtitleError: SubtitleError | null;
   videoErrorCode: VideoErrorCode | null;
+  projectDeleted: ProjectDeletedView | null;
+  projectError: ProjectError | null;
   /** What a command from the menu or the toolbar could not do. See T3. */
   chromeError: string | null;
 };
@@ -34,6 +38,8 @@ export default function StatusBar({
   savedInPlace,
   subtitleError,
   videoErrorCode,
+  projectDeleted,
+  projectError,
   chromeError,
 }: StatusBarProps) {
   const detail = subtitleError === null ? null : subtitleErrorDetail(subtitleError);
@@ -46,8 +52,16 @@ export default function StatusBar({
       </p>
       <div className="statusbar__messages">
         {truncated && <span className="statusbar__truncated">{en.subtitle.truncated}</span>}
+        {projectDeleted !== null && (
+          <span className="statusbar__project-message">{projectDeletedLine(projectDeleted)}</span>
+        )}
         {saved !== null && (
           <span className="statusbar__message">{subtitleSavedLine(saved, savedInPlace)}</span>
+        )}
+        {projectError !== null && (
+          <p className="statusbar__project-error" role="alert">
+            {projectErrorMessage(projectError)}
+          </p>
         )}
         {videoErrorCode !== null && (
           <p className="statusbar__video-error" role="alert">

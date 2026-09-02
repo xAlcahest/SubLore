@@ -2,9 +2,11 @@
 //! One project at a time, held behind a mutex because a SQLite connection is `Send` and not `Sync`.
 //! The IPC names and payloads here are a public interface (CONTRIBUTING.md §6). See BACKLOG.md M4.4.
 //!
-//! Nothing in this module writes to a user's media or subtitle file. Attaching records a path.
+//! Nothing in this module writes to a user's media or subtitle file. Attaching, locating,
+//! renaming, detaching and deleting all move records; the files stay where the user put them.
 
 pub mod error;
+pub mod session;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -14,7 +16,7 @@ use serde::Serialize;
 use sublore_project::delete::delete_project;
 use sublore_project::model::FileRole;
 use sublore_project::records::{self, Project};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::log;
 use error::{ProjectError, ProjectErrorCode};
@@ -76,6 +78,9 @@ pub struct EpisodeFileView {
     pub path: String,
     /// Absent when the size could not be read when the file was attached.
     pub byte_length: Option<u64>,
+    /// There is no file at `path` any more. Read when the view is built, never acted on: the record
+    /// stays and the rail offers Locate (decision 24, D3).
+    pub missing: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -90,20 +95,68 @@ pub struct ProjectDeletedView {
 
 #[tauri::command]
 pub async fn project_create(
+    app: AppHandle,
     state: State<'_, ProjectState>,
     folder: String,
 ) -> Result<ProjectView, ProjectError> {
     let slot = state.handle();
-    blocking("create", move || create(&slot, &folder)).await
+    blocking("create", move || {
+        let view = create(&slot, &folder)?;
+        session::opened(&app, Path::new(&view.folder));
+        Ok(view)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn project_open(
+    app: AppHandle,
     state: State<'_, ProjectState>,
     folder: String,
 ) -> Result<ProjectView, ProjectError> {
     let slot = state.handle();
-    blocking("open", move || open(&slot, &folder)).await
+    blocking("open", move || {
+        let view = open(&slot, &folder)?;
+        session::opened(&app, Path::new(&view.folder));
+        Ok(view)
+    })
+    .await
+}
+
+/// Close the open project without touching anything on disk. The next launch opens nothing
+/// (decision 24, D2 and D5).
+#[tauri::command]
+pub async fn project_close(
+    app: AppHandle,
+    state: State<'_, ProjectState>,
+) -> Result<(), ProjectError> {
+    let slot = state.handle();
+    blocking("close", move || {
+        close(&slot)?;
+        session::closed(&app);
+        Ok(())
+    })
+    .await
+}
+
+/// What was open when Sublore last ran, and the ten projects opened before it. The frontend reopens
+/// the project; File draws the list (decision 24, D5).
+#[tauri::command]
+pub async fn project_session(app: AppHandle) -> Result<session::Session, ProjectError> {
+    blocking("session", move || Ok(session::read(&app))).await
+}
+
+/// Remember which episode is selected, so the next launch comes back to it (decision 24, D5).
+#[tauri::command]
+pub async fn project_select_episode(
+    app: AppHandle,
+    episode_id: Option<i64>,
+) -> Result<(), ProjectError> {
+    blocking("select episode", move || {
+        session::selected(&app, episode_id);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -133,10 +186,76 @@ pub async fn project_attach_file(
 /// directory for Sublore to delete. See BACKLOG.md M4.3.
 #[tauri::command]
 pub async fn project_delete(
+    app: AppHandle,
     state: State<'_, ProjectState>,
 ) -> Result<ProjectDeletedView, ProjectError> {
     let slot = state.handle();
-    blocking("delete", move || delete(&slot)).await
+    blocking("delete", move || {
+        let deleted = delete(&slot)?;
+        session::forgotten(&app, Path::new(&deleted.folder));
+        Ok(deleted)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn project_rename_episode(
+    state: State<'_, ProjectState>,
+    episode_id: i64,
+    title: String,
+) -> Result<ProjectView, ProjectError> {
+    let slot = state.handle();
+    blocking("rename episode", move || {
+        rename_episode(&slot, episode_id, &title)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn project_delete_episode(
+    state: State<'_, ProjectState>,
+    episode_id: i64,
+) -> Result<ProjectView, ProjectError> {
+    let slot = state.handle();
+    blocking("delete episode", move || {
+        with_open(&slot, |project| {
+            records::delete_episode(project, episode_id).map_err(ProjectError::from_crate)
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn project_detach_file(
+    state: State<'_, ProjectState>,
+    file_id: i64,
+) -> Result<ProjectView, ProjectError> {
+    let slot = state.handle();
+    blocking("detach file", move || {
+        with_open(&slot, |project| {
+            records::detach_file(project, file_id).map_err(ProjectError::from_crate)
+        })
+    })
+    .await
+}
+
+/// Point an attachment at the file the user found. Nothing searches for it: the path comes from the
+/// chooser and from nowhere else (decision 24, D3).
+#[tauri::command]
+pub async fn project_locate_file(
+    state: State<'_, ProjectState>,
+    file_id: i64,
+    path: String,
+) -> Result<ProjectView, ProjectError> {
+    let slot = state.handle();
+    blocking("locate file", move || {
+        with_open(&slot, |project| {
+            records::relocate_file(project, file_id, Path::new(&path))
+                .map(|_| ())
+                .map_err(ProjectError::from_crate)
+        })
+    })
+    .await
 }
 
 /// Every command's body runs here: SQLite calls and native dialogs both block, so neither ever
@@ -179,6 +298,24 @@ pub fn add_episode(slot: &SharedProject, title: &str) -> Result<ProjectView, Pro
         records::add_episode(project, title, SystemTime::now())
             .map(|_| ())
             .map_err(ProjectError::from_crate)
+    })
+}
+
+/// Give an episode the title the user typed. The rail disables the button on a blank one, so an
+/// empty title reaching here is a bug in the frontend rather than something the user did.
+pub fn rename_episode(
+    slot: &SharedProject,
+    episode_id: i64,
+    title: &str,
+) -> Result<ProjectView, ProjectError> {
+    if title.trim().is_empty() {
+        return Err(ProjectError::new(
+            ProjectErrorCode::CommandFailed,
+            "an episode title cannot be empty",
+        ));
+    }
+    with_open(slot, |project| {
+        records::set_episode_title(project, episode_id, title).map_err(ProjectError::from_crate)
     })
 }
 
@@ -246,6 +383,7 @@ fn view(project: &Project) -> Result<ProjectView, ProjectError> {
                 .map(|file| EpisodeFileView {
                     id: file.id,
                     role: file.role.as_str().to_owned(),
+                    missing: !file.path.is_file(),
                     path: text(&file.path),
                     byte_length: file.byte_length,
                 })

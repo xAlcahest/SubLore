@@ -32,6 +32,8 @@ pub enum ProjectErrorCode {
     /// Already attached to this episode under this path.
     DuplicateFile,
     EpisodeNotFound,
+    /// The attachment being re-pointed is not in the project any more.
+    FileNotAttached,
     /// The command needs a project and none is open. The app layer's own.
     NoProjectOpen,
     WriteFailed,
@@ -81,6 +83,7 @@ impl ProjectError {
             ProjectErrorKind::NotAFile => ProjectErrorCode::NotAFile,
             ProjectErrorKind::DuplicateFile => ProjectErrorCode::DuplicateFile,
             ProjectErrorKind::EpisodeNotFound => ProjectErrorCode::EpisodeNotFound,
+            ProjectErrorKind::FileNotAttached => ProjectErrorCode::FileNotAttached,
             ProjectErrorKind::WriteFailed => ProjectErrorCode::WriteFailed,
             ProjectErrorKind::DeleteFailed => ProjectErrorCode::DeleteFailed,
             ProjectErrorKind::PermissionDenied => ProjectErrorCode::PermissionDenied,

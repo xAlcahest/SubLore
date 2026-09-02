@@ -1,7 +1,8 @@
 //! The project a user has open, its episodes, and the files attached to them. See BACKLOG.md M4.2.
 //!
-//! Nothing here writes to a user's file. `attach_file` reads one metadata entry and stores a path;
-//! `detach_file` and `delete_episode` run SQL and are incapable of anything else. CONTRIBUTING.md §3.1.
+//! Nothing here writes to a user's file. `attach_file` and `relocate_file` read one metadata entry
+//! and store a path; `set_episode_title`, `detach_file` and `delete_episode` run SQL and are incapable
+//! of anything else. CONTRIBUTING.md §3.1.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -151,6 +152,72 @@ pub fn files(project: &Project, episode_id: i64) -> Result<Vec<EpisodeFile>, Pro
         .map_err(|error| query_failed(&error, database))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|error| query_failed(&error, database))
+}
+
+/// Give an episode a new title. The title is stored text, and no file on disk is touched (decision 24, D2).
+pub fn set_episode_title(
+    project: &mut Project,
+    episode_id: i64,
+    title: &str,
+) -> Result<(), ProjectError> {
+    let database = project.database.database_path().to_path_buf();
+    let rows = project
+        .database
+        .conn()
+        .execute(
+            "UPDATE episodes SET title = ?2 WHERE id = ?1",
+            params![episode_id, title],
+        )
+        .map_err(|error| query_failed(&error, &database))?;
+    if rows == 0 {
+        return Err(ProjectError::new(
+            ProjectErrorKind::EpisodeNotFound,
+            &database,
+            format!("no episode {episode_id}"),
+        ));
+    }
+    Ok(())
+}
+
+/// Re-point an attachment at the file the user found. Reads the new file's metadata and nothing
+/// else: the record moves, neither file does (decision 24, D3). See CONTRIBUTING.md §3.1.
+pub fn relocate_file(
+    project: &mut Project,
+    file_id: i64,
+    path: &Path,
+) -> Result<EpisodeFile, ProjectError> {
+    let text = validate_path(path)?;
+    let metadata = read_metadata(path)?;
+    let database = project.database.database_path().to_path_buf();
+
+    let updated = project
+        .database
+        .conn()
+        .query_row(
+            "UPDATE episode_files SET path = ?2, byte_length = ?3, modified_at = ?4
+             WHERE id = ?1
+             RETURNING id, episode_id, role, path, byte_length, modified_at, added_at",
+            params![
+                file_id,
+                text,
+                metadata.len() as i64,
+                metadata.modified().ok().map(unix_seconds),
+            ],
+            to_file,
+        )
+        .optional()
+        // The only constraint an update here can trip is the episode's UNIQUE path: that episode
+        // already holds a record for the file the user has just pointed at.
+        .map_err(|error| {
+            ProjectError::from_sqlite(&error, &database, ProjectErrorKind::DuplicateFile)
+        })?;
+    updated.ok_or_else(|| {
+        ProjectError::new(
+            ProjectErrorKind::FileNotAttached,
+            &database,
+            format!("no attachment {file_id}"),
+        )
+    })
 }
 
 /// Remove one attachment record. The file on disk is not touched. Detaching a record that is

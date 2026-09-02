@@ -9,6 +9,8 @@ export type EpisodeFileView = {
   path: string;
   /** Null when the size could not be read when the file was attached. */
   byteLength: number | null;
+  /** There is no file at `path` any more. Read when the view is built (decision 24, D3). */
+  missing: boolean;
 };
 
 export type EpisodeView = {
@@ -24,6 +26,16 @@ export type ProjectView = {
   title: string;
   schemaVersion: number;
   episodes: EpisodeView[];
+};
+
+/**
+ * What was open when Sublore last ran (decision 24, D5). `recent` is what File > Recent projects
+ * draws; the rail reads only the project to reopen and the episode to re-select.
+ */
+export type ProjectSession = {
+  folder: string | null;
+  episodeId: number | null;
+  recent: string[];
 };
 
 export type ProjectDeletedView = {
@@ -50,6 +62,7 @@ export type ProjectErrorCode =
   | "notAFile"
   | "duplicateFile"
   | "episodeNotFound"
+  | "fileNotAttached"
   | "noProjectOpen"
   | "writeFailed"
   | "deleteFailed"
@@ -82,6 +95,7 @@ const ERROR_CODES: ReadonlySet<string> = new Set<ProjectErrorCode>([
   "notAFile",
   "duplicateFile",
   "episodeNotFound",
+  "fileNotAttached",
   "noProjectOpen",
   "writeFailed",
   "deleteFailed",

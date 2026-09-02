@@ -88,7 +88,7 @@ capture's exit status instead.
 | `specs/video-empty.spec.js`             | `leaves the stage empty and the surface unmapped before anything is opened`          | At first paint the placeholder is there and the surface is `IsUnMapped`: no opaque slab over an empty stage (BACKLOG N2, gate 1).                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `specs/video-empty.spec.js`             | `keeps the surface unmapped when the layout changes with no video`                   | Collapsing and restoring the stage with no video sends a real rectangle again and the surface stays unmapped: visibility follows the video, not the rectangle.                                                                                                                                                                                                                                                                                                                                                                                  |
 | `specs/video-empty.spec.js`             | `keeps the surface unmapped after an open that failed`                               | A file mpv refuses leaves an error on screen, the surface unmapped, and a later layout change does not show it.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `specs/chooser.spec.js`                 | `leaves no field in the interface that a path can be typed into`                     | T1's promise: no text input anywhere takes a path, the project panel's episode-name box excepted (and the cue editor, which exists only while a cue is open).                                                                                                                                                                                                                                                                                                                                                                                   |
+| `specs/chooser.spec.js`                 | `leaves no field in the interface that a path can be typed into`                     | T1's promise: no text input anywhere takes a path, the rail's own question excepted (and the cue editor, which exists only while a cue is open).                                                                                                                                                                                                                                                                                                                                                                                                |
 | `specs/chooser.spec.js`                 | five `... when the chooser is dismissed` checks                                      | Video, subtitle, save-a-copy, project folder and episode file: cancelling each chooser leaves the app exactly as it was, and writes nothing.                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 Everything above runs in the `e2e` CI job except four rows, named rather than counted:
@@ -217,12 +217,22 @@ belonged to — `.bar__input`, `.subbar__input` and `.subbar__dest` — and noth
 more.
 
 `.bar__button`, `.stage__surface`, `.stage__empty`, `.controls__button`,
-`.controls__slider`, `.subbar__open`, `.subbar__save-copy`,
-`.project__path`, `.project__choose-folder`, `.project__create`, `.project__open`, `.project__delete`,
-`.project__status`, `.project__error`, `.project__episodes`, `.project__episode`,
-`.project__episode--selected`, `.project__episode-title`, `.project__files`, `.project__file`,
-`.project__new-episode`, `.project__add-episode`, `.project__file-path`, `.project__choose-file`,
-`.project__role-media`, `.project__role-source`, `.project__role-target`, `.project__attach`
+`.controls__slider`, `.subbar__open`, `.subbar__save-copy`
+
+T7 replaced the project panel's buttons and fields with the rail tree and its context menu, so every
+`.project__*` name is gone. What stands in their place: `.rail`, `.rail__cap`, `.rail__empty`,
+`.rail__project`, `.rail__episode`, `.rail__episode--selected`, `.rail__file`,
+`.rail__file--missing`, `.rail__file-name`, `.rail__missing`, `.rail__none`,
+`.railmenu`, `.railmenu__item--<command>`, `.raildialog`, `.raildialog__message`,
+`.raildialog__field`, `.raildialog__confirm`, `.raildialog__cancel`.
+
+The `<command>` half of a menu item's class is the command: `create-project`, `open-project`,
+`close-project`, `delete-project`, `add-episode`, `attach-media`, `attach-source`, `attach-target`,
+`rename-episode`, `delete-episode`, `open-file`, `locate-file`, `detach-file`. A `.rail__file` row
+carries the whole path as its `title`, because the row itself is only as wide as the rail.
+
+The project's own messages moved into the status bar with the rest (decision 24, A1):
+`.statusbar__project-message` and `.statusbar__project-error`.
 
 Added by M2.3: `.subbar__save`, `.subbar__undo`, `.subbar__redo`, `.subbar__discard`, `.cuelist`, `.cuelist__sizer`, `.cuelist__row`, `.cuelist__row--selected`,
 `.cuelist__row--comment`, `.cuelist__pos`, `.cuelist__number`, `.cuelist__start`, `.cuelist__end`,
