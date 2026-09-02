@@ -26,15 +26,17 @@ export const windowHeight = 700;
  * Where the first cue's text sits inside the window the close-gate scripts launch.
  *
  * Those scripts click a cue without a WebDriver session, so the point has to be a number rather
- * than a lookup, and T1 moved it: the path boxes left both bars and every row came up with them.
+ * than a lookup, and every layout change moves it: T1 took the path boxes out of both bars, and T2
+ * put the grid under a fixed-height top block instead of under a stack of them.
  *
- * It belongs to those scripts and to no one else. They start the app on an empty data home, so the
- * transcribe bar carries a Download button for the model that is not there and stands taller than
- * it does under WebDriver, which runs with a model on disk: measured, 23 px of difference in where
- * the rows land. Re-measure it the way it was measured — a screenshot of the running check — and
- * not from a spec, whose window is a different one.
+ * It belongs to those scripts and to the N1b probe beside them, which launches the app the same
+ * way and had been carrying a copy of its own two layouts out of date. They start the app on an
+ * empty data home, so the
+ * transcribe bar carries a Download button for the model that is not there, and the window is not
+ * the one a spec drives. Re-measure it the way it was measured — a screenshot of a launch made the
+ * way those scripts make it — and never from a spec.
  */
-export const firstCueText = { x: 840, y: 523 };
+export const firstCueText = { x: 840, y: 442 };
 
 /**
  * Missing prerequisites are failures with an actionable message, never skips (design section 10).

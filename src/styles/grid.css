@@ -1,0 +1,104 @@
+/* The cue grid. It takes everything the top block leaves, which is why nothing else here grows. */
+
+.cuelist__panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.cuelist__head,
+.cuelist__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.cuelist__head {
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-panel);
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+
+.cuelist {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.cuelist:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.cuelist__sizer {
+  position: relative;
+}
+
+.cuelist__row {
+  position: absolute;
+  right: 0;
+  left: 0;
+}
+
+.cuelist__row--selected {
+  background: var(--accent-bg);
+}
+
+.cuelist__row--comment .cuelist__text {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.cuelist__pos,
+.cuelist__headcell--pos {
+  flex: 0 0 3.5rem;
+  color: var(--ink-faint);
+  text-align: right;
+}
+
+.cuelist__number,
+.cuelist__headcell--num {
+  flex: 0 0 3.5rem;
+  text-align: right;
+}
+
+.cuelist__start,
+.cuelist__end,
+.cuelist__headcell--time {
+  flex: 0 0 7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.cuelist__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cuelist__editor {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 0.25rem;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-sunken);
+  color: inherit;
+  font: inherit;
+  resize: none;
+}
+
+.cuelist__empty {
+  margin: 0;
+  padding: 0.75rem;
+  color: var(--ink-dim);
+  font-size: 0.875rem;
+}

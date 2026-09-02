@@ -66,8 +66,23 @@ export default function VideoStage({ hasVideo, onRegionChange }: VideoStageProps
       }
     }
 
+    // Position as much as size: a box above or before an ancestor moves the stage without resizing
+    // it, and an observer on the element alone never hears about that. See M0.2.
     const observer = new ResizeObserver(schedule);
-    observer.observe(element);
+    for (
+      let node: Element | null = element;
+      node !== null && node !== document.body;
+      node = node.parentElement
+    ) {
+      observer.observe(node);
+      for (
+        let ahead = node.previousElementSibling;
+        ahead !== null;
+        ahead = ahead.previousElementSibling
+      ) {
+        observer.observe(ahead);
+      }
+    }
     window.addEventListener("resize", schedule);
     schedule();
 
