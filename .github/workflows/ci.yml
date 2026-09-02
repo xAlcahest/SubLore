@@ -301,7 +301,9 @@ jobs:
       matrix:
         # Windows builds the installers and stops there. Nothing has ever run one, so an msi from
         # this job is a file that exists, not an install that works; MW.3 is where that is answered.
-        os: [ubuntu-latest, windows-latest]
+        # A file nobody runs is not worth a release build on every pull request, so on a pull
+        # request only Linux packages, which is the half the smoke below actually starts.
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest", "windows-latest"]') }}
     defaults:
       run:
         shell: bash
@@ -351,8 +353,13 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # APPIMAGE_EXTRACT_AND_RUN: linuxdeploy is itself an AppImage and mounts itself with FUSE,
+      # which a runner does not have. Without this the deb builds and the AppImage step dies on
+      # "failed to run linuxdeploy" (measured on Linux, 2026-09-02).
       - name: Build the Linux installers
         if: runner.os == 'Linux'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
         run: pnpm tauri build --bundles deb,appimage
 
       - name: Build the Windows installers
