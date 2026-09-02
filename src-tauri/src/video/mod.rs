@@ -104,7 +104,9 @@ pub struct VideoState {
 }
 
 impl VideoState {
-    fn player(&self) -> Arc<Player> {
+    /// The mpv core, for the callers that run a blocking read off it. `crate::audio` asks for the
+    /// track list through this; nothing else outside this module holds it.
+    pub fn player(&self) -> Arc<Player> {
         Arc::clone(&self.player)
     }
 
@@ -159,6 +161,10 @@ pub async fn video_open(
     // Debug builds only: the worker-thread crash path the M0.4 acceptance criteria exercise.
     trip(ForcePoint::Open);
 
+    // The waveform's job lives as long as the media does (decision 12), and this open replaces
+    // it: the peaks of the file being left are void from here, whether or not the new one loads.
+    crate::audio::cancel_for_media_change(&app);
+
     let player = state.player();
     // mpv builds its own window inside the surface during the load and leaves it unmapped if the
     // surface is hidden, so the surface has to be visible first. See BACKLOG.md M0.2.
@@ -180,9 +186,16 @@ pub async fn video_open(
     })?;
 
     // `open` blocks until mpv reports a verdict, so it never runs on the async runtime's poll.
-    let opened = tauri::async_runtime::spawn_blocking(move || player.open(&path))
-        .await
-        .map_err(|error| VideoError::player_unavailable(format!("open task failed: {error}")))?;
+    let peaking = app.clone();
+    let opened = tauri::async_runtime::spawn_blocking(move || {
+        let opened = player.open(&path)?;
+        // On the same thread that loaded the file, so no second open can slip between the load
+        // and this read of the track list: `open` refuses a concurrent one. See M2.4, W4.
+        crate::audio::start_for_playing_track(&peaking, &player);
+        Ok(opened)
+    })
+    .await
+    .map_err(|error| VideoError::player_unavailable(format!("open task failed: {error}")))?;
 
     if opened.is_err() {
         // A failed compensation leaves the surface shown over a video that never loaded, so it is

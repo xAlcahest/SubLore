@@ -22,6 +22,12 @@ name = "crash_main_thread"
 path = "tests/crash_main_thread.rs"
 harness = false
 
+[features]
+# Tests that need a real ffmpeg and the generated waveform fixtures, mirroring the feature of the
+# same name in sublore-audio. Off by default, so on a machine without them there is no test to
+# skip: there is no test at all. Run `sh fixtures/video/make-waveform-fixtures.sh` first.
+real-media = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -33,6 +39,7 @@ serde = { version = "1", features = ["derive"] }
 # escapes what a hand-rolled line format would corrupt: a Linux path may contain a newline.
 serde_json = "1"
 sublore-asr = { path = "../crates/sublore-asr" }
+sublore-audio = { path = "../crates/sublore-audio" }
 sublore-edit = { path = "../crates/sublore-edit" }
 sublore-formats = { path = "../crates/sublore-formats" }
 sublore-io = { path = "../crates/sublore-io" }

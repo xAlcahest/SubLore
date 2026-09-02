@@ -2,6 +2,7 @@
 //! loaded through `sublore-module-api`. See LICENSE at the root of the repository.
 
 pub mod asr;
+pub mod audio;
 pub mod chooser;
 pub mod crash;
 pub mod dialog;
@@ -124,6 +125,9 @@ pub fn run() -> tauri::Result<()> {
             asr::asr_model_download_cancel,
             asr::asr_transcribe_start,
             asr::asr_transcribe_cancel,
+            audio::audio_tracks,
+            audio::audio_peaks_start,
+            audio::audio_peaks_cancel,
             chooser::choose_path,
             project::project_add_episode,
             project::project_attach_file,
@@ -178,6 +182,7 @@ pub fn run() -> tauri::Result<()> {
             }
             crash::force::trip(ForcePoint::Startup);
             app.manage(asr::AsrState::default());
+            app.manage(audio::AudioState::default());
             // A killed process cannot run its own cleanup, so abandoned run directories are swept
             // here, off the main thread. See BACKLOG.md M3.1.
             asr::sweep_scratch(app.handle());
@@ -206,6 +211,7 @@ pub fn run() -> tauri::Result<()> {
             match decide_close_now(&label, session) {
                 CloseAction::Close => {
                     asr::shutdown(app_handle);
+                    audio::shutdown(app_handle);
                     shutdown_video(app_handle);
                 }
                 CloseAction::Ask => {
@@ -702,8 +708,10 @@ fn request_close_of_every_window(app_handle: &AppHandle) -> bool {
 /// Everything that has to stop before the process does. Idempotent, like each of its parts: more
 /// than one of the exit events can fire on the way out.
 fn shutdown_all(app_handle: &AppHandle) {
-    // A transcription outlives the window that started it unless it is stopped here.
+    // A transcription outlives the window that started it unless it is stopped here, and so
+    // does the ffmpeg peaking a waveform.
     asr::shutdown(app_handle);
+    audio::shutdown(app_handle);
     shutdown_video(app_handle);
     shutdown_project(app_handle);
 }
@@ -904,6 +912,34 @@ mod tests {
             "the exit handler decides the quit itself instead of asking through the close gate: \
              {second_gate:?}"
         );
+    }
+
+    /// Every child Sublore spawns has to be stopped on the way out, and the only place that runs
+    /// for every exit event is this one. A subsystem missing from it is a process that outlives
+    /// the window. See BACKLOG.md M3.1 and M2.4, W4.
+    #[test]
+    fn the_exit_path_stops_every_subsystem_that_owns_something_running() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("fn shutdown_all(")
+            .expect("the exit path is in this file");
+        let end = start
+            + source[start..]
+                .find("fn shutdown_video(")
+                .expect("shutdown_video follows it");
+        let body = &source[start..end];
+
+        for stop in [
+            "asr::shutdown(app_handle)",
+            "audio::shutdown(app_handle)",
+            "shutdown_video(app_handle)",
+            "shutdown_project(app_handle)",
+        ] {
+            assert!(
+                body.contains(stop),
+                "the exit path no longer runs {stop}:\n{body}"
+            );
+        }
     }
 
     /// The interval the dialog no longer covers: it is off screen, the answer is still being acted
