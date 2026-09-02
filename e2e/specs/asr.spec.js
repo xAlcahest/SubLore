@@ -208,6 +208,11 @@ async function startRun(toplevel) {
   });
 }
 
+/** The folder the media lives in, and what was in it before any run: the read-only guarantee is
+ * about what a transcription adds, not about the list being frozen. See CONTRIBUTING.md §3.1. */
+const videoDir = path.join(repoRoot, "fixtures", "video");
+let mediaFolderBefore = [];
+
 describe("transcription", () => {
   let toplevel = null;
   let fixture = null;
@@ -220,6 +225,7 @@ describe("transcription", () => {
   let saved = null;
 
   before(async () => {
+    mediaFolderBefore = readdirSync(videoDir).sort();
     fixture = requireVideoFixture();
     saveDir = saveDirectory("transcription-save");
     firstSaveDir = saveDirectory("first-save");
@@ -279,7 +285,6 @@ describe("transcription", () => {
 
     // CONTRIBUTING.md §3.1: the user's media is read only. Snapshot what is beside it, and its own
     // metadata, and compare after the run.
-    const videoDir = path.join(repoRoot, "fixtures", "video");
     const before = { listing: readdirSync(videoDir).sort(), stat: statSync(fixture) };
 
     setStubMode("fast");
@@ -333,11 +338,10 @@ describe("transcription", () => {
     expect(await textOf(".statusbar__error")).toBe(null);
 
     // The transcription wrote nothing at all: not beside the media, and nowhere Sublore saves.
+    // Compared against what was there when the run started, not against a list written here: a
+    // fixture added to that folder is not a defect, and a frozen list would call it one.
     expect(readdirSync(saveDir)).toEqual([]);
-    expect(readdirSync(path.join(repoRoot, "fixtures", "video")).sort()).toEqual([
-      "make-sample.sh",
-      "sample.mkv",
-    ]);
+    expect(readdirSync(videoDir).sort()).toEqual(mediaFolderBefore);
   });
 
   it("edits a cue of the result, saves it, and reopens the file with the edit in it", async () => {
