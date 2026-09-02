@@ -69,6 +69,17 @@ const SECOND_TEXT = "Typed and then saved";
 const THIRD_POSITION = 300;
 const THIRD_TEXT = "Edited while checking the shortcuts";
 const STATUS_PREFIX = "SRT · 2000 cues · LF";
+/** Where the cursor and selection check starts, 1-based, clear of the rows edited above. */
+const CURSOR_POSITION = 500;
+/**
+ * The markup fixture the CPS column is measured on, and its four expected rates. Each is the
+ * character count with the markup stripped over the cue's duration, rounded: decision 24 A8.
+ * Line 1 is the one that matters: 39 characters over 2 s is 20, while the 46 the tags make it
+ * would read 23 and carry the warning. Line 4 has no markup and is over the limit on its own.
+ */
+const TAGS_STATUS = "SRT · 4 cues · LF";
+const TAGS_CPS = ["20", "14", "17", "22"];
+const TAGS_OVER_LIMIT = [false, false, false, true];
 
 function fixture(...parts) {
   const file = path.join(repoRoot, "fixtures", "subtitles", ...parts);
@@ -120,20 +131,96 @@ function centreOf(selector) {
   }, selector);
 }
 
-/** Centre of the text cell of the row at a given 1-based list position, if it is rendered. */
+/** Centre of one cell of the row at a given 1-based list position, if that row is rendered. */
+function centreOfCell(position, cell) {
+  return browser.execute(
+    (wanted, css) => {
+      const rows = Array.from(document.querySelectorAll(".cuelist__row"));
+      const row = rows.find(
+        (candidate) => candidate.querySelector(".cuelist__pos")?.textContent === wanted,
+      );
+      const target = row?.querySelector(css);
+      if (!target) {
+        return null;
+      }
+      const rect = target.getBoundingClientRect();
+      const dpr = window.devicePixelRatio;
+      return { x: (rect.x + rect.width / 2) * dpr, y: (rect.y + rect.height / 2) * dpr };
+    },
+    String(position),
+    cell,
+  );
+}
+
+/** Centre of the text cell, which is the one a click opens the inline editor on. */
 function centreOfRow(position) {
+  return centreOfCell(position, ".cuelist__text");
+}
+
+/**
+ * What the grid says about its two states (decision 5). Positions are 1-based and come from the
+ * rendered rows, which is every row the assertions below name.
+ */
+function gridState() {
+  return browser.execute(() => {
+    const rows = Array.from(document.querySelectorAll(".cuelist__row"));
+    const positions = (kept) =>
+      rows
+        .filter(kept)
+        .map((row) => Number(row.querySelector(".cuelist__pos")?.textContent))
+        .sort((a, b) => a - b);
+    const list = document.querySelector(".cuelist");
+    return {
+      // The membership marker and its ARIA concept are read apart: either alone going missing is
+      // the split coming undone.
+      selected: positions((row) => row.classList.contains("cuelist__row--selected")),
+      ariaSelected: positions((row) => row.getAttribute("aria-selected") === "true"),
+      cursor: positions((row) => row.classList.contains("cuelist__row--active")),
+      activeDescendant: list?.getAttribute("aria-activedescendant") ?? null,
+      multiselectable: list?.getAttribute("aria-multiselectable") ?? null,
+      focused: document.activeElement?.classList.contains("cuelist") === true,
+      rendered: rows.length,
+    };
+  });
+}
+
+/**
+ * Wait for the grid to hold one cursor row and one exact selection, and say what it held instead
+ * when it never did: the state this asserts on has no other readout in a failed run.
+ */
+async function expectGrid(want, what) {
+  let seen = null;
+  const same = (got, wanted) =>
+    got.length === wanted.length && got.every((v, i) => v === wanted[i]);
+  try {
+    return await waitFor(
+      async () => {
+        seen = await gridState();
+        return same(seen.cursor, want.cursor) && same(seen.selected, want.selected) ? seen : null;
+      },
+      { timeout: 15000, message: what },
+    );
+  } catch (error) {
+    throw new Error(
+      `${error.message}\nwanted cursor ${JSON.stringify(want.cursor)} and selection ` +
+        `${JSON.stringify(want.selected)}; the grid showed cursor ${JSON.stringify(seen?.cursor)} ` +
+        `and selection ${JSON.stringify(seen?.selected)}`,
+    );
+  }
+}
+
+/** The CPS cell of a rendered row, and whether it carries the warning colour. */
+function cpsOf(position) {
   return browser.execute((wanted) => {
     const rows = Array.from(document.querySelectorAll(".cuelist__row"));
     const row = rows.find(
       (candidate) => candidate.querySelector(".cuelist__pos")?.textContent === wanted,
     );
-    const cell = row?.querySelector(".cuelist__text");
+    const cell = row?.querySelector(".cuelist__cps");
     if (!cell) {
       return null;
     }
-    const rect = cell.getBoundingClientRect();
-    const dpr = window.devicePixelRatio;
-    return { x: (rect.x + rect.width / 2) * dpr, y: (rect.y + rect.height / 2) * dpr };
+    return { text: cell.textContent, over: cell.classList.contains("cuelist__cps--over") };
   }, String(position));
 }
 
@@ -674,5 +761,163 @@ describe("cue list editing", () => {
     await scrollTo(SECOND_POSITION);
     expect(await rowText(SECOND_POSITION)).toBe(SECOND_TEXT);
     expect(await present(".statusbar__error")).toBe(false);
+  });
+
+  // Decision 5: the cursor and the selection are two states, both driven from the keyboard. Every
+  // step below is a keystroke, because the keyboard half is the half a mouse-only check would miss.
+  it("moves the cursor with one modifier and grows the selection with another", async () => {
+    await scrollTo(CURSOR_POSITION);
+    // The number cell, not the text cell: a click there moves the cursor without opening an editor.
+    await clickCentre(
+      toplevel,
+      await centreOfCell(CURSOR_POSITION, ".cuelist__pos"),
+      `row ${CURSOR_POSITION} number cell`,
+    );
+    const started = await expectGrid(
+      { cursor: [CURSOR_POSITION], selected: [CURSOR_POSITION] },
+      "a plain click to put the cursor on the row it landed on, selected alone",
+    );
+    expect(started.focused).toBe(true);
+    expect(started.multiselectable).toBe("true");
+    expect(await present(".cuelist__editor")).toBe(false);
+
+    key("Down");
+    await expectGrid(
+      { cursor: [CURSOR_POSITION + 1], selected: [CURSOR_POSITION + 1] },
+      "a plain arrow to move the cursor and collapse the selection onto it",
+    );
+
+    key("shift+Down");
+    key("shift+Down");
+    await expectGrid(
+      {
+        cursor: [CURSOR_POSITION + 3],
+        selected: [CURSOR_POSITION + 1, CURSOR_POSITION + 2, CURSOR_POSITION + 3],
+      },
+      "shift to extend the selection over the run the cursor walked",
+    );
+
+    key("ctrl+Down");
+    key("ctrl+Down");
+    // The gesture that proves the two states are not one: the cursor is now outside the selection.
+    const walked = await expectGrid(
+      {
+        cursor: [CURSOR_POSITION + 5],
+        selected: [CURSOR_POSITION + 1, CURSOR_POSITION + 2, CURSOR_POSITION + 3],
+      },
+      "ctrl to walk the cursor without touching the selection",
+    );
+    expect(walked.ariaSelected).toEqual([
+      CURSOR_POSITION + 1,
+      CURSOR_POSITION + 2,
+      CURSOR_POSITION + 3,
+    ]);
+    expect(walked.activeDescendant).toBe(`cuelist-row-${CURSOR_POSITION + 4}`);
+
+    key("ctrl+space");
+    const scattered = await expectGrid(
+      {
+        cursor: [CURSOR_POSITION + 5],
+        selected: [
+          CURSOR_POSITION + 1,
+          CURSOR_POSITION + 2,
+          CURSOR_POSITION + 3,
+          CURSOR_POSITION + 5,
+        ],
+      },
+      "ctrl+space to add the row under the cursor to the selection, leaving a gap behind it",
+    );
+    expect(scattered.ariaSelected).toEqual(scattered.selected);
+
+    key("Escape");
+    await expectGrid(
+      { cursor: [CURSOR_POSITION + 5], selected: [CURSOR_POSITION + 5] },
+      "Escape to collapse the selection onto the cursor",
+    );
+
+    key("ctrl+a");
+    const all = await waitFor(
+      async () => {
+        const state = await gridState();
+        return state.selected.length === state.rendered ? state : null;
+      },
+      { timeout: 15000, message: "ctrl+a to select every row" },
+    );
+    // The rows are virtualized, so "every row" is every row in the DOM; a handful would not mean it.
+    expect(all.rendered).toBeGreaterThan(20);
+    expect(all.cursor).toEqual([CURSOR_POSITION + 5]);
+  });
+
+  // Decision 24 A8. The stripping is the half a naive implementation gets wrong, so the fixture is
+  // the one full of markup and the numbers below are what it reads once the markup is not counted.
+  it("counts CPS over the text a viewer reads, not over the markup", async () => {
+    // Replacing the open document is a different question and is asked elsewhere; this one is
+    // measured on a document that has nothing unsaved in it.
+    expect(await present(".statusbar__dirty")).toBe(false);
+    await openSubtitle(toplevel, fixture("srt", "clean", "tags-and-entities.srt"));
+    await waitFor(
+      async () => (await textOf(".statusbar__document"))?.includes(TAGS_STATUS) === true,
+      {
+        timeout: 20000,
+        message: "the status line to report the markup fixture",
+      },
+    );
+
+    for (let position = 1; position <= TAGS_CPS.length; position += 1) {
+      const cell = await cpsOf(position);
+      expect(cell).not.toBe(null);
+      expect(`${position}: ${cell.text}`).toBe(`${position}: ${TAGS_CPS[position - 1]}`);
+      expect(`${position}: ${cell.over}`).toBe(`${position}: ${TAGS_OVER_LIMIT[position - 1]}`);
+    }
+  });
+
+  // Decision 5: the one gesture that hands the grid the keyboard and moves neither state. The focus
+  // is the list being focusable rather than a handler, so this is what guards it against both.
+  it("focuses the grid on a click below the last row, and changes neither state", async () => {
+    await clickCentre(toplevel, await centreOfCell(3, ".cuelist__pos"), "row 3 number cell");
+    const before = await expectGrid(
+      { cursor: [3], selected: [3] },
+      "the cursor to sit on the row that was clicked",
+    );
+    expect(before.focused).toBe(true);
+
+    // Somewhere outside the grid first, or "it took the focus" would be true before the click.
+    await clickElement(toplevel, ".statusbar__document");
+    await waitFor(async () => (await gridState()).focused === false, {
+      timeout: 15000,
+      message: "the grid to lose the keyboard to a click outside it",
+    });
+
+    const empty = await browser.execute(() => {
+      const list = document.querySelector(".cuelist");
+      const sizer = document.querySelector(".cuelist__sizer");
+      if (list === null || sizer === null) {
+        return null;
+      }
+      const panel = list.getBoundingClientRect();
+      const rows = sizer.getBoundingClientRect();
+      // Below the last row and inside the panel. A short file leaves most of the panel empty.
+      if (panel.bottom - rows.bottom < 20) {
+        return null;
+      }
+      const dpr = window.devicePixelRatio;
+      return { x: (panel.x + panel.width / 2) * dpr, y: ((rows.bottom + panel.bottom) / 2) * dpr };
+    });
+    if (empty === null) {
+      throw new Error("the grid has no empty space below its last row, so this gesture cannot aim");
+    }
+    await clickCentre(toplevel, empty, "the empty space below the last row");
+
+    const after = await waitFor(
+      async () => {
+        const state = await gridState();
+        return state.focused ? state : null;
+      },
+      { timeout: 15000, message: "the grid to take the keyboard from a click that hit no row" },
+    );
+    expect(after.cursor).toEqual(before.cursor);
+    expect(after.selected).toEqual(before.selected);
+    expect(after.activeDescendant).toBe(before.activeDescendant);
+    expect(await present(".cuelist__editor")).toBe(false);
   });
 });

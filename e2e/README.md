@@ -224,6 +224,12 @@ Added by M2.3: `.subbar__save`, `.subbar__undo`, `.subbar__redo`, `.subbar__disc
 `.cuelist__row--comment`, `.cuelist__pos`, `.cuelist__number`, `.cuelist__start`, `.cuelist__end`,
 `.cuelist__text`, `.cuelist__editor`, `.cuelist__empty`
 
+Added by T6, the cursor and the selection as two states (decision 5): `.cuelist__row--active` is the
+cursor and `.cuelist__row--selected` is now membership in the selection, not the one row that was
+both. `aria-selected` on a row is membership, `aria-activedescendant` on `.cuelist` names the cursor
+row by its `cuelist-row-<0-based index>` id, and `.cuelist` is `aria-multiselectable`. The CPS column
+is `.cuelist__cps`, carrying `.cuelist__cps--over` above the 21 cps of decision 24 A8.
+
 Added by M3.4: `.asrbar__model`, `.asrbar__download`, `.asrbar__gpu`, `.asrbar__start`, `.asrbar__cancel`,
 `.asrbar__progress`, `.asrbar__status`, `.asrbar__backend`, `.asrbar__error`, `.asrbar__cue`
 

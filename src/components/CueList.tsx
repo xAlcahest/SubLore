@@ -5,8 +5,10 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 
+import { useCueSelection } from "../hooks/useCueSelection";
 import { en } from "../i18n/en";
 import { type CueRow } from "../types/subtitle";
 
@@ -17,6 +19,16 @@ import { type CueRow } from "../types/subtitle";
 const ROW_HEIGHT = 28;
 /** Rows kept rendered above and below the viewport, so a fast scroll does not show gaps. */
 const OVERSCAN = 8;
+/** Reading rate a line is flagged above, fixed and not configurable in v1. Decision 24 A8. */
+const CPS_LIMIT = 21;
+/** The markup A8 does not count: ASS override blocks and HTML-style tags. */
+const MARKUP = /\{[^}]*\}|<[^>]*>/g;
+/** Line breaks in both spellings a cue holds: a real one, and the `\N` of an ASS field. */
+const LINE_BREAKS = /\r\n|[\r\n]|\\[Nn]/g;
+/**
+ * Owed to src/i18n/en.ts as `subtitle.cueList.cps`; T3 owns that file this wave. See m2-0-tasks T6.
+ */
+const CPS_HEADER = "CPS";
 
 /** Input types that hold typed text, and so keep their own undo. A range slider holds none. */
 const TEXT_INPUT_TYPES = ["text", "search", "url", "email", "tel", "password", "number"];
@@ -33,6 +45,23 @@ function ownsTheKeyboard(target: EventTarget | null, editor: HTMLTextAreaElement
     return TEXT_INPUT_TYPES.includes(target.type);
   }
   return target instanceof HTMLTextAreaElement || target.isContentEditable;
+}
+
+/** The cursor is named by `aria-activedescendant`, which needs an id on the row it points at. */
+function rowId(index: number): string {
+  return `cuelist-row-${index}`;
+}
+
+/**
+ * Characters per second: spaces counted, line breaks not, over text with its markup stripped.
+ * Null when the cue has no duration to divide by. Decision 24 A8.
+ */
+function readingRate(cue: CueRow): number | null {
+  const seconds = (cue.endMs - cue.startMs) / 1000;
+  if (!(seconds > 0)) {
+    return null;
+  }
+  return cue.text.replace(MARKUP, "").replace(LINE_BREAKS, "").length / seconds;
 }
 
 /** hh:mm:ss.mmm. Separators are punctuation, not translatable copy. */
@@ -82,7 +111,6 @@ export default function CueList({
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(0);
-  const [selected, setSelected] = useState(0);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [committing, setCommitting] = useState(false);
@@ -90,6 +118,7 @@ export default function CueList({
   const editingRef = useRef<number | null>(null);
 
   const count = cues.length;
+  const { active, selected, move, toggle, selectAll, collapse } = useCueSelection(count);
 
   useEffect(() => {
     const list = listRef.current;
@@ -122,8 +151,9 @@ export default function CueList({
       if (cue === undefined) {
         return;
       }
+      // Editing is about the cursor, never about the selection: a bulk operation issued after an
+      // edit still means what it meant before (decision 5).
       editingRef.current = index;
-      setSelected(index);
       setEditing(index);
       setDraft(cue.text);
     },
@@ -211,24 +241,43 @@ export default function CueList({
   useEffect(() => () => onEditingChange(false), [onEditingChange]);
 
   function onListKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (editingRef.current !== null || count === 0) {
+    if (editingRef.current !== null || count === 0 || active === null) {
+      return;
+    }
+    // Alt is excluded from both: AltGr arrives as ctrl+alt, and it is typing, not a shortcut.
+    if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      selectAll();
+      return;
+    }
+    // Ctrl+Space is how the keyboard scatters a selection: it flips the row the cursor walked to.
+    if (event.ctrlKey && !event.altKey && event.key === " ") {
+      event.preventDefault();
+      toggle(active);
+      return;
+    }
+    if (event.key === "Escape") {
+      if (selected.size > 1) {
+        event.preventDefault();
+        collapse();
+      }
       return;
     }
     const last = count - 1;
     const page = Math.max(1, Math.floor(viewport / ROW_HEIGHT));
-    let next = selected;
+    let next = active;
     switch (event.key) {
       case "ArrowDown":
-        next = Math.min(last, selected + 1);
+        next = Math.min(last, active + 1);
         break;
       case "ArrowUp":
-        next = Math.max(0, selected - 1);
+        next = Math.max(0, active - 1);
         break;
       case "PageDown":
-        next = Math.min(last, selected + page);
+        next = Math.min(last, active + page);
         break;
       case "PageUp":
-        next = Math.max(0, selected - page);
+        next = Math.max(0, active - page);
         break;
       case "Home":
         next = 0;
@@ -238,14 +287,23 @@ export default function CueList({
         break;
       case "Enter":
         event.preventDefault();
-        beginEdit(Math.min(selected, last));
+        beginEdit(active);
         return;
       default:
         return;
     }
     event.preventDefault();
-    setSelected(next);
+    move(next, event.shiftKey ? "extend" : event.ctrlKey ? "cursorOnly" : "plain");
     ensureVisible(next);
+  }
+
+  /** Every mouse gesture on a row mirrors a key: ctrl toggles, shift extends, a plain one moves. */
+  function onRowMouseDown(event: ReactMouseEvent<HTMLDivElement>, index: number) {
+    if (event.ctrlKey) {
+      toggle(index);
+      return;
+    }
+    move(index, event.shiftKey ? "extend" : "plain");
   }
 
   function onEditorKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
@@ -257,9 +315,11 @@ export default function CueList({
     }
     if (event.key === "Tab") {
       event.preventDefault();
-      const next = Math.min(count - 1, (editingRef.current ?? selected) + 1);
+      // Tab collapses the selection onto the row it lands on: tabbing down a file must not grow a
+      // range behind it (decision 5).
+      const next = Math.min(count - 1, (editingRef.current ?? active ?? 0) + 1);
       void commit().then(() => {
-        setSelected(next);
+        move(next, "plain");
         ensureVisible(next);
         listRef.current?.focus();
       });
@@ -285,6 +345,9 @@ export default function CueList({
   if (editing !== null && (editing < first || editing >= last)) {
     indices.push(editing);
   }
+  // aria-activedescendant has to name an element that exists, and the cursor's row is dropped from
+  // the DOM like any other when it scrolls out of view.
+  const activeId = active !== null && indices.includes(active) ? rowId(active) : undefined;
 
   return (
     <div className="cuelist__panel">
@@ -299,12 +362,15 @@ export default function CueList({
           {en.subtitle.cueList.start}
         </span>
         <span className="cuelist__headcell cuelist__headcell--time">{en.subtitle.cueList.end}</span>
+        <span className="cuelist__headcell cuelist__headcell--cps">{CPS_HEADER}</span>
         <span className="cuelist__headcell">{en.subtitle.cueList.text}</span>
       </div>
       <div
         className="cuelist"
         role="listbox"
         aria-label={en.subtitle.cueList.label}
+        aria-multiselectable={true}
+        aria-activedescendant={activeId}
         tabIndex={0}
         ref={listRef}
         onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
@@ -317,26 +383,38 @@ export default function CueList({
               return null;
             }
             const classes = ["cuelist__row"];
-            if (index === selected) {
+            if (selected.has(index)) {
               classes.push("cuelist__row--selected");
+            }
+            if (index === active) {
+              classes.push("cuelist__row--active");
             }
             if (cue.comment) {
               classes.push("cuelist__row--comment");
             }
+            const rate = readingRate(cue);
+            const cpsClasses = ["cuelist__cps"];
+            if (rate !== null && rate > CPS_LIMIT) {
+              cpsClasses.push("cuelist__cps--over");
+            }
             return (
               <div
                 key={index}
+                id={rowId(index)}
                 className={classes.join(" ")}
                 role="option"
-                aria-selected={index === selected}
+                aria-selected={selected.has(index)}
                 title={cue.comment ? en.subtitle.cueList.comment : undefined}
                 style={{ top: index * ROW_HEIGHT, height: ROW_HEIGHT }}
-                onMouseDown={() => setSelected(index)}
+                onMouseDown={(event) => onRowMouseDown(event, index)}
               >
                 <span className="cuelist__pos">{index + 1}</span>
                 <span className="cuelist__number">{cue.number ?? ""}</span>
                 <span className="cuelist__start">{timecode(cue.startMs)}</span>
                 <span className="cuelist__end">{timecode(cue.endMs)}</span>
+                <span className={cpsClasses.join(" ")}>
+                  {rate === null ? "" : Math.round(rate)}
+                </span>
                 {editing === index ? (
                   <textarea
                     className="cuelist__editor"
@@ -348,7 +426,15 @@ export default function CueList({
                     onBlur={() => void commit()}
                   />
                 ) : (
-                  <span className="cuelist__text" onClick={() => beginEdit(index)}>
+                  <span
+                    className="cuelist__text"
+                    // A plain click opens the editor; the modified ones are selecting, not editing.
+                    onClick={(event) => {
+                      if (!event.ctrlKey && !event.shiftKey) {
+                        beginEdit(index);
+                      }
+                    }}
+                  >
                     {cue.text}
                   </span>
                 )}
