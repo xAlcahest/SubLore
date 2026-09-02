@@ -212,6 +212,10 @@ jobs:
       - name: Generate video fixture
         run: sh fixtures/video/make-sample.sh
 
+      # waveform.spec.js reads the peaks of a file whose audio is known. Generated, never committed.
+      - name: Generate waveform fixtures
+        run: sh fixtures/video/make-waveform-fixtures.sh
+
       # The app hashes the model before every run, so the transcription spec needs the real file.
       # The stand-in sidecar never reads it. Downloaded here because CI asked, never by the app.
       - name: Fetch the transcription model

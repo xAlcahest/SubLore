@@ -184,6 +184,10 @@ async function surfaceRect() {
 }
 
 /** Wait for a viewable X11 child of the app window sitting on the rectangle the stage reports. */
+function present(selector) {
+  return browser.execute((css) => document.querySelector(css) !== null, selector);
+}
+
 async function waitForSurfaceOnStage(toplevel) {
   const expected = await surfaceRect();
   expect(expected.width).toBeGreaterThan(0);
@@ -497,6 +501,15 @@ describe("the shell layout", () => {
       "section.currentline",
     ]);
     expect(withProbe.children[1].top).toBeGreaterThan(EDGE_SLOP_PX);
+
+    // Waited for, not assumed present: the waveform arrives with the peak job's first chunk, and on
+    // a slower machine that is after this point. Reading the column without waiting made this
+    // assertion depend on how fast the runner is, which is the defect e2e/README.md's own rule about
+    // environment-anchored assertions exists to catch.
+    await waitFor(() => present(".waveform"), {
+      timeout: 30000,
+      message: "the waveform panel to arrive before the column is read",
+    });
 
     const column = await toolsColumn();
     expect(column.children.map((child) => child.name)).toEqual([
