@@ -119,9 +119,11 @@ jobs:
           sh fixtures/video/make-waveform-fixtures.sh
           cargo test -p sublore-audio --features real-media
           # A feature that stops being passed compiles the file away and leaves a green step behind,
-          # which is the shape of the hole this step was added to close.
-          cargo test -p sublore-audio --features real-media -- --list |
-            grep -q 'the_alternating_fixture_reads_full_where_it_is_a_tone_and_flat_where_it_is_silent' ||
+          # which is the shape of the hole this step was added to close. Through a file, not a pipe:
+          # `grep -q` closes the pipe on its first match and cargo dies of SIGPIPE, which pipefail
+          # then reports as a failure of the step that just succeeded.
+          cargo test -p sublore-audio --features real-media -- --list > real-media-list.txt
+          grep -q 'the_alternating_fixture_reads_full_where_it_is_a_tone_and_flat_where_it_is_silent' real-media-list.txt ||
             { echo "the test M2.4 is specified against is not in the suite"; exit 1; }
 
       # --no-fail-fast: one target that cannot start must not hide the state of the others. The

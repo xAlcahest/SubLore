@@ -27,3 +27,4 @@ fixtures/audio/*.wav
 
 # Whisper models are downloaded by the user, never committed.
 *.bin
+real-media-list.txt
