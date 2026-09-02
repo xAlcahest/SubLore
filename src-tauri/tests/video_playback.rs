@@ -56,6 +56,26 @@ fn wait_until(timeout: Duration, mut check: impl FnMut() -> bool) -> bool {
     }
 }
 
+/// A numeric locale that is not `C`, which is the precondition the regression needs. The
+/// environment's own comes first, the way GTK's init adopts it; the named ones keep the test able
+/// to run where `LANG` is already `C`, and libmpv lets `C.UTF-8` through, so that one drives only
+/// the second half. See BACKLOG.md N9, S9.
+fn adopt_a_non_c_numeric_locale() -> String {
+    for candidate in [c"", c"en_US.UTF-8", c"de_DE.UTF-8", c"C.UTF-8"] {
+        // SAFETY: SERIAL holds, so no other test is building an mpv core while this moves a
+        // process-global setting.
+        unsafe { libc::setlocale(libc::LC_NUMERIC, candidate.as_ptr()) };
+        let adopted = current_numeric_locale();
+        if adopted != "C" {
+            return adopted;
+        }
+    }
+    panic!(
+        "no numeric locale other than \"C\" could be adopted, so this test cannot drive its \
+         regression here: install a locale (glibc ships C.UTF-8) or set LC_NUMERIC for the run"
+    );
+}
+
 fn current_numeric_locale() -> String {
     // SAFETY: a null locale argument only queries the current setting.
     let name = unsafe { libc::setlocale(libc::LC_NUMERIC, std::ptr::null()) };
@@ -129,7 +149,16 @@ fn pause_freezes_position() {
     let player = player();
     player.open(&fixture_path()).expect("fixture should open");
     player.play().expect("play should be accepted");
-    sleep(Duration::from_millis(500));
+    // Without this a runner too slow to decode inside the old 500 ms sleep proved that a player
+    // which never started does not advance. See BACKLOG.md N9, S7.
+    assert!(
+        wait_until(
+            Duration::from_secs(5),
+            || matches!(player.position(), Ok(t) if t > 0.0)
+        ),
+        "playback never advanced, so a frozen position proves nothing: position was {:?}",
+        player.position()
+    );
     player.pause().expect("pause should be accepted");
     sleep(Duration::from_millis(200));
 
@@ -325,6 +354,7 @@ fn player_drops_without_hanging() {
 fn shutdown_during_open_never_strands_either_call() {
     let _serial = serial();
     let path = fixture_path();
+    let mut crossed = 0;
 
     for step in 0..12 {
         let player = Arc::new(player());
@@ -360,13 +390,28 @@ fn shutdown_during_open_never_strands_either_call() {
         );
         match outcome {
             Ok(_) => {}
-            Err(error) => assert_ne!(
-                error.code,
-                VideoErrorCode::OpenTimeout,
-                "step {step}: open waited out the full timeout on a stopped event thread"
-            ),
+            Err(error) => {
+                // Only this detail says the shutdown landed after `open` armed its channel, which
+                // is the window under test. See BACKLOG.md N9, S8.
+                if error.detail == "the player stopped while opening" {
+                    crossed += 1;
+                }
+                assert_ne!(
+                    error.code,
+                    VideoErrorCode::OpenTimeout,
+                    "step {step}: open waited out the full timeout on a stopped event thread"
+                );
+            }
         }
     }
+
+    // Anti-vacuity, the shape crates/sublore-edit/tests/property.rs uses: a sweep whose steps all
+    // land outside the window proves only that ordered calls work. See BACKLOG.md N9, S8.
+    assert!(
+        crossed > 0,
+        "{crossed} of the 12 steps found an open in flight, so the microsecond sweep is the wrong \
+         size for this machine and the race was never run"
+    );
 }
 
 /// Regression for the M0.2 launch failure: GTK calls setlocale(LC_ALL, "") during init, after which
@@ -374,12 +419,15 @@ fn shutdown_during_open_never_strands_either_call() {
 #[test]
 fn player_forces_the_c_numeric_locale() {
     let _serial = serial();
-    // SAFETY: adopt the environment's numeric locale, exactly as GTK's init does.
-    unsafe { libc::setlocale(libc::LC_NUMERIC, c"".as_ptr()) };
+    let adopted = adopt_a_non_c_numeric_locale();
 
     let player = Player::new(PlayerConfig::headless(), None)
         .expect("the player must start whatever the process locale is");
-    assert_eq!(current_numeric_locale(), "C");
+    assert_eq!(
+        current_numeric_locale(),
+        "C",
+        "the player started under {adopted} and left it in place"
+    );
 
     player.open(&fixture_path()).expect("fixture should open");
 }

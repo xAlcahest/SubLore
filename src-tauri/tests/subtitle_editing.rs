@@ -68,6 +68,16 @@ impl Drop for Scratch {
     }
 }
 
+/// What the backup store holds. A store that was never created is empty; any other read failure is
+/// a failure, not a clean directory. See BACKLOG.md N9, S11.
+fn backups_in(dir: &Path) -> usize {
+    match fs::read_dir(dir) {
+        Ok(entries) => entries.count(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(error) => panic!("{} should be readable: {error}", dir.display()),
+    }
+}
+
 fn text(cue: usize, text: &str) -> Edit {
     Edit::SetText {
         cue,
@@ -654,6 +664,13 @@ fn save_current_writes_nothing_when_the_session_is_clean() {
     // file the user only opened, and would overwrite whatever another program put there since.
     let outcome = save_current(&slot, scratch.backups()).expect("no error");
     assert!(outcome.is_none(), "a clean session writes nothing");
+    // A save writes its backup before it writes the file, so an empty store is proof no save ran.
+    // The mtime below cannot say that on a filesystem with coarse timestamps. See N9, S11.
+    assert_eq!(
+        backups_in(&scratch.backups()),
+        0,
+        "a save ran: it left a backup behind"
+    );
     assert_eq!(
         fs::metadata(&copy)
             .expect("copy")

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use common::{fake_whisper, process_present, snapshot, Sandbox};
+use common::{entries_in, fake_whisper, process_present, snapshot, Sandbox};
 use sublore_asr::error::AsrErrorKind;
 use sublore_asr::sidecar::{transcribe, Cancel, Compute, Language, Phase, TranscribeRequest};
 use sublore_asr::tools::Tools;
@@ -242,6 +242,13 @@ fn a_child_that_says_nothing_is_killed_by_the_stall_timer() {
         .expect_err("a silent child is not a transcript");
 
     assert_eq!(error.kind, AsrErrorKind::Stalled);
+    // The stall governs both children, so without this a slow ffmpeg would satisfy the kind above
+    // and the test would die further down on a pid file whisper never wrote. See BACKLOG.md N9, S12.
+    assert!(
+        error.detail.contains("whisper"),
+        "the extraction stalled, not the transcription: {}",
+        error.detail
+    );
     assert!(
         started.elapsed() < Duration::from_secs(10),
         "the timer should fire on its own"
@@ -410,9 +417,7 @@ fn the_scratch_directory_is_gone_on_every_path_out_of_a_run() {
 }
 
 fn scratch_children(tools: &Tools) -> usize {
-    fs::read_dir(&tools.scratch_root)
-        .map(|entries| entries.count())
-        .unwrap_or(0)
+    entries_in(&tools.scratch_root)
 }
 
 #[test]
