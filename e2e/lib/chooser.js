@@ -8,6 +8,11 @@
  *
  * The chooser is a separate X toplevel: the webview cannot see it and WebDriver cannot touch it, so
  * everything here works at the X level and belongs inside a server the harness owns.
+ *
+ * Every keystroke sequence below is GTK's (Alt+Home for the Recent list, Ctrl+L for the location
+ * entry, Alt+O for the accept button), and Windows raises a common item dialog with none of them,
+ * so MW.1b owns the counterpart. It needs no guard of its own: every call reaches `x11.js` or
+ * `input.js` first, and those refuse by name.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 

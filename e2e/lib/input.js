@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 
+import { requireLinuxBackend } from "./platform.js";
 import { mapState, windowSize } from "./x11.js";
 
 /**
@@ -9,6 +10,11 @@ import { mapState, windowSize } from "./x11.js";
  * through XTEST instead. These are genuine key and button events, not synthesized DOM events.
  */
 function xdotool(args) {
+  // Every gesture in this file goes through here, so this is the seam MW.1b replaces.
+  requireLinuxBackend(
+    "input.js synthetic input",
+    "deliver real key, button and pointer-motion events to the focused window, and move that focus",
+  );
   requireOwnedDisplay();
   return execFileSync("xdotool", args, { encoding: "utf8", timeout: 15000 });
 }

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 
 import { windowHeight, windowTitle, windowWidth } from "./paths.js";
+import { requireLinuxBackend } from "./platform.js";
 
 /**
  * One window line of `xwininfo -tree` output, e.g.
@@ -12,6 +13,11 @@ const WINDOW_LINE =
   /^\s*(0x[0-9a-f]+)\s+(?:"([^"]*)"|\(has no name\)):\s*\([^)]*\)\s+(\d+)x(\d+)\+(-?\d+)\+(-?\d+)\s+\+(-?\d+)\+(-?\d+)\s*$/i;
 
 function xwininfo(args) {
+  // Every reader in this file goes through here, so this is the seam MW.1b replaces.
+  requireLinuxBackend(
+    "x11.js window inspection",
+    "list the app's toplevels with their name, geometry, map state and children",
+  );
   // stderr captured, not inherited: `mapState` classifies a destroyed window by reading it, and the
   // default leaves it undefined while printing "X Error: 9: BadDrawable" over every run's output.
   return execFileSync("xwininfo", args, {

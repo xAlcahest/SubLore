@@ -12,6 +12,12 @@ the same line. No spec measures pixels — `lib/pixels.js`'s `saturation()` has 
 xwininfo and ffmpeg are each checked before any spec starts, so a missing one is a sentence naming it
 rather than a timeout inside whichever spec needed it first.
 
+All of that is Linux, and `lib/platform.js` is where the harness says so. Every library function that
+drives X11 or a POSIX process group calls `requireLinuxBackend(seam, owes)` first, so on any other
+platform it refuses by name and says what a Windows counterpart would have to do, instead of failing
+later as a broken assertion or quietly doing nothing. BACKLOG MW.1a lists which file is which kind
+and MW.1b writes the Windows side, on a machine that can run it.
+
 The two things that do read pixels run only on the owner's machine: `webview-paint-check.js` and the
 `real-session-check.mjs` probe. Both capture with ImageMagick's `import` and measure with ffmpeg
 `signalstats`. `import` exists in ImageMagick 6; `magick` ships only with version 7 and the CI runner

@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { requireLinuxBackend } from "./platform.js";
+
 /**
  * Poll until `probe` returns something truthy. Never a fixed sleep: every wait has a deadline and
  * a message saying what was expected (design section 10).
@@ -39,6 +41,11 @@ export async function waitFor(probe, { timeout = 30000, interval = 250, message 
  * @returns {number[]}
  */
 export function processGroupMembers(pgid) {
+  // A process group is POSIX; on Windows a job object is the equivalent unit. Seam for MW.1b.
+  requireLinuxBackend(
+    "proc.js processGroupMembers",
+    "list the processes one run spawned, as the exact set it created rather than a name scan",
+  );
   try {
     const out = execFileSync("pgrep", ["-g", String(pgid)], { encoding: "utf8", timeout: 10000 });
     return out
@@ -54,8 +61,16 @@ export function processGroupMembers(pgid) {
   }
 }
 
-/** Best-effort teardown of a whole process group. Never throws: it runs on failure paths. */
+/**
+ * Best-effort teardown of a whole process group. Never throws for a group that is already gone:
+ * that is the outcome asked for, and this runs on failure paths. It does throw off Linux, where
+ * the catch below would swallow the negative signal and leave the app running.
+ */
 export function killGroup(pgid, signal = "SIGKILL") {
+  requireLinuxBackend(
+    "proc.js killGroup",
+    "tear down every process one run spawned, including the sidecar and the driver's children",
+  );
   try {
     process.kill(-pgid, signal);
   } catch {
