@@ -1,0 +1,11 @@
+[package]
+name = "sublore-module-api"
+version = "0.1.0"
+description = "The interface a Sublore module is loaded through: the C ABI types and constants, and nothing else"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Deliberately empty, as in sublore-formats. A dependency here would cross the boundary this crate
+# exists to keep narrow. See BACKLOG.md N8a.
+[dependencies]
