@@ -10,6 +10,10 @@
  *
  * It spawns nothing itself: whisper-cli has no children either, so the orphan check the spec runs
  * after a cancel is asking the same question of the same shape of process tree.
+ *
+ * Nothing in here is platform-specific. What is, is how the app gets to run it: on Linux the
+ * shebang and the mode bit `e2e/lib/asr.js` sets. That is the seam MW.1b fills, and this file is
+ * what its shim will call.
  */
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";

@@ -11,6 +11,11 @@
  * `dialog::ask_close` now gives its buttons mnemonics, so each answer has a keystroke that does not
  * depend on a theme, a font, a screen size or a window manager. Escape is GTK's own answer for
  * cancel and needs no mnemonic.
+ *
+ * The shape here is GTK's: a separate toplevel found by name, answered by an Alt mnemonic. Windows
+ * shows `dialog.rs`'s non-Linux arm instead, which is a different dialog with different keys, so
+ * MW.1b owns the counterpart. It needs no guard of its own: every call reaches `x11.js` or
+ * `input.js` first, and those refuse by name.
  */
 import { focusWindow, pressKey } from "./input.js";
 import { waitFor } from "./proc.js";

@@ -14,6 +14,11 @@ import process from "node:process";
  * owner's own session is Wayland. **BACKLOG N2b fixes it in the product.** What is left here is
  * determinism for the harness, not a cure: clearing the variable makes every run start from the
  * same place instead of from whatever the developer's shell exported.
+ *
+ * The mechanism is portable and every value in it is Linux's. On Windows all three are inert:
+ * nothing reads `GDK_BACKEND` or `WAYLAND_DISPLAY`, and `main.rs` gates the webkit hatch behind
+ * `cfg(target_os = "linux")`. So this stays as it is, MW.1b adds whatever the WebView2 launcher
+ * needs beside it, and there is no guard here on purpose: a launcher needs a base environment.
  */
 export function appEnv(overrides = {}) {
   const env = {

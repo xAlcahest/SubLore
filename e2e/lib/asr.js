@@ -7,6 +7,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { repoRoot } from "./paths.js";
+import { requireLinuxBackend } from "./platform.js";
 
 /**
  * The transcription spec's fixtures: a stand-in sidecar, the real model the app insists on, and the
@@ -53,8 +54,17 @@ function dataHome() {
   return dir;
 }
 
-/** `app_data_dir()` as Tauri resolves it on Linux: $XDG_DATA_HOME/<identifier>. */
+/**
+ * `app_data_dir()` as Tauri resolves it on Linux: $XDG_DATA_HOME/<identifier>. That equality is
+ * what lets `e2e/wdio.conf.js` point a run at a throwaway data home, and it does not hold on
+ * Windows, where the dir comes from a known folder id and no environment variable moves it. Seam
+ * for MW.1b, which needs its own way to redirect the app's data home before it can assert on it.
+ */
 export function appDataDir() {
+  requireLinuxBackend(
+    "asr.js appDataDir",
+    "resolve the app data dir a run redirected the app to, and redirect it in the first place",
+  );
   return path.join(dataHome(), APP_IDENTIFIER);
 }
 
@@ -79,7 +89,10 @@ function cacheHome() {
   }
   const home = process.env.HOME;
   if (typeof home !== "string" || home === "") {
-    throw new Error("neither XDG_CACHE_HOME nor HOME is set, so the model cannot be found");
+    throw new Error(
+      "neither XDG_CACHE_HOME nor HOME is set, so the model cannot be found: point " +
+        "SUBLORE_TEST_MODEL_DIR at the directory holding it",
+    );
   }
   return path.join(home, ".cache");
 }
@@ -129,6 +142,12 @@ export function damageModel() {
  * before the first session, so the app finds all of it at startup.
  */
 export function installStubSidecar() {
+  // The app spawns SUBLORE_WHISPER_BIN directly, so the stub runs from its shebang and its mode
+  // bit. Windows has neither and needs a shim it can execute. Seam for MW.1b.
+  requireLinuxBackend(
+    "asr.js installStubSidecar",
+    "install a stand-in sidecar the app can spawn as SUBLORE_WHISPER_BIN, wrapping whisper-stub.mjs",
+  );
   mkdirSync(asrDir(), { recursive: true });
   const stub = stubBinary();
   copyFileSync(path.join(repoRoot, "e2e", "tools", "whisper-stub.mjs"), stub);
@@ -176,6 +195,11 @@ export function stubArgv() {
  * about.
  */
 export function processLine(pid) {
+  // A zombie is a POSIX state and it is the state this check exists to catch. Seam for MW.1b.
+  requireLinuxBackend(
+    "asr.js processLine",
+    "say whether one pid is still a process, and distinguish a reaped child from an unreaped one",
+  );
   try {
     const out = execFileSync("ps", ["-o", "pid=,stat=,comm=", "-p", String(pid)], {
       encoding: "utf8",

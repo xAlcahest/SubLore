@@ -244,6 +244,10 @@ jobs:
         continue-on-error: true
         run: .github/scripts/e2e-check.sh late-edit e2e:close-gate-late-edit
 
+      - name: Quit gate test (a quit that is not a window close asks the same question)
+        continue-on-error: true
+        run: .github/scripts/e2e-check.sh quit-gate e2e:quit-gate
+
       - name: Startup args test (a name the command line cannot carry costs that name, not the launch)
         continue-on-error: true
         run: .github/scripts/e2e-check.sh startup-args e2e:startup-args

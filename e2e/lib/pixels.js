@@ -1,6 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import process from "node:process";
 
+import { requireLinuxBackend } from "./platform.js";
+
 /**
  * Is the native video surface showing a picture?
  *
@@ -30,32 +32,48 @@ export function requireFfmpeg() {
 }
 
 /**
- * Average saturation inside `rect` of the X display.
+ * The ffmpeg input that grabs `rect` off the screen, which is the only platform-shaped part of this
+ * file: the saturation measure below and what it means are the same anywhere. Seam for MW.1b,
+ * whose input device is `gdigrab` with an offset rather than a display name.
  * @param {{absX: number, absY: number, width: number, height: number}} rect
  */
-export function saturation(rect) {
+function screenGrabArgs(rect) {
+  requireLinuxBackend(
+    "pixels.js screenGrabArgs",
+    "hand ffmpeg one frame of a screen rectangle given in root coordinates",
+  );
   const display = process.env.DISPLAY;
   if (display === undefined || display === "") {
     throw new Error("DISPLAY is not set; there is no screen to measure.");
   }
+  return [
+    "-f",
+    "x11grab",
+    // Explicit: x11grab's defaults for these two have changed between releases, and a different
+    // frame rate or draw-mouse setting changes the pixels this measures.
+    "-framerate",
+    "1",
+    "-draw_mouse",
+    "0",
+    "-video_size",
+    `${rect.width}x${rect.height}`,
+    "-i",
+    `${display}+${rect.absX},${rect.absY}`,
+  ];
+}
+
+/**
+ * Average saturation inside `rect` of the screen.
+ * @param {{absX: number, absY: number, width: number, height: number}} rect
+ */
+export function saturation(rect) {
   // ffmpeg writes signalstats to stderr, so both streams are read: reading stdout alone returns
   // nothing at all and the parse below fails with a null.
   const run = spawnSync(
     "ffmpeg",
     [
       "-hide_banner",
-      "-f",
-      "x11grab",
-      // Explicit: x11grab's defaults for these two have changed between releases, and a different
-      // frame rate or draw-mouse setting changes the pixels this measures.
-      "-framerate",
-      "1",
-      "-draw_mouse",
-      "0",
-      "-video_size",
-      `${rect.width}x${rect.height}`,
-      "-i",
-      `${display}+${rect.absX},${rect.absY}`,
+      ...screenGrabArgs(rect),
       "-frames:v",
       "1",
       "-vf",
