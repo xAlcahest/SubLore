@@ -5,6 +5,9 @@ Usage: close-window.py <window-id>
 
 This is the app's real close path. `xdotool windowclose` is XDestroyWindow, which bypasses it
 (and currently segfaults the app), and `xdotool windowquit` is a no-op without a window manager.
+
+X11 only. The Windows equivalent of this ClientMessage is WM_CLOSE to the HWND, and BACKLOG MW.1b
+writes it as a sibling tool. Which one a check runs is chosen in `e2e/lib/paths.js`.
 """
 
 import sys

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import process from "node:process";
 
+import { requireLinuxBackend } from "./platform.js";
 import { waitFor } from "./proc.js";
 
 /** tauri-driver is a dev tool installed with `cargo install tauri-driver --locked`, not a repo dep. */
@@ -59,6 +60,12 @@ function installHandlers() {
 }
 
 export async function startDriver() {
+  // Two Linux things at once: the native driver is WebKitWebDriver, and `stopDriver` reaches the
+  // grandchild through a process group. Guarded here so `stopDriver` cannot fail silently later.
+  requireLinuxBackend(
+    "driver.js startDriver",
+    "run tauri-driver against the WebView2 driver and stop it with its whole process tree",
+  );
   installHandlers();
   await waitFor(() => portFree(driverPort), {
     timeout: 30000,
