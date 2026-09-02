@@ -3157,6 +3157,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sublore-asr",
+ "sublore-audio",
  "sublore-edit",
  "sublore-formats",
  "sublore-io",

@@ -85,6 +85,21 @@ impl VideoPlayerState {
     }
 }
 
+/// One audio track of the open media, as mpv reports it. mpv is the authority on which one is
+/// playing (decision 24 E2), so `playing` comes from `track-list` and from nothing else.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioTrack {
+    /// mpv's own `aid`, which is what switching a track sets.
+    pub id: i64,
+    /// ffmpeg's index for the stream, which is what an extraction maps with `-map 0:n`.
+    pub ff_index: u32,
+    /// The stream's language tag, when the file carries one.
+    pub lang: Option<String>,
+    pub title: Option<String>,
+    pub playing: bool,
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PositionPayload {
@@ -403,6 +418,70 @@ impl Player {
         let mpv = self.handle()?;
         mpv.get_property::<bool>("pause")
             .map_err(|error| from_mpv(error, "pause"))
+    }
+
+    /// The file that is open, or nothing when none is. `Loading` is not open: a peak job started
+    /// against a file mpv has not finished loading would be peaking the file before it. See
+    /// BACKLOG.md M2.4, W4.
+    pub fn loaded_path(&self) -> Option<String> {
+        let state = self.state().ok()?;
+        match state.status {
+            PlayerStatus::Ready => state.path.clone(),
+            PlayerStatus::Idle | PlayerStatus::Loading => None,
+        }
+    }
+
+    /// The open media's audio tracks, in mpv's own order, with the playing one marked.
+    ///
+    /// Read property by property rather than as one node: libmpv2 hands back scalars, and the six
+    /// fields below are the whole of what the waveform and the Audio menu need. See M2.4, W4.
+    pub fn audio_tracks(&self) -> Result<Vec<AudioTrack>, VideoError> {
+        let mpv = self.handle()?;
+        // No file open is not an empty track list, and the caller has to be able to tell them
+        // apart: one is "this media has no audio", the other is "there is no media".
+        self.loaded_duration()?;
+
+        let count = mpv
+            .get_property::<i64>("track-list/count")
+            .map_err(|error| from_mpv(error, "track-list/count"))?;
+        let mut tracks = Vec::new();
+        for index in 0..count.max(0) {
+            let kind = mpv
+                .get_property::<String>(&format!("track-list/{index}/type"))
+                .map_err(|error| from_mpv(error, "track-list type"))?;
+            if kind != "audio" {
+                continue;
+            }
+            let id = mpv
+                .get_property::<i64>(&format!("track-list/{index}/id"))
+                .map_err(|error| from_mpv(error, "track-list id"))?;
+            let ff_index = mpv
+                .get_property::<i64>(&format!("track-list/{index}/ff-index"))
+                .map_err(|error| from_mpv(error, "track-list ff-index"))?;
+            // ffmpeg is mapped by this number, so one that is not a stream index is refused here
+            // rather than turned into a `-map` argument nothing can satisfy.
+            let ff_index = u32::try_from(ff_index).map_err(|_| {
+                VideoError::command_failed(format!(
+                    "mpv reported ff-index {ff_index} for audio track {id}"
+                ))
+            })?;
+            tracks.push(AudioTrack {
+                id,
+                ff_index,
+                // A file with no language tag has no `lang` property; that is absence, not
+                // failure, so it is read as None rather than propagated.
+                lang: mpv
+                    .get_property::<String>(&format!("track-list/{index}/lang"))
+                    .ok(),
+                title: mpv
+                    .get_property::<String>(&format!("track-list/{index}/title"))
+                    .ok(),
+                playing: mpv
+                    .get_property::<bool>(&format!("track-list/{index}/selected"))
+                    .map_err(|error| from_mpv(error, "track-list selected"))?,
+            });
+        }
+        Ok(tracks)
     }
 
     /// Deterministic and idempotent. Order matters: no new handles, then stop the event thread,
