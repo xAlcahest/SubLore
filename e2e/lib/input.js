@@ -172,6 +172,16 @@ export function clickAt(x, y) {
   xdotool(["click", "1"]);
 }
 
+/** The gesture that opens a context menu, which is where the rail keeps its commands (A3). */
+export function rightClickAt(x, y) {
+  const target = { x: Math.round(x), y: Math.round(y) };
+  const now = pointerLocation();
+  if (now.x !== target.x || now.y !== target.y) {
+    xdotool(["mousemove", "--sync", String(target.x), String(target.y)]);
+  }
+  xdotool(["click", "3"]);
+}
+
 /** Two clicks inside the double-click interval, which is what opens the cue list's inline editor. */
 export function doubleClickAt(x, y) {
   const target = { x: Math.round(x), y: Math.round(y) };

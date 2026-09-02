@@ -213,12 +213,22 @@ belonged to — `.bar__input`, `.subbar__input` and `.subbar__dest` — and noth
 more.
 
 `.bar__button`, `.stage__surface`, `.stage__empty`, `.controls__button`,
-`.controls__slider`, `.subbar__open`, `.subbar__save-copy`,
-`.project__path`, `.project__choose-folder`, `.project__create`, `.project__open`, `.project__delete`,
-`.project__status`, `.project__error`, `.project__episodes`, `.project__episode`,
-`.project__episode--selected`, `.project__episode-title`, `.project__files`, `.project__file`,
-`.project__new-episode`, `.project__add-episode`, `.project__file-path`, `.project__choose-file`,
-`.project__role-media`, `.project__role-source`, `.project__role-target`, `.project__attach`
+`.controls__slider`, `.subbar__open`, `.subbar__save-copy`
+
+T7 replaced the project panel's buttons and fields with the rail tree and its context menu, so every
+`.project__*` name is gone. What stands in their place: `.rail`, `.rail__cap`, `.rail__empty`,
+`.rail__project`, `.rail__episode`, `.rail__episode--selected`, `.rail__file`,
+`.rail__file--missing`, `.rail__file-name`, `.rail__missing`, `.rail__none`,
+`.railmenu`, `.railmenu__item--<command>`, `.raildialog`, `.raildialog__message`,
+`.raildialog__field`, `.raildialog__confirm`, `.raildialog__cancel`.
+
+The `<command>` half of a menu item's class is the command: `create-project`, `open-project`,
+`close-project`, `delete-project`, `add-episode`, `attach-media`, `attach-source`, `attach-target`,
+`rename-episode`, `delete-episode`, `open-file`, `locate-file`, `detach-file`. A `.rail__file` row
+carries the whole path as its `title`, because the row itself is only as wide as the rail.
+
+The project's own messages moved into the status bar with the rest (decision 24, A1):
+`.statusbar__project-message` and `.statusbar__project-error`.
 
 Added by M2.3: `.subbar__save`, `.subbar__undo`, `.subbar__redo`, `.subbar__discard`, `.cuelist`, `.cuelist__sizer`, `.cuelist__row`, `.cuelist__row--selected`,
 `.cuelist__row--comment`, `.cuelist__pos`, `.cuelist__number`, `.cuelist__start`, `.cuelist__end`,

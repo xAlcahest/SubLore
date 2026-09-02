@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 
 import { choosePath, type ChooseKind } from "./chooser";
 import CueList from "./components/CueList";
-import ProjectPanel from "./components/ProjectPanel";
+import ProjectRail from "./components/ProjectRail";
 import StatusBar from "./components/StatusBar";
 import SubtitleBar from "./components/SubtitleBar";
 import TranscribeBar from "./components/TranscribeBar";
@@ -14,6 +14,7 @@ import { useStartupFiles } from "./hooks/useStartupFiles";
 import { useSubtitleFile } from "./hooks/useSubtitleFile";
 import { useTranscription } from "./hooks/useTranscription";
 import { useVideoPlayer } from "./hooks/useVideoPlayer";
+import { type EpisodeFileView } from "./types/project";
 import "./App.css";
 
 export default function App() {
@@ -79,6 +80,18 @@ export default function App() {
     });
   }
 
+  /**
+   * Activating a file in the rail opens it, through the same commands the chooser route uses: a
+   * video in the player, a subtitle as the document. See BACKLOG.md M4.5.
+   */
+  function openAttachedFile(file: EpisodeFileView) {
+    if (file.role === "media") {
+      void open(file.path);
+      return;
+    }
+    void subtitle.open(file.path);
+  }
+
   async function adoptTranscription(runId: number) {
     // Text sitting in an open editor is unsaved work too, so it reaches the document before
     // anything asks whether the document may be replaced.
@@ -116,18 +129,7 @@ export default function App() {
       </header>
       <div className="shell__body">
         <aside className="shell__rail">
-          <ProjectPanel
-            busy={project.busy}
-            project={project.project}
-            deleted={project.deleted}
-            error={project.error}
-            onCreate={(folder) => void project.create(folder)}
-            onOpen={(folder) => void project.open(folder)}
-            onDelete={() => void project.remove()}
-            onAddEpisode={(title) => void project.addEpisode(title)}
-            onAttachFile={(episodeId, role, path) => void project.attachFile(episodeId, role, path)}
-            onChoosePath={project.choosePath}
-          />
+          <ProjectRail project={project} onOpenFile={openAttachedFile} />
         </aside>
         <div className="shell__top">
           <section className="shell__video">
@@ -168,6 +170,8 @@ export default function App() {
         savedInPlace={subtitle.savedInPlace}
         subtitleError={subtitle.error}
         videoErrorCode={errorCode}
+        projectDeleted={project.deleted}
+        projectError={project.error}
       />
     </div>
   );

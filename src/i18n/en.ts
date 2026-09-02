@@ -19,29 +19,56 @@ export const en = {
     },
   },
   project: {
-    pathLabel: "Project folder",
-    /** Stands where a chosen path goes, so the row does not collapse before anything is chosen. */
-    pathNone: "Nothing chosen",
-    choose: "Choose",
-    create: "Create",
-    open: "Open",
-    delete: "Delete project",
+    /** Over the tree, so the rail says what it is listing before anything is open. */
+    cap: "Project",
     noProject: "No project open.",
-    /** Title and folder, so the status line says which project and where it lives. */
-    status: "{title} · {folder}",
     noEpisodes: "No episodes yet.",
-    episodeLabel: "New episode",
     episodePlaceholder: "Episode name",
-    addEpisode: "Add episode",
     episode: "{ordinal}. {title}",
-    fileLabel: "File",
-    attach: "Attach",
     noFiles: "No files attached.",
+    /** A rail row is narrow, so the row carries the file's name and its tooltip the rest. */
     file: "{role} · {path}",
+    missing: "missing",
     roles: {
       media: "Video",
       source: "Source",
       target: "Target",
+    },
+    /** What right-clicking the rail opens, for anyone reaching it without seeing it. */
+    menuLabel: "Project actions",
+    menu: {
+      createProject: "Create project…",
+      openProject: "Open project…",
+      closeProject: "Close project",
+      deleteProject: "Delete project…",
+      addEpisode: "Add episode…",
+      attach: "Attach {role}…",
+      renameEpisode: "Rename episode…",
+      deleteEpisode: "Delete episode…",
+      openFile: "Open",
+      locateFile: "Locate…",
+      detachFile: "Detach",
+    },
+    /** Every one of these is asked once and answered before anything changes (decision 24, D2). */
+    ask: {
+      cancel: "Cancel",
+      addEpisodeTitle: "Add episode",
+      addEpisodeConfirm: "Add",
+      renameEpisodeTitle: "Rename episode",
+      renameEpisodeConfirm: "Rename",
+      closeProjectTitle: "Close project",
+      closeProjectMessage: "Close {title}? Nothing on disk is touched.",
+      closeProjectConfirm: "Close",
+      deleteProjectTitle: "Delete project",
+      deleteProjectMessage:
+        "Delete the project in {folder}? Sublore removes its own project file there and leaves your video and subtitle files exactly where they are.",
+      deleteProjectConfirm: "Delete project",
+      deleteEpisodeTitle: "Delete episode",
+      deleteEpisodeMessage: "Delete {episode}? The files attached to it stay on disk.",
+      deleteEpisodeConfirm: "Delete episode",
+      detachFileTitle: "Detach file",
+      detachFileMessage: "Detach {name} from {episode}? The file stays on disk.",
+      detachFileConfirm: "Detach",
     },
     deleted: "Deleted the project in {folder}. Your own video and subtitle files were not touched.",
     errors: {
@@ -62,6 +89,7 @@ export const en = {
       notAFile: "That path is not a file.",
       duplicateFile: "That file is already attached to this episode.",
       episodeNotFound: "That episode is not in the project any more.",
+      fileNotAttached: "That file is not attached to this episode any more.",
       noProjectOpen: "Open a project first.",
       writeFailed: "Sublore could not write to the project file. Check that the disk has room.",
       deleteFailed:

@@ -647,20 +647,37 @@ describe("cue list editing", () => {
       message: `row ${THIRD_POSITION} to hold the second edit`,
     });
 
-    // T1 left one text box outside the cue editor, in the project panel, so that is where a typed
-    // ctrl+z can still be taken by the document's handler. It only exists once a project is open.
-    await clickElement(toplevel, ".project__choose-folder");
+    // The one text box outside the cue editor is the field the rail's Add episode question opens
+    // with, so that is where a typed ctrl+z can still be taken by the document's handler. It needs
+    // a project open, and it is reached the way T7 left the rail: through the rail's own menu.
+    await clickElement(toplevel, ".rail__empty");
+    await waitFor(() => present(".railmenu__item--create-project"), {
+      timeout: 20000,
+      message: "the rail's project menu to open",
+    });
+    await clickElement(toplevel, ".railmenu__item--create-project");
     const folderChooser = await waitForChooser("Choose a project folder");
     await answerChooser(folderChooser, scratchFolder("undo-project"), "project folder");
     focusWindow(toplevel.id);
-    await clickElement(toplevel, ".project__create");
-    await waitFor(() => present(".project__new-episode"), {
+    await waitFor(() => present(".rail__project"), {
       timeout: 20000,
-      message: "the project panel to offer its episode box",
+      message: "the rail to show the project it just created",
     });
 
-    await typeInto(toplevel, ".project__new-episode", "Episode 1");
+    await clickElement(toplevel, ".rail__project");
+    await waitFor(() => present(".railmenu__item--add-episode"), {
+      timeout: 20000,
+      message: "the rail's project menu to offer Add episode",
+    });
+    await clickElement(toplevel, ".railmenu__item--add-episode");
+    await waitFor(() => present(".raildialog__field"), {
+      timeout: 20000,
+      message: "the rail to ask for an episode name",
+    });
+
+    await typeInto(toplevel, ".raildialog__field", "Episode 1");
     key("ctrl+z");
+    key("Escape");
 
     // The toolbar undo that follows must be the first step off the top of the stack. Had the
     // keystroke above reached the document, it would be the second, and the row below moves too.

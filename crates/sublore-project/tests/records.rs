@@ -14,7 +14,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sublore_project::error::ProjectErrorKind;
 use sublore_project::model::FileRole;
 use sublore_project::records::{
-    add_episode, attach_file, delete_episode, episodes, files, Project,
+    add_episode, attach_file, delete_episode, detach_file, episodes, files, relocate_file,
+    set_episode_title, Project,
 };
 
 /// Subtitle bytes, not tidy text: a CRLF file and a non-ASCII one.
@@ -597,6 +598,173 @@ fn deleting_an_episode_removes_its_rows_and_nothing_else() {
         "the user's file is still on disk"
     );
     assert_eq!(read_bytes(&kept), SRT);
+    project.close().expect("closes");
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ---------------------------------------------------------------------------
+// Decision 24, D2 and D3: rename, detach and locate. None of them touches a file on disk.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn renaming_an_episode_changes_its_title_and_nothing_else() {
+    let (root, folder, user) = workspace("rename-episode");
+    let subtitle = write_bytes(&user.join("ep01.srt"), SRT);
+
+    let mut project = Project::create(&folder, "Series", at(1_756_000_000)).expect("created");
+    let episode = add_episode(&mut project, "one", at(1)).expect("episode one");
+    let other = add_episode(&mut project, "two", at(2)).expect("episode two");
+    attach_file(&mut project, episode.id, FileRole::Source, &subtitle, at(3)).expect("attaches");
+    let attached = files(&project, episode.id).expect("lists");
+
+    set_episode_title(&mut project, episode.id, "Ep. 01 — 第一話").expect("the episode is renamed");
+
+    let listed = episodes(&project).expect("lists");
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].title, "Ep. 01 — 第一話");
+    assert_eq!(listed[0].id, episode.id, "the same row, not a new one");
+    assert_eq!(listed[0].ordinal, episode.ordinal, "the order is unchanged");
+    assert_eq!(
+        listed[0].created_at, episode.created_at,
+        "when it was made is unchanged"
+    );
+    assert_eq!(listed[1], other, "the other episode is untouched");
+    assert_eq!(
+        files(&project, episode.id).expect("lists"),
+        attached,
+        "the attachment rows are untouched"
+    );
+    assert_eq!(
+        set_episode_title(&mut project, episode.id + 500, "nobody")
+            .expect_err("an episode that is not there cannot be renamed")
+            .kind,
+        ProjectErrorKind::EpisodeNotFound
+    );
+
+    assert_eq!(read_bytes(&subtitle), SRT, "the user's file is untouched");
+    project.close().expect("closes");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn detaching_removes_one_record_and_leaves_the_file_where_it_is() {
+    let (root, folder, user) = workspace("detach-file");
+    let subtitle = write_bytes(&user.join("ep01.srt"), SRT);
+    let media = write_bytes(&user.join("ep01.mkv"), MKV);
+
+    let mut project = Project::create(&folder, "Series", at(1_756_000_000)).expect("created");
+    let episode = add_episode(&mut project, "one", at(1)).expect("episode");
+    let source = attach_file(&mut project, episode.id, FileRole::Source, &subtitle, at(2))
+        .expect("the subtitle attaches");
+    attach_file(&mut project, episode.id, FileRole::Media, &media, at(3))
+        .expect("the media attaches");
+    let before = snapshot(&user);
+
+    detach_file(&mut project, source.id).expect("the record is removed");
+
+    let left = files(&project, episode.id).expect("lists");
+    assert_eq!(left.len(), 1, "only the detached record went");
+    assert_eq!(left[0].path, media);
+    // Detaching what is already gone is not a failure: what was asked for is not there either way.
+    detach_file(&mut project, source.id).expect("detaching twice is not a failure");
+    assert_eq!(files(&project, episode.id).expect("lists").len(), 1);
+
+    assert_eq!(
+        snapshot(&user),
+        before,
+        "the user's folder is byte-identical"
+    );
+    project.close().expect("closes");
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn locating_a_moved_file_re_points_the_record_and_moves_no_file() {
+    let (root, folder, user) = workspace("relocate-file");
+    let elsewhere = root.join("elsewhere");
+    fs::create_dir_all(&elsewhere).expect("the second user directory should be creatable");
+    let original = write_bytes(&user.join("ep01.srt"), SRT);
+    let moved = write_bytes(&elsewhere.join("ep01.srt"), SRT_IT);
+    let other = write_bytes(&user.join("ep02.srt"), SRT);
+
+    let mut project = Project::create(&folder, "Series", at(1_756_000_000)).expect("created");
+    let episode = add_episode(&mut project, "one", at(1)).expect("episode");
+    let record = attach_file(&mut project, episode.id, FileRole::Source, &original, at(2))
+        .expect("the subtitle attaches");
+    let second = attach_file(&mut project, episode.id, FileRole::Target, &other, at(3))
+        .expect("the second subtitle attaches");
+    let before = (snapshot(&user), snapshot(&elsewhere));
+
+    let updated = relocate_file(&mut project, record.id, &moved).expect("the record is re-pointed");
+
+    assert_eq!(updated.id, record.id, "the same record, re-pointed");
+    assert_eq!(updated.path, moved);
+    assert_eq!(
+        updated.role,
+        FileRole::Source,
+        "the role does not move with it"
+    );
+    assert_eq!(
+        updated.byte_length,
+        Some(SRT_IT.len() as u64),
+        "the size is read from the file it now points at"
+    );
+    assert_eq!(
+        updated.added_at, record.added_at,
+        "when it was attached stands"
+    );
+    assert_eq!(
+        files(&project, episode.id).expect("lists"),
+        vec![updated.clone(), second.clone()],
+        "the other record is untouched and the order holds"
+    );
+
+    // The episode already holds `other`, so pointing this record at it would make two of one file.
+    assert_eq!(
+        relocate_file(&mut project, record.id, &other)
+            .expect_err("a path the episode already holds is refused")
+            .kind,
+        ProjectErrorKind::DuplicateFile
+    );
+    assert_eq!(
+        relocate_file(&mut project, record.id + 500, &moved)
+            .expect_err("a record that is not there cannot be re-pointed")
+            .kind,
+        ProjectErrorKind::FileNotAttached
+    );
+    for (label, path, expected) in [
+        (
+            "a relative path",
+            PathBuf::from("ep01.srt"),
+            ProjectErrorKind::PathNotAbsolute,
+        ),
+        (
+            "a file that is not there",
+            user.join("nowhere.srt"),
+            ProjectErrorKind::FileNotFound,
+        ),
+        ("a directory", user.clone(), ProjectErrorKind::NotAFile),
+    ] {
+        assert_eq!(
+            relocate_file(&mut project, record.id, &path)
+                .expect_err(label)
+                .kind,
+            expected,
+            "{label} must be refused"
+        );
+    }
+    assert_eq!(
+        files(&project, episode.id).expect("lists"),
+        vec![updated, second],
+        "every refusal left the records exactly as they were"
+    );
+
+    // The whole point of D3: locating moves a record, never a file.
+    assert_eq!(
+        (snapshot(&user), snapshot(&elsewhere)),
+        before,
+        "both user folders are byte-identical"
+    );
     project.close().expect("closes");
     let _ = fs::remove_dir_all(&root);
 }

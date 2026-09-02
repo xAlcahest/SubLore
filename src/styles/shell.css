@@ -50,10 +50,12 @@ body {
   height: 13.5rem;
 }
 
+/* 6.5rem is the mockup's 104px at the default root size, and the tree is what fits in it: T2 held
+   the rail at 18rem only because the panel of fields and buttons it carried did not. */
 .shell__rail {
   display: flex;
   flex: none;
-  width: 18rem;
+  width: 6.5rem;
   flex-direction: column;
   min-height: 0;
   border-right: 1px solid var(--line);

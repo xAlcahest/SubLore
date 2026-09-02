@@ -36,7 +36,15 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import console from "node:console";
-import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -51,7 +59,7 @@ import {
   waitForChooser,
 } from "../lib/chooser.js";
 import { appEnv } from "../lib/env.js";
-import { clickAt, focusWindow, pressKey } from "../lib/input.js";
+import { clickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import {
   repoRoot,
   requireAppBinary,
@@ -64,7 +72,7 @@ import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
 
 /** Gutting an assertion has to be as red as failing one, so the checks count themselves. */
-const EXPECTED_CHECKS = 14;
+const EXPECTED_CHECKS = 15;
 let checksRun = 0;
 
 /**
@@ -78,22 +86,29 @@ let checksRun = 0;
 const CHROME_TEXT = { x: 900, y: 168 };
 
 /**
- * Tab stops from `CHROME_TEXT` to each rail control, in ProjectPanel.tsx's own order: Choose,
- * Create, Open, Delete project, the episode field, Add episode, Choose again.
+ * Tab stops from `CHROME_TEXT` into the rail, in ProjectRail.tsx's own DOM order: the project node
+ * — "No project open." until there is one — and then each episode under it.
  *
- * The rail is reached by the keyboard rather than by pixel because it scrolls and its viewport is
- * 13.5rem tall whatever the window is (src/styles/shell.css) — so no window size brings the file
- * row above its fold, and the row's pixel is a dozen font-dependent line heights the harness does
- * not choose. A tab stop is the app's own DOM order. Clicking a paragraph outside the rail puts the
- * focus navigation starting point there, so these counts hold wherever the rail happens to sit.
- *
- * A disabled control is not a tab stop: Add episode is skipped throughout because this check never
- * types an episode title, and Create and Open are skipped until a folder has been chosen — which is
- * why Choose is one stop in from the chrome whether or not a project is open.
+ * The rail is reached by the keyboard rather than by pixel because a row's pixel is a stack of
+ * font-dependent line heights the harness does not choose. A tab stop is the app's own DOM order.
+ * Clicking a paragraph outside the rail puts the focus navigation starting point there, so these
+ * counts hold wherever the rail happens to sit.
  */
-const CHOOSE_FOLDER_TABS = 1;
-const CREATE_PROJECT_TABS = 2;
-const CHOOSE_FILE_TABS = 6;
+const RAIL_ROOT_TABS = 1;
+const RAIL_EPISODE_TABS = 2;
+
+/**
+ * Where each command sits in the menu its node opens (decision 24, A3). Open project is second in
+ * both of the project node's two states, so opening a project is one route either way.
+ */
+const CREATE_PROJECT = 0;
+const ADD_EPISODE = 0;
+const OPEN_PROJECT = 1;
+const ATTACH_MEDIA = 0;
+
+/** What opens a node's menu: a click on the project node, the menu key on an episode. */
+const CLICK = "space";
+const MENU_KEY = "Menu";
 
 /** The two chooser titles. Frozen contract with src-tauri/src/strings.rs. */
 const FOLDER_TITLE = "Choose a project folder";
@@ -280,8 +295,12 @@ function describeThreads(others) {
  * Put the keyboard focus on the rail control this many tab stops past the chrome's status line.
  * `at` turns a point in the window into the point on the screen it is drawn at.
  */
-async function focusRailControl(toplevel, at, tabs) {
+async function focusRailNode(toplevel, at, tabs) {
   focusWindow(toplevel.id);
+  // Twice: the first click may land on an open menu's backdrop and only dismiss it, and the
+  // starting point for the walk below has to be the paragraph itself.
+  clickAt(at(CHROME_TEXT).x, at(CHROME_TEXT).y);
+  await sleep(200);
   clickAt(at(CHROME_TEXT).x, at(CHROME_TEXT).y);
   await sleep(300);
   for (let step = 0; step < tabs; step += 1) {
@@ -290,12 +309,23 @@ async function focusRailControl(toplevel, at, tabs) {
   }
 }
 
+/** Open a rail node's menu and walk the keyboard down to the item at `index`. */
+async function walkToMenuItem(toplevel, at, { tabs, index, opener }) {
+  await focusRailNode(toplevel, at, tabs);
+  pressKey(opener);
+  await sleep(400);
+  for (let step = 0; step < index; step += 1) {
+    pressKey("Down");
+    await sleep(80);
+  }
+}
+
 /**
- * Press a rail control until a chooser answers, because a button exists before the webview has
+ * Press a rail command until a chooser answers, because a menu item exists before the webview has
  * wired it up. The whole walk is repeated on each attempt rather than the last keystroke: a Tab
  * that missed would otherwise leave every later press on a control nobody chose.
  */
-async function pressUntilChooser(toplevel, at, tabs, title, { attempts = 8, alive } = {}) {
+async function pressUntilChooser(toplevel, at, route, title, { attempts = 8, alive } = {}) {
   let last = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     // A chooser the last attempt opened just too late to be seen is the one being asked for, and it
@@ -304,7 +334,7 @@ async function pressUntilChooser(toplevel, at, tabs, title, { attempts = 8, aliv
     if (late !== null) {
       return late;
     }
-    await focusRailControl(toplevel, at, tabs);
+    await walkToMenuItem(toplevel, at, route);
     pressKey("space");
     try {
       return await waitForChooser(title, { timeout: 4000, alive });
@@ -313,9 +343,10 @@ async function pressUntilChooser(toplevel, at, tabs, title, { attempts = 8, aliv
     }
   }
   throw new Error(
-    `no chooser named "${title}" after ${attempts} presses of the control ${tabs} tab stops past ` +
-      `${JSON.stringify(CHROME_TEXT)}. Either that point is no longer the chrome's status line, or ` +
-      `the rail's focus order changed.\n${last?.message ?? ""}`,
+    `no chooser named "${title}" after ${attempts} walks to item ${route.index} of the menu on the ` +
+      `node ${route.tabs} tab stops past ${JSON.stringify(CHROME_TEXT)}. Either that point is no ` +
+      `longer the chrome's status line, or the rail's focus order or menu order changed.\n` +
+      `${last?.message ?? ""}`,
   );
 }
 
@@ -416,9 +447,13 @@ async function main() {
 
     // The folder half. `pressUntilChooser` throws unless a chooser is on screen, so a `check` here
     // would only ever be true and would inflate the counter.
-    const folderChooser = await pressUntilChooser(toplevel, at, CHOOSE_FOLDER_TABS, FOLDER_TITLE, {
-      alive,
-    });
+    const folderChooser = await pressUntilChooser(
+      toplevel,
+      at,
+      { tabs: RAIL_ROOT_TABS, index: CREATE_PROJECT, opener: CLICK },
+      FOLDER_TITLE,
+      { alive },
+    );
     await answerChooser(folderChooser, projectFolder, "folder");
     check(
       "the folder chooser handed back the folder it was given",
@@ -429,8 +464,7 @@ async function main() {
       `${projectFolder} never came back. The app's log held:\n${appLog(dataHome)}`,
     );
 
-    await focusRailControl(toplevel, at, CREATE_PROJECT_TABS);
-    pressKey("space");
+    // Create project is one gesture since T7: the chooser answers and the project is made there.
     const projectFile = path.join(projectFolder, "project.sublore");
     const created = await waitFor(() => existsSync(projectFile), {
       timeout: 20000,
@@ -441,15 +475,47 @@ async function main() {
     check(
       "the app created the project in the folder the picker returned",
       created,
-      `${projectFile} does not exist, so the chosen folder never reached the panel's field and ` +
-        `Create had nothing to work with. The app's log held:\n${appLog(dataHome)}`,
+      `${projectFile} does not exist, so the chosen folder never reached the command behind the ` +
+        `menu item. The app's log held:\n${appLog(dataHome)}`,
     );
 
-    // The file half. Its row exists only once a project is open (ProjectPanel.tsx), and since T2 it
-    // sits below the rail's fold, which is why it is reached by focus rather than by pixel.
-    const fileChooser = await pressUntilChooser(toplevel, at, CHOOSE_FILE_TABS, FILE_TITLE, {
-      alive,
+    // The file half. Attaching is an episode's command, so there has to be an episode: the rail
+    // asks for its name in a field of its own, which is typed into here and nowhere else.
+    //
+    // No DOM here, so the episode is waited for through the database: every write past the create
+    // lands in the write-ahead log beside it, which is stamped before the gesture rather than after.
+    const wal = `${projectFile}-wal`;
+    const walMark = () => (existsSync(wal) ? `${statSync(wal).size}@${statSync(wal).mtimeMs}` : "");
+    const before_episode = walMark();
+    await walkToMenuItem(toplevel, at, {
+      tabs: RAIL_ROOT_TABS,
+      index: ADD_EPISODE,
+      opener: CLICK,
     });
+    pressKey("space");
+    await sleep(600);
+    typeText("One");
+    pressKey("Return");
+    const added = await waitFor(() => walMark() !== before_episode, {
+      timeout: 20000,
+      message: "the episode to reach the project database",
+    })
+      .then(() => true)
+      .catch(() => false);
+    check(
+      "the episode the rail asked for reached the project",
+      added,
+      `${wal} is still ${before_episode}, so Add episode wrote nothing. The app's log held:\n` +
+        `${appLog(dataHome)}`,
+    );
+
+    const fileChooser = await pressUntilChooser(
+      toplevel,
+      at,
+      { tabs: RAIL_EPISODE_TABS, index: ATTACH_MEDIA, opener: MENU_KEY },
+      FILE_TITLE,
+      { alive },
+    );
     await answerChooser(fileChooser, subtitle, "file");
     check(
       "the file chooser handed back the file it was given",
@@ -461,9 +527,13 @@ async function main() {
     // from before the Escape: matching the whole log would pass on a cancellation from earlier.
     const CANCELLED = /chooser: the project-file choice was cancelled/g;
     const before_escape = (appLog(dataHome).match(CANCELLED) ?? []).length;
-    const cancelled = await pressUntilChooser(toplevel, at, CHOOSE_FILE_TABS, FILE_TITLE, {
-      alive,
-    });
+    const cancelled = await pressUntilChooser(
+      toplevel,
+      at,
+      { tabs: RAIL_EPISODE_TABS, index: ATTACH_MEDIA, opener: MENU_KEY },
+      FILE_TITLE,
+      { alive },
+    );
     await cancelChooser(cancelled, "file");
     check(
       "a chooser dismissed with Escape comes back as a cancellation",
@@ -505,9 +575,13 @@ async function main() {
     // cancellation never touched.
     const FOLDER_CANCELLED = /chooser: the project-folder choice was cancelled/g;
     const cancelledBefore = (appLog(dataHome).match(FOLDER_CANCELLED) ?? []).length;
-    const browsed = await pressUntilChooser(toplevel, at, CHOOSE_FOLDER_TABS, FOLDER_TITLE, {
-      alive,
-    });
+    const browsed = await pressUntilChooser(
+      toplevel,
+      at,
+      { tabs: RAIL_ROOT_TABS, index: OPEN_PROJECT, opener: CLICK },
+      FOLDER_TITLE,
+      { alive },
+    );
     // Alt+Home is GTK's own "go to the home folder", so this cancellation happens somewhere other
     // than the folder that was chosen. A memory written from where the chooser was browsing would
     // be the home folder, and the second run would say so.
@@ -545,9 +619,13 @@ async function main() {
     const alive = () => second.exit === null;
 
     // Accepted with nothing chosen in it, so the folder it hands back is the folder it opened at.
-    const reopened = await pressUntilChooser(toplevel, at, CHOOSE_FOLDER_TABS, FOLDER_TITLE, {
-      alive,
-    });
+    const reopened = await pressUntilChooser(
+      toplevel,
+      at,
+      { tabs: RAIL_ROOT_TABS, index: OPEN_PROJECT, opener: CLICK },
+      FOLDER_TITLE,
+      { alive },
+    );
     await acceptChooser(reopened, "folder");
     check(
       "the folder chooser opened at the folder chosen before the app was closed",
@@ -564,9 +642,13 @@ async function main() {
 
     // A remembered folder that is gone is a folder the user moved or deleted between sessions.
     rmSync(projectFolder, { recursive: true, force: true });
-    const defaulted = await pressUntilChooser(toplevel, at, CHOOSE_FOLDER_TABS, FOLDER_TITLE, {
-      alive,
-    });
+    const defaulted = await pressUntilChooser(
+      toplevel,
+      at,
+      { tabs: RAIL_ROOT_TABS, index: OPEN_PROJECT, opener: CLICK },
+      FOLDER_TITLE,
+      { alive },
+    );
     check(
       "a remembered folder that is no longer there is dropped instead of handed to the chooser",
       await said(
