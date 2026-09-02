@@ -16,6 +16,7 @@
     "e2e:shutdown": "node e2e/scripts/shutdown-check.js",
     "e2e:close-gate": "node e2e/scripts/close-gate-check.js",
     "e2e:close-gate-late-edit": "node e2e/scripts/close-gate-late-edit-check.js",
+    "e2e:quit-gate": "node e2e/scripts/quit-gate-check.js",
     "e2e:startup-args": "node e2e/scripts/startup-args-check.js",
     "e2e:no-display": "node e2e/scripts/no-display-check.js",
     "e2e:wayland": "node e2e/scripts/wayland-attach-check.js",
