@@ -29,12 +29,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { appEnv } from "../lib/env.js";
 import { doubleClickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import { answerDialog } from "../lib/gtk-dialog.js";
-import { closeWindowTool, repoRoot, requireAppBinary } from "../lib/paths.js";
+import { closeWindowTool, firstCueText, repoRoot, requireAppBinary } from "../lib/paths.js";
+import { SUBTITLE_OPENED, waitForLog } from "../lib/applog.js";
 import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { allWindows, findToplevel } from "../lib/x11.js";
 
-/** Point in the current shell, relative to the toplevel origin. M2.0 must revisit this. */
-const FIRST_CUE_TEXT = { x: 750, y: 540 };
 /** Frozen contract with src-tauri/src/strings.rs, same as the close gate check's. */
 const DIALOG_TITLE = "Unsaved changes";
 const EDIT_MARK = "SUBLORE_N1B";
@@ -75,11 +74,11 @@ try {
   });
 
   phase = "dirty";
-  // Fixed waits, for the same reason close-gate-check.js has them: without a DOM there is nothing
-  // observable to wait on here. A wait that turns out too short shows up as a phase, not as a pass.
-  await sleep(3500);
+  // The app says when the document is open, so this waits for that rather than for a number of
+  // milliseconds: the number was 3500 and CI was slower than it (gate 2, run 33339776169).
+  await waitForLog(dataHome, SUBTITLE_OPENED, { what: "the subtitle to be open" });
   focusWindow(toplevel.id);
-  doubleClickAt(toplevel.absX + FIRST_CUE_TEXT.x, toplevel.absY + FIRST_CUE_TEXT.y);
+  doubleClickAt(toplevel.absX + firstCueText.x, toplevel.absY + firstCueText.y);
   await sleep(600);
   typeText(EDIT_MARK);
   pressKey("Return");
