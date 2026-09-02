@@ -29,7 +29,10 @@ const MISSING = "missing";
 /** From `en.project.roles`: what the attachment's tooltip calls it. */
 const SOURCE_ROLE = "Source";
 const EPISODE_TITLE = "Episode 1";
-const RENAMED_TITLE = "Episode 1 — pilot";
+// ASCII on purpose: `xdotool type` remaps a spare keycode for a character the keymap has no
+// key for, and the webview reports it as unidentified, so the field never fills. Non-ASCII
+// titles are covered where they belong, in `records.rs`'s `renames_an_episode`.
+const RENAMED_TITLE = "Episode 1 pilot";
 /** What the episode row reads, from `en.project.episode`: "{ordinal}. {title}". */
 const EPISODE_ROW = `1. ${EPISODE_TITLE}`;
 const RENAMED_ROW = `1. ${RENAMED_TITLE}`;
