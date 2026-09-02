@@ -356,6 +356,22 @@ fn shutdown_during_open_never_strands_either_call() {
     let path = fixture_path();
     let mut crossed = 0;
 
+    // The sweep is measured, not chosen: one uninterrupted open says how wide the window is on
+    // this machine, and the steps divide that. A fixed microsecond figure was right here and far
+    // too small on the Windows runner, where every step landed after the open had finished.
+    let reference = {
+        let player = player();
+        let started = Instant::now();
+        let _ = player.open(&path);
+        let took = started.elapsed();
+        assert!(
+            player.shutdown(),
+            "the reference open must leave a destroyable core"
+        );
+        took
+    };
+    let stride = (reference / 12).max(Duration::from_micros(50));
+
     for step in 0..12 {
         let player = Arc::new(player());
         let opener = {
@@ -369,7 +385,7 @@ fn shutdown_during_open_never_strands_either_call() {
         };
 
         // Sweep the window between the two locks `open` used to take separately.
-        sleep(Duration::from_micros(step * 150));
+        sleep(stride * step as u32);
         let closed = Instant::now();
         let destroyed = player.shutdown();
         let close_took = closed.elapsed();
@@ -409,8 +425,9 @@ fn shutdown_during_open_never_strands_either_call() {
     // land outside the window proves only that ordered calls work. See BACKLOG.md N9, S8.
     assert!(
         crossed > 0,
-        "{crossed} of the 12 steps found an open in flight, so the microsecond sweep is the wrong \
-         size for this machine and the race was never run"
+        "{crossed} of the 12 steps found an open in flight. The sweep spans {reference:?}, \
+         measured from one uninterrupted open on this machine, in strides of {stride:?}, and no \
+         step landed inside the window, so the race was never run"
     );
 }
 
