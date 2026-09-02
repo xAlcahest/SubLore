@@ -43,6 +43,8 @@ pub enum ProjectErrorKind {
     /// Already attached to this episode under this path.
     DuplicateFile,
     EpisodeNotFound,
+    /// The attachment row being re-pointed is not in the project any more.
+    FileNotAttached,
     /// SQLITE_FULL or an IO error from the database.
     WriteFailed,
     PermissionDenied,

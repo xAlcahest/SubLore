@@ -78,10 +78,13 @@ describe("video surface with no video open", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => browser.execute(() => document.querySelector(".bar__button") !== null), {
-      timeout: 30000,
-      message: "the app UI to render",
-    });
+    await waitFor(
+      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      {
+        timeout: 30000,
+        message: "the app UI to render",
+      },
+    );
   });
 
   it("leaves the stage empty and the surface unmapped before anything is opened", async () => {
@@ -117,7 +120,7 @@ describe("video surface with no video open", () => {
   });
 
   it("keeps the surface unmapped after an open that failed", async () => {
-    const button = await centreOf(".bar__button");
+    const button = await centreOf(".toolbar__open-video");
     clickAt(toplevel.absX + button.x, toplevel.absY + button.y);
     const chooser = await waitForChooser("Choose a video");
     await answerChooser(chooser, brokenVideo(), "video");

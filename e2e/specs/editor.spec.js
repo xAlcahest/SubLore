@@ -112,7 +112,7 @@ function workingCopy() {
 
 /** Open a subtitle through the system chooser, which is the only route since T1. */
 async function openSubtitle(toplevel, file) {
-  await clickElement(toplevel, ".subbar__open");
+  await clickElement(toplevel, ".toolbar__open-subtitle");
   const chooser = await waitForChooser("Choose a subtitle");
   await answerChooser(chooser, file, "subtitle");
   focusWindow(toplevel.id);
@@ -314,7 +314,7 @@ describe("cue list editing", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => present(".subbar__open"), {
+    await waitFor(() => present(".toolbar__open-subtitle"), {
       timeout: 30000,
       message: "the subtitle bar to render",
     });
@@ -633,7 +633,7 @@ describe("cue list editing", () => {
     // Undone back to the file as it was opened, so there is nothing unsaved any more.
     expect(await present(".statusbar__dirty")).toBe(false);
 
-    await clickElement(toplevel, ".subbar__redo");
+    await clickElement(toplevel, ".toolbar__redo");
     await waitFor(async () => (await rowText(EDITED_POSITION)) === EDITED_TEXT, {
       timeout: 20000,
       message: "the redone text to come back",
@@ -642,7 +642,7 @@ describe("cue list editing", () => {
   });
 
   it("saves the edit, and every other byte of the file is the byte that was there", async () => {
-    await clickElement(toplevel, ".subbar__save");
+    await clickElement(toplevel, ".toolbar__save");
     await waitFor(async () => (await present(".statusbar__dirty")) === false, {
       timeout: 20000,
       message: "the dirty marker to clear after a save",
@@ -701,7 +701,7 @@ describe("cue list editing", () => {
 
     // Save without pressing Enter first: the click blurs the editor, so the commit it causes and
     // the save must both land, in that order.
-    await clickElement(toplevel, ".subbar__save");
+    await clickElement(toplevel, ".toolbar__save");
     await waitFor(async () => (await present(".statusbar__dirty")) === false, {
       timeout: 20000,
       message: "the dirty marker to clear after saving an open editor",
@@ -734,24 +734,41 @@ describe("cue list editing", () => {
       message: `row ${THIRD_POSITION} to hold the second edit`,
     });
 
-    // T1 left one text box outside the cue editor, in the project panel, so that is where a typed
-    // ctrl+z can still be taken by the document's handler. It only exists once a project is open.
-    await clickElement(toplevel, ".project__choose-folder");
+    // The one text box outside the cue editor is the field the rail's Add episode question opens
+    // with, so that is where a typed ctrl+z can still be taken by the document's handler. It needs
+    // a project open, and it is reached the way T7 left the rail: through the rail's own menu.
+    await clickElement(toplevel, ".rail__empty");
+    await waitFor(() => present(".railmenu__item--create-project"), {
+      timeout: 20000,
+      message: "the rail's project menu to open",
+    });
+    await clickElement(toplevel, ".railmenu__item--create-project");
     const folderChooser = await waitForChooser("Choose a project folder");
     await answerChooser(folderChooser, scratchFolder("undo-project"), "project folder");
     focusWindow(toplevel.id);
-    await clickElement(toplevel, ".project__create");
-    await waitFor(() => present(".project__new-episode"), {
+    await waitFor(() => present(".rail__project"), {
       timeout: 20000,
-      message: "the project panel to offer its episode box",
+      message: "the rail to show the project it just created",
     });
 
-    await typeInto(toplevel, ".project__new-episode", "Episode 1");
+    await clickElement(toplevel, ".rail__project");
+    await waitFor(() => present(".railmenu__item--add-episode"), {
+      timeout: 20000,
+      message: "the rail's project menu to offer Add episode",
+    });
+    await clickElement(toplevel, ".railmenu__item--add-episode");
+    await waitFor(() => present(".raildialog__field"), {
+      timeout: 20000,
+      message: "the rail to ask for an episode name",
+    });
+
+    await typeInto(toplevel, ".raildialog__field", "Episode 1");
     key("ctrl+z");
+    key("Escape");
 
     // The toolbar undo that follows must be the first step off the top of the stack. Had the
     // keystroke above reached the document, it would be the second, and the row below moves too.
-    await clickElement(toplevel, ".subbar__undo");
+    await clickElement(toplevel, ".toolbar__undo");
     await scrollTo(THIRD_POSITION);
     await waitFor(async () => (await rowText(THIRD_POSITION)) === thirdOriginal, {
       timeout: 20000,

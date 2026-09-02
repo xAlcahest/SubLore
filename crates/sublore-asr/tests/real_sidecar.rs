@@ -20,7 +20,7 @@ mod common;
 
 #[cfg(feature = "real-asr")]
 mod real {
-    use super::common::{snapshot, Sandbox};
+    use super::common::{comm_prefix, entries_in, snapshot, Sandbox};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU8, Ordering};
@@ -304,9 +304,7 @@ mod real {
             "a whisper process outlived the run that owns it"
         );
         assert_eq!(
-            fs::read_dir(&tools.scratch_root)
-                .map(|entries| entries.count())
-                .unwrap_or(0),
+            entries_in(&tools.scratch_root),
             0,
             "the scratch directory should be gone"
         );
@@ -322,8 +320,10 @@ mod real {
             .expect("the binary has a name");
         #[cfg(unix)]
         {
+            // `pgrep -x` matches the kernel's truncated `comm`, so the pattern is truncated the
+            // same way; a longer binary name would otherwise match nothing. See BACKLOG.md N9, S14.
             let output = std::process::Command::new("pgrep")
-                .args(["-x", name])
+                .args(["-x", comm_prefix(name)])
                 .output()
                 .expect("pgrep should be runnable");
             !String::from_utf8_lossy(&output.stdout).trim().is_empty()

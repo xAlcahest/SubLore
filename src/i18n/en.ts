@@ -1,8 +1,51 @@
 /** English source strings. All user-facing copy lives here, never inline in components. */
 export const en = {
   appName: "Sublore",
+  /**
+   * The menu bar and the toolbar. Only the titles with items behind them are here: Subtitles,
+   * Timing, Audio and Terms arrive with the milestone that fills each (decision 24 A2 and A4).
+   */
+  menu: {
+    file: {
+      title: "File",
+      openSubtitle: "Open subtitle…",
+      openVideo: "Open video…",
+      save: "Save",
+      saveCopy: "Save a copy…",
+      discard: "Discard changes",
+      quit: "Quit",
+    },
+    edit: {
+      title: "Edit",
+      undo: "Undo",
+      redo: "Redo",
+    },
+    help: {
+      title: "Help",
+      about: "About Sublore",
+    },
+    /** Drawn beside a menu item. Each key is handled by whichever component owns that command. */
+    keys: {
+      openSubtitle: "Ctrl+O",
+      openVideo: "Ctrl+Shift+O",
+      save: "Ctrl+S",
+      saveCopy: "Ctrl+Shift+S",
+      undo: "Ctrl+Z",
+      redo: "Ctrl+Y",
+      quit: "Ctrl+Q",
+    },
+    errors: {
+      quitFailed: "Sublore could not quit. Close the window instead.",
+    },
+  },
+  about: {
+    title: "About Sublore",
+    tagline: "Translation memory for subtitles.",
+    version: "Version {version}",
+    licence: "GNU General Public License, version 3 or later.",
+    close: "Close",
+  },
   video: {
-    open: "Open",
     play: "Play",
     pause: "Pause",
     position: "Position",
@@ -19,29 +62,56 @@ export const en = {
     },
   },
   project: {
-    pathLabel: "Project folder",
-    /** Stands where a chosen path goes, so the row does not collapse before anything is chosen. */
-    pathNone: "Nothing chosen",
-    choose: "Choose",
-    create: "Create",
-    open: "Open",
-    delete: "Delete project",
+    /** Over the tree, so the rail says what it is listing before anything is open. */
+    cap: "Project",
     noProject: "No project open.",
-    /** Title and folder, so the status line says which project and where it lives. */
-    status: "{title} · {folder}",
     noEpisodes: "No episodes yet.",
-    episodeLabel: "New episode",
     episodePlaceholder: "Episode name",
-    addEpisode: "Add episode",
     episode: "{ordinal}. {title}",
-    fileLabel: "File",
-    attach: "Attach",
     noFiles: "No files attached.",
+    /** A rail row is narrow, so the row carries the file's name and its tooltip the rest. */
     file: "{role} · {path}",
+    missing: "missing",
     roles: {
       media: "Video",
       source: "Source",
       target: "Target",
+    },
+    /** What right-clicking the rail opens, for anyone reaching it without seeing it. */
+    menuLabel: "Project actions",
+    menu: {
+      createProject: "Create project…",
+      openProject: "Open project…",
+      closeProject: "Close project",
+      deleteProject: "Delete project…",
+      addEpisode: "Add episode…",
+      attach: "Attach {role}…",
+      renameEpisode: "Rename episode…",
+      deleteEpisode: "Delete episode…",
+      openFile: "Open",
+      locateFile: "Locate…",
+      detachFile: "Detach",
+    },
+    /** Every one of these is asked once and answered before anything changes (decision 24, D2). */
+    ask: {
+      cancel: "Cancel",
+      addEpisodeTitle: "Add episode",
+      addEpisodeConfirm: "Add",
+      renameEpisodeTitle: "Rename episode",
+      renameEpisodeConfirm: "Rename",
+      closeProjectTitle: "Close project",
+      closeProjectMessage: "Close {title}? Nothing on disk is touched.",
+      closeProjectConfirm: "Close",
+      deleteProjectTitle: "Delete project",
+      deleteProjectMessage:
+        "Delete the project in {folder}? Sublore removes its own project file there and leaves your video and subtitle files exactly where they are.",
+      deleteProjectConfirm: "Delete project",
+      deleteEpisodeTitle: "Delete episode",
+      deleteEpisodeMessage: "Delete {episode}? The files attached to it stay on disk.",
+      deleteEpisodeConfirm: "Delete episode",
+      detachFileTitle: "Detach file",
+      detachFileMessage: "Detach {name} from {episode}? The file stays on disk.",
+      detachFileConfirm: "Detach",
     },
     deleted: "Deleted the project in {folder}. Your own video and subtitle files were not touched.",
     errors: {
@@ -62,6 +132,7 @@ export const en = {
       notAFile: "That path is not a file.",
       duplicateFile: "That file is already attached to this episode.",
       episodeNotFound: "That episode is not in the project any more.",
+      fileNotAttached: "That file is not attached to this episode any more.",
       noProjectOpen: "Open a project first.",
       writeFailed: "Sublore could not write to the project file. Check that the disk has room.",
       deleteFailed:
@@ -72,12 +143,6 @@ export const en = {
     },
   },
   subtitle: {
-    open: "Open",
-    save: "Save as",
-    saveFile: "Save",
-    undo: "Undo",
-    redo: "Redo",
-    discard: "Discard changes",
     /** Appended to the status line while the document differs from the file on disk. */
     dirty: "Unsaved changes",
     /** Shown once the undo bound has dropped its oldest entries. */

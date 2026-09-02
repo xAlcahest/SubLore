@@ -113,13 +113,16 @@ describe("video surface hide and show", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => browser.execute(() => document.querySelector(".bar__button") !== null), {
-      timeout: 30000,
-      message: "the app UI to render",
-    });
+    await waitFor(
+      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      {
+        timeout: 30000,
+        message: "the app UI to render",
+      },
+    );
 
     // Open the fixture through the chooser, the way a person does.
-    const open = await centreOf(".bar__button");
+    const open = await centreOf(".toolbar__open-video");
     clickAt(toplevel.absX + open.x, toplevel.absY + open.y);
     const chooser = await waitForChooser("Choose a video");
     await answerChooser(chooser, videoFixture, "video");

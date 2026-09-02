@@ -204,6 +204,10 @@ export default function CueList({
       if (pressed !== "z" && pressed !== "y" && pressed !== "s") {
         return;
       }
+      // Ctrl+Shift+S is Save a copy, which the chrome owns (decision 24 A3).
+      if (pressed === "s" && event.shiftKey) {
+        return;
+      }
       if (ownsTheKeyboard(event.target, editorRef.current)) {
         return;
       }

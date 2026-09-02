@@ -44,8 +44,23 @@ let checksRun = 0;
 
 /** The close dialog's window name. Frozen contract with src-tauri/src/strings.rs. */
 const DIALOG_TITLE = "Unsaved changes";
-/** The fixture's first cue before anything touches it: 'The harbour was empty when we got there.' */
-const UNEDITED_FIRST_CUE_CHARS = 40;
+/** The fixture both phases open. Its first cue is what the edit below changes. */
+const SOURCE_FIXTURE = path.join(repoRoot, "fixtures", "subtitles", "srt", "clean", "basic-lf.srt");
+
+/**
+ * The first cue's length as the fixture carries it, read rather than pinned: a pinned number and an
+ * edited fixture disagreeing puts the guard below back to accepting an unchanged commit, which is
+ * the failure it was rebuilt to reject. See BACKLOG.md N9, S15.
+ */
+function firstCueChars(bytes) {
+  const text = bytes.toString("utf8").split("\n\n")[0].split("\n").slice(2).join("\n");
+  if (text.length === 0) {
+    throw new Error(`no first cue text in ${SOURCE_FIXTURE}: the fixture changed shape`);
+  }
+  return text.length;
+}
+
+const UNEDITED_FIRST_CUE_CHARS = firstCueChars(readFileSync(SOURCE_FIXTURE));
 
 /** The text committed into cue 1, which the save branch then looks for in the file. */
 const EDIT_MARK = "SUBLORE_N1";
@@ -250,7 +265,7 @@ async function main() {
   requireAppBinary();
   requireCloseWindowTool();
 
-  const source = path.join(repoRoot, "fixtures", "subtitles", "srt", "clean", "basic-lf.srt");
+  const source = SOURCE_FIXTURE;
   const original = readFileSync(source);
 
   // Phase one: cancel, then discard, on the same instance.

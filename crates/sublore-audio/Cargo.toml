@@ -1,0 +1,16 @@
+[package]
+name = "sublore-audio"
+version = "0.1.0"
+description = "Waveform peaks: decode one audio track with ffmpeg and fold it into millisecond buckets"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[features]
+# Tests that need a real ffmpeg and the generated waveform fixtures. Off by default, so on a
+# machine without them there is no test to skip: there is no test at all. Run them with
+# `sh fixtures/video/make-waveform-fixtures.sh` first. See BACKLOG.md M2.4.
+real-media = []
+
+# Deliberately empty, as in sublore-io. ffmpeg is a child process, not a linked library.
+[dependencies]

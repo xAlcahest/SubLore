@@ -445,30 +445,41 @@ fn attaching_a_read_only_file_in_a_read_only_directory_changes_nothing() {
 // Structural: the crate's own source is the evidence. See the M4 design, section 5.
 // ---------------------------------------------------------------------------
 
-/// Every `.rs` file under the crate's `src/`, as (file name, source text).
+/// Every `.rs` file under the crate's `src/`, as (path below `src/`, source text). Recursive, in
+/// the shape `crates/sublore-asr/tests/no_network.rs` uses: a module in a subdirectory is source
+/// like any other and the guards below must see it. See BACKLOG.md N9, S10.
 fn crate_sources() -> Vec<(String, String)> {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let entries = fs::read_dir(&src)
-        .unwrap_or_else(|error| panic!("{} should be readable: {error}", src.display()));
-    let mut found: Vec<(String, String)> = entries
-        .map(|entry| entry.expect("a directory entry should be readable").path())
-        .filter(|path| path.extension().is_some_and(|kind| kind == "rs"))
-        .map(|path| {
-            let name = path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let text = fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("{} should be readable: {error}", path.display()));
-            (name, text)
-        })
-        .collect();
+    let mut found = Vec::new();
+    visit(&src, &src, &mut found);
     found.sort();
     assert!(
-        found.len() >= 7,
+        found.len() >= 8,
         "the crate's modules should all be there: {found:?}"
     );
     found
+}
+
+fn visit(root: &Path, dir: &Path, sink: &mut Vec<(String, String)>) {
+    let entries = fs::read_dir(dir)
+        .unwrap_or_else(|error| panic!("{} should be readable: {error}", dir.display()));
+    for entry in entries {
+        let path = entry.expect("a directory entry should be readable").path();
+        if path.is_dir() {
+            visit(root, &path, sink);
+        } else if path.extension().is_some_and(|kind| kind == "rs") {
+            let name = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .components()
+                .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/");
+            let text = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{} should be readable: {error}", path.display()));
+            sink.push((name, text));
+        }
+    }
 }
 
 fn occurrences(text: &str, needle: &str) -> usize {
@@ -479,7 +490,7 @@ fn occurrences(text: &str, needle: &str) -> usize {
 fn only_delete_rs_may_remove_a_file() {
     // Everything that creates, replaces, copies or removes something on disk. `fs::copy` and
     // `fs::write` are on the list because M4.2 forbids copying a user's file just as flatly as
-    // M4.3 forbids deleting one.
+    // M4.3 forbids deleting one. A renaming import defeats a name list, so this is a floor.
     let patterns = [
         "remove_file",
         "remove_dir_all",
