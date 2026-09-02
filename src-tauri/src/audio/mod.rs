@@ -320,10 +320,10 @@ pub async fn audio_peaks_cancel(
 ///
 /// Failures are logged rather than returned: the open succeeded, and the user has a video. The
 /// failures a translator can act on come from the job itself, as `audio://error`.
-pub fn start_for_playing_track(app: &AppHandle, player: &Player) {
-    let Some(media) = player.loaded_path() else {
-        return;
-    };
+pub fn start_for_playing_track(app: &AppHandle, player: &Player, media: &str) {
+    // The path comes from the caller, which has just opened it, rather than from mpv. Asking mpv
+    // gave None on a slow runner right after a successful open, and that branch returned in
+    // silence, so the waveform simply never happened and no line said why. See W5.
     let tracks = match player.audio_tracks() {
         Ok(tracks) => tracks,
         Err(error) => {

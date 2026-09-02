@@ -195,7 +195,7 @@ pub async fn video_open(
         let opened = player.open(&path)?;
         // On the same thread that loaded the file, so no second open can slip between the load
         // and this read of the track list: `open` refuses a concurrent one. See M2.4, W4.
-        crate::audio::start_for_playing_track(&peaking, &player);
+        crate::audio::start_for_playing_track(&peaking, &player, &opened.path);
         Ok(opened)
     })
     .await
