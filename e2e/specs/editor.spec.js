@@ -764,8 +764,8 @@ describe("cue list editing", () => {
       message: `row ${THIRD_POSITION} to hold the second edit`,
     });
 
-    // The one text box outside the cue editor is the field the rail's Add episode question opens
-    // with, so that is where a typed ctrl+z can still be taken by the document's handler. It needs
+    // The one text box that is not one of the document's own editors is the field the rail's Add
+    // episode question opens with, so that is where a typed ctrl+z could still be taken. It needs
     // a project open, and it is reached the way T7 left the rail: through the rail's own menu.
     await closeAnyOpenProject(toplevel);
     await openProjectMenu(toplevel);

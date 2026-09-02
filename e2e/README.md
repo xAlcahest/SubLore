@@ -90,6 +90,9 @@ capture's exit status instead.
 | `specs/video-empty.spec.js`             | `keeps the surface unmapped after an open that failed`                               | A file mpv refuses leaves an error on screen, the surface unmapped, and a later layout change does not show it.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `specs/chooser.spec.js`                 | `leaves no field in the interface that a path can be typed into`                     | T1's promise: no text input anywhere takes a path, the rail's own question excepted (and the cue editor, which exists only while a cue is open).                                                                                                                                                                                                                                                                                                                                                                                                |
 | `specs/chooser.spec.js`                 | five `... when the chooser is dismissed` checks                                      | Video, subtitle, save-a-copy, project folder and episode file: cancelling each chooser leaves the app exactly as it was, and writes nothing.                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `specs/current-line.spec.js`            | `shows the line the cursor is on, and follows the cursor when it moves`              | The tools column draws the cue the grid's cursor is on, and moving the cursor moves what it draws.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `specs/current-line.spec.js`            | `commits through the command the grid commits with, and the grid row shows it`       | The only subtitle command the commit issues is `subtitle_set_text`, the grid row shows the text, and nothing is written to disk.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `specs/current-line.spec.js`            | `is undone in one step, which is what a grid edit costs`                             | One Undo puts the document back where it opened and clears the unsaved marker.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 Everything above runs in the `e2e` CI job except four rows, named rather than counted:
 `webview-paint-check.js`, `wayland-attach-check.js`, and the two probes. `webview-paint-check.js`
@@ -114,7 +117,7 @@ is ready, so the `IsViewable` check is what makes this test meaningful.
 sh fixtures/video/make-sample.sh     # the fixture is generated, never committed
 sh scripts/fetch-model.sh            # ggml-tiny.en.bin, fetched once, never committed
 pnpm e2e:build                       # tauri build --debug --no-bundle
-xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e           # the nine WebDriver spec files
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e           # the twelve WebDriver spec files
 xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:shutdown  # the clean-close check
 xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:close-gate  # the unsaved-edits gate
 xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:close-gate-late-edit  # an edit made while the answer is in flight
@@ -171,7 +174,7 @@ A harness that runs nothing must not report success. WebdriverIO does not reliab
 specs, so `wdio.conf.js` asserts the count itself:
 
 ```js
-const EXPECTED_TESTS = 82;
+const EXPECTED_TESTS = 86;
 ```
 
 `onComplete` throws if fewer than that many tests passed, which covers a deleted spec file, an
@@ -281,6 +284,20 @@ Two other keyboard routes decide where that item may sit, and both are in File: 
 walks Open video down to Quit over the disabled pair, and `quit-gate-check.js` reaches Quit as the
 last enabled item in File. An item added anywhere in File breaks one of them, which is why
 Transcribe waits in Edit for the Audio title (decision 24 A2).
+
+Added by T5, the current line in the tools column: `.currentline`, `.currentline__times`,
+`.currentline__start`, `.currentline__end`, `.currentline__duration`, `.currentline__cps`,
+`.currentline__cps--over`, `.currentline__text`, `.currentline__empty`. The box is a second text
+field in the DOM, so it is in `chooser.spec.js`'s `ALLOWED_TEXT_FIELDS` beside the rail's question;
+what that check asserts — that no field ever holds a path — is unchanged. It carries
+`data-document-editor`, as `.cuelist__editor` does: the two are the document's own editors, so
+Ctrl+Z and Ctrl+S inside either belong to the document rather than to the webview, which is the
+distinction `editor.spec.js`'s ctrl+z check turns on.
+
+`shell.spec.js` asserts the waveform's absence as "nothing else takes space in `.shell__tools`",
+never as a missing selector, and shows the reading catching a panel it inserts itself before it
+reads the real column. A waveform shipped under another name walks past the second and not past the
+first.
 
 Readiness has no dedicated signal: a video is loaded when `.stage__empty` is gone **and**
 `.controls__button` is enabled. A subtitle file is open when `.statusbar__document` stops saying

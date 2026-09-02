@@ -27,15 +27,28 @@ function runBetween(from: number, to: number): Set<number> {
 
 /**
  * The active line and the selection as two states, decision 5. A document with rows opens on its
- * first row, selected alone; the grid remounts per document, so a new document starts there too.
+ * first row, selected alone.
+ *
+ * `openId` counts opens: the shell owns these states now that the tools column reads the cursor
+ * too (T5), so a new document can no longer reset them by remounting the grid.
  */
-export function useCueSelection(count: number): CueSelection {
+export function useCueSelection(count: number, openId: number): CueSelection {
   const [active, setActive] = useState<number | null>(count === 0 ? null : 0);
   const [selected, setSelected] = useState<ReadonlySet<number>>(() =>
     count === 0 ? new Set<number>() : new Set<number>([0]),
   );
   /** Where a range extension starts. Nothing renders from it, so it is a ref. */
   const anchor = useRef(0);
+  const [openedAt, setOpenedAt] = useState(openId);
+
+  // A new document starts on its first row. The rows and the count arrive in the same update, so
+  // the branch below already sees the document it is resetting onto.
+  if (openedAt !== openId) {
+    setOpenedAt(openId);
+    setActive(count === 0 ? null : 0);
+    setSelected(count === 0 ? new Set<number>() : new Set<number>([0]));
+    anchor.current = 0;
+  }
 
   const move = useCallback((index: number, how: CueMove) => {
     setActive(index);

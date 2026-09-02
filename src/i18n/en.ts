@@ -207,6 +207,17 @@ export const en = {
       /** Marks an ASS Comment: event, which a player does not draw. */
       comment: "Comment",
     },
+    /** The box in the tools column that edits whichever line the cursor is on (T5). */
+    currentLine: {
+      label: "Current line",
+      none: "No line to edit.",
+      start: "Start",
+      end: "End",
+      /** In seconds, which is the scale a line's length is judged against. */
+      duration: "Duration",
+      cps: "CPS",
+      text: "Text",
+    },
     reasons: {
       expectedTiming: "a timing line was expected here",
       badTimecode: "a timestamp is not valid",

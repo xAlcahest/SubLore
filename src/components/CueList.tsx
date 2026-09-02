@@ -8,9 +8,10 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 
-import { useCueSelection } from "../hooks/useCueSelection";
+import { type CueSelection } from "../hooks/useCueSelection";
 import { en } from "../i18n/en";
 import { type CueRow } from "../types/subtitle";
+import { CPS_LIMIT, isDocumentEditor, readingRate, timecode } from "./cueView";
 
 /**
  * Fixed row height in CSS pixels. The whole windowing calculation is this number, which is why it
@@ -19,21 +20,16 @@ import { type CueRow } from "../types/subtitle";
 const ROW_HEIGHT = 28;
 /** Rows kept rendered above and below the viewport, so a fast scroll does not show gaps. */
 const OVERSCAN = 8;
-/** Reading rate a line is flagged above, fixed and not configurable in v1. Decision 24 A8. */
-const CPS_LIMIT = 21;
-/** The markup A8 does not count: ASS override blocks and HTML-style tags. */
-const MARKUP = /\{[^}]*\}|<[^>]*>/g;
-/** Line breaks in both spellings a cue holds: a real one, and the `\N` of an ASS field. */
-const LINE_BREAKS = /\r\n|[\r\n]|\\[Nn]/g;
 /** Input types that hold typed text, and so keep their own undo. A range slider holds none. */
 const TEXT_INPUT_TYPES = ["text", "search", "url", "email", "tel", "password", "number"];
 
 /**
- * A field that owns its own keyboard: a path box, anything typed into but the cue editor. The
- * document shortcuts below stay out of those, so Ctrl+Z there means what it means everywhere else.
+ * A field that owns its own keyboard: anything typed into that is not one of the document's own
+ * editors. The document shortcuts below stay out of those, so Ctrl+Z there means what it means
+ * everywhere else.
  */
-function ownsTheKeyboard(target: EventTarget | null, editor: HTMLTextAreaElement | null): boolean {
-  if (!(target instanceof HTMLElement) || target === editor) {
+function ownsTheKeyboard(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement) || isDocumentEditor(target)) {
     return false;
   }
   if (target instanceof HTMLInputElement) {
@@ -47,31 +43,10 @@ function rowId(index: number): string {
   return `cuelist-row-${index}`;
 }
 
-/**
- * Characters per second: spaces counted, line breaks not, over text with its markup stripped.
- * Null when the cue has no duration to divide by. Decision 24 A8.
- */
-function readingRate(cue: CueRow): number | null {
-  const seconds = (cue.endMs - cue.startMs) / 1000;
-  if (!(seconds > 0)) {
-    return null;
-  }
-  return cue.text.replace(MARKUP, "").replace(LINE_BREAKS, "").length / seconds;
-}
-
-/** hh:mm:ss.mmm. Separators are punctuation, not translatable copy. */
-function timecode(milliseconds: number): string {
-  const safe = Number.isFinite(milliseconds) && milliseconds > 0 ? Math.floor(milliseconds) : 0;
-  const millis = safe % 1000;
-  const seconds = Math.floor(safe / 1000) % 60;
-  const minutes = Math.floor(safe / 60_000) % 60;
-  const hours = Math.floor(safe / 3_600_000);
-  const pad = (value: number, width: number) => value.toString().padStart(width, "0");
-  return `${pad(hours, 2)}:${pad(minutes, 2)}:${pad(seconds, 2)}.${pad(millis, 3)}`;
-}
-
 type CueListProps = {
   cues: CueRow[];
+  /** The cursor and the selection, held by the shell: the tools column reads the cursor too (T5). */
+  selection: CueSelection;
   /** ASS writes line breaks as `\N` inside one field, so a real one cannot be committed there. */
   multiline: boolean;
   /**
@@ -94,6 +69,7 @@ type CueListProps = {
  */
 export default function CueList({
   cues,
+  selection,
   multiline,
   flushRef,
   onEditingChange,
@@ -113,7 +89,7 @@ export default function CueList({
   const editingRef = useRef<number | null>(null);
 
   const count = cues.length;
-  const { active, selected, move, toggle, selectAll, collapse } = useCueSelection(count);
+  const { active, selected, move, toggle, selectAll, collapse } = selection;
 
   useEffect(() => {
     const list = listRef.current;
@@ -203,7 +179,7 @@ export default function CueList({
       if (pressed === "s" && event.shiftKey) {
         return;
       }
-      if (ownsTheKeyboard(event.target, editorRef.current)) {
+      if (ownsTheKeyboard(event.target)) {
         return;
       }
       // Intercepted inside the cue editor: the webview's own text undo must never diverge from
@@ -418,6 +394,7 @@ export default function CueList({
                   <textarea
                     className="cuelist__editor"
                     ref={editorRef}
+                    data-document-editor=""
                     value={draft}
                     spellCheck={false}
                     onChange={(event) => setDraft(event.target.value)}
