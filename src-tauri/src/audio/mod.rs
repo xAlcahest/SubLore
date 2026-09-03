@@ -14,8 +14,9 @@
 pub mod error;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use serde::Serialize;
 use sublore_audio::{peaks_cached, Bucket, Cancel, PeakRequest, PeaksCache};
@@ -249,8 +250,23 @@ pub fn run_job(
     emit: &(dyn Fn(AudioEvent) + Sync),
     cache: Option<&PeaksCache>,
 ) {
+    // How long the panel waited for something to draw. CONTRIBUTING.md section 7 puts a number on
+    // it, and the stopwatch is stopped where the peaks are handed over rather than where they are
+    // produced: an implementation that held them back and delivered them at the end would read as
+    // one long wait here, which is the regression the budget exists to catch.
+    let started = Instant::now();
+    let announced = AtomicBool::new(false);
+    let handed_over = |event: AudioEvent| {
+        if matches!(event, AudioEvent::Peaks(_)) && !announced.swap(true, Ordering::Relaxed) {
+            log::info!(
+                "waveform: job {job_id} had its first peaks after {} ms",
+                started.elapsed().as_millis()
+            );
+        }
+        emit(event);
+    };
     let on_chunk = |first_ms: u32, buckets: &[Bucket]| {
-        emit(AudioEvent::Peaks(chunk(job_id, first_ms, buckets)));
+        handed_over(AudioEvent::Peaks(chunk(job_id, first_ms, buckets)));
     };
     // Without a cache directory the peaks are still read, they are just read again next time: an
     // unusable cache is a slower app, never a broken one.
@@ -272,6 +288,12 @@ pub fn run_job(
         }),
         None => sublore_audio::extract_peaks(ffmpeg, request, cancel, &on_chunk),
     };
+    // On its own line rather than folded into the one below, so a reader of either is not reading
+    // around the other. CONTRIBUTING.md section 7 is written in these two numbers.
+    log::info!(
+        "waveform: job {job_id} finished in {} ms",
+        started.elapsed().as_millis()
+    );
     let terminal = match outcome {
         Ok(buckets) => AudioEvent::Done(AudioDone { job_id, buckets }),
         Err(error) => {
@@ -283,7 +305,7 @@ pub fn run_job(
             })
         }
     };
-    emit(terminal);
+    handed_over(terminal);
 }
 
 fn chunk(job_id: u64, first_ms: u32, buckets: &[Bucket]) -> AudioPeaks {

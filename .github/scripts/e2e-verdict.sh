@@ -6,7 +6,7 @@
 # seventh. A name on disk that is not in this list fails too, so a step and this list cannot drift
 # apart in silence. Adding a check means adding its name here.
 set -u
-EXPECTED="smoke shutdown close-gate late-edit quit-gate startup-args mpv-context picker-thread scale no-display"
+EXPECTED="smoke shutdown close-gate late-edit quit-gate startup-args mpv-context picker-thread waveform-budget scale no-display"
 
 missing=""
 failed=""

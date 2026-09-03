@@ -91,6 +91,9 @@ The usual standards apply in full. The Sublore-specific points:
 - Idle memory (project open, video paused): < 400 MB excluding whisper model memory.
 - UI stays responsive during transcription: ASR runs in the sidecar, never blocks the main thread; progress is visible and cancellable.
 - Opening a 2,000-line subtitle file: < 1 s. QA pass over one episode: < 5 s.
+- Waveform: first peaks on screen within 2 s of the media opening, and a 24-minute episode read all
+  the way within 20 s. Measured by `pnpm e2e:waveform-budget`, whose first number CI guards on every
+  push and whose second is the owner's machine's.
 
 A PR that regresses a budget states it explicitly and waits for owner approval.
 
