@@ -57,6 +57,36 @@ function present(selector) {
 }
 
 /**
+ * What the app is showing, for a wait that ran out. The panel is absent until the first peak
+ * arrives, so a bare timeout cannot tell a job that never started from one that failed from one
+ * that is merely slow; this reads the three places that each leave a different mark.
+ */
+async function whatTheAppShows() {
+  const state = await browser.execute(() => {
+    const canvas = document.querySelector(".waveform__canvas");
+    const error = document.querySelector(".statusbar__waveform-error");
+    const slider = document.querySelector(".controls__slider");
+    return {
+      panel: document.querySelector(".waveform") !== null,
+      canvas: canvas === null ? null : { width: canvas.width, height: canvas.height },
+      error: error === null ? null : error.textContent,
+      at: slider === null ? null : Number(slider.value),
+      duration: slider === null ? null : Number(slider.max),
+    };
+  });
+  const panel =
+    state.canvas === null
+      ? `no .waveform__canvas (panel ${state.panel ? "present" : "absent"})`
+      : `a ${state.canvas.width}x${state.canvas.height} canvas`;
+  const video =
+    state.duration === null
+      ? "no transport, so no video is open"
+      : `the video is open, ${state.at} of ${state.duration}s`;
+  const failed = state.error === null ? "no failure is on the status bar" : `"${state.error}"`;
+  return `${video}; ${panel}; ${failed}`;
+}
+
+/**
  * How tall the drawn wave is at one moment in the media, as a fraction of the canvas height, read
  * out of the canvas's own pixels.
  *
@@ -152,16 +182,21 @@ describe("the waveform draws what the job produces", () => {
 
     // The panel is up before the whole 60 s has been peaked. Asserted against the job's own report
     // rather than a stopwatch: `audio://done` has not been seen while this holds.
-    const drawnEarly = await waitFor(
-      async () => {
-        if (!(await present(".waveform"))) {
-          return null;
-        }
-        const ink = await inkAt(1, DURATION_S);
-        return ink !== null && ink.painted > 0 ? ink : null;
-      },
-      { timeout: 30000, message: "the waveform panel to appear and hold ink" },
-    );
+    let drawnEarly = null;
+    try {
+      drawnEarly = await waitFor(
+        async () => {
+          if (!(await present(".waveform"))) {
+            return null;
+          }
+          const ink = await inkAt(1, DURATION_S);
+          return ink !== null && ink.painted > 0 ? ink : null;
+        },
+        { timeout: 30000, message: "the waveform panel to appear and hold ink" },
+      );
+    } catch (error) {
+      throw new Error(`${error.message}\nwhen the wait ran out: ${await whatTheAppShows()}.`);
+    }
     expect(drawnEarly.painted).toBeGreaterThan(0);
   });
 
@@ -190,7 +225,9 @@ describe("the waveform draws what the job produces", () => {
         timeout: 60000,
         message: "every block centre to be drawn",
       },
-    );
+    ).catch(async (error) => {
+      throw new Error(`${error.message}\nwhen the wait ran out: ${await whatTheAppShows()}.`);
+    });
 
     for (const reading of readings) {
       const where = `${reading.from}-${reading.to}s`;

@@ -303,6 +303,16 @@ jobs:
       # check would be green for the wrong reason, so it refuses to run instead. Same owner-machine
       # rule. Neither is silently skippable: both fail loudly when their prerequisite is absent.
 
+      # WebDriver forwards the app's stderr and drops its stdout, so the log the app writes about
+      # itself never reached CI and a failing check could only be read from the outside. The app
+      # also writes it to its own log directory, which is what this takes.
+      - name: Take the log the app writes about itself
+        if: always()
+        run: |
+          mkdir -p ci-logs
+          cp -r "${XDG_DATA_HOME:-$HOME/.local/share}/com.sublore.app/logs" ci-logs/app-log \
+            || echo "the app wrote no log directory"
+
       # A diagnostic run collects every failure instead of stopping at the first, but it must not
       # end green while a check is red: the artefact is the evidence, this step is the verdict.
       - name: Collect the diagnostic logs
