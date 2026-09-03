@@ -101,8 +101,18 @@ async function main() {
     });
     check(`the installed app opened its "${windowTitle}" window`, toplevel !== null);
 
-    // Created is not shown: an unmapped toplevel is a window nobody can see.
-    const state = mapState(toplevel.id);
+    // Created is not shown: an unmapped toplevel is a window nobody can see. Waited for rather
+    // than read once, because `findToplevel` answers as soon as the window is in the tree and the
+    // map follows it: read at that instant the AppImage, which mounts a squashfs before it starts,
+    // answered IsUnMapped on a check the .deb had just passed.
+    let state = null;
+    await waitFor(
+      () => {
+        state = mapState(toplevel.id);
+        return state === "IsViewable" ? state : null;
+      },
+      { timeout: 15000, message: "the app window to be mapped" },
+    ).catch(() => null);
     check("that window is mapped on screen", state === "IsViewable", `map state was ${state}`);
   } finally {
     // Never leak processes on a failure path, but never signal a pgid the kernel may already have
