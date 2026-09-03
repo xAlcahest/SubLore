@@ -129,6 +129,7 @@ xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:startup-args  # names the comma
 xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:scale       # an integer display scale
 xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:picker-thread  # no second GTK thread, and the picker opens where it last landed
 xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e:mpv-context  # a refused gpu-context costs the request, not the window
+xvfb-run -a -s "-screen 0 1024x700x24" pnpm e2e:waveform-budget  # the waveform's two numbers, CONTRIBUTING.md section 7
 pnpm e2e:no-display                          # no xvfb-run: this one proves what happens without a display
 ```
 
@@ -137,6 +138,15 @@ Two more have prerequisites no headless runner has, so they are run by hand and 
 ```sh
 pnpm e2e:webview   # needs /sys/module/nvidia for the branch it tests to be taken
 pnpm e2e:wayland   # needs a real Wayland session, so no Xvfb wrapper
+```
+
+The waveform budget has a second half that is the owner's machine's and not CI's, because a runner
+is not the machine CONTRIBUTING.md section 7 names and a 24-minute fixture is not a thing to
+generate on every push:
+
+```sh
+sh fixtures/video/make-waveform-fixtures.sh --with-24min
+xvfb-run -a -s "-screen 0 1024x700x24" pnpm e2e:waveform-budget --with-24min
 ```
 
 The screen has to hold the whole window under test. Fedora's `xvfb-run` defaults to 640x480, and on

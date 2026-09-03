@@ -298,6 +298,13 @@ jobs:
       # The only automated check that catches N2c's fix being removed: every other job misses it
       # because devicePixelRatio is 1 under Xvfb. At GDK_SCALE=2 the window is 2048x1400, larger
       # than the screen, which this bare X server serves without clamping (verified locally).
+      # The first of CONTRIBUTING.md section 7's two waveform numbers. The 24-minute one is the
+      # owner's machine's: a runner is not the machine that budget names.
+      - name: Waveform budget test (peaks on screen inside two seconds)
+        continue-on-error: true
+        timeout-minutes: 5
+        run: .github/scripts/e2e-check.sh waveform-budget e2e:waveform-budget
+
       - name: Scaled surface test (an integer display scale is applied exactly once)
         continue-on-error: true
         timeout-minutes: 4

@@ -67,6 +67,13 @@ export function requireVideoFixture() {
 /** The M2.4 fixture whose audio is known: six ten-second blocks, tone first. Generated, not committed. */
 export const waveformFixture = path.join(repoRoot, "fixtures", "video", "waveform-60s.mkv");
 
+/** The M2.4 fixture for the 24 minute number. Written only by `--with-24min`, never in CI. */
+export const longFixture = path.join(repoRoot, "fixtures", "video", "waveform-24min.mkv");
+
+export function requireLongFixture() {
+  return requireFile(longFixture, "sh fixtures/video/make-waveform-fixtures.sh --with-24min");
+}
+
 export function requireWaveformFixture() {
   return requireFile(waveformFixture, "sh fixtures/video/make-waveform-fixtures.sh");
 }
