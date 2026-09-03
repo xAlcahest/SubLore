@@ -331,17 +331,45 @@ pub fn start_for_playing_track(app: &AppHandle, player: &Player, media: &str) {
             return;
         }
     };
-    // Decision 24 E3: media with no audio spawns no child, on any route into the panel.
-    let Some(track) = tracks.into_iter().find(|track| track.playing) else {
-        log::info!("waveform: {media} has no playing audio track, so nothing is peaked");
+    // Decision 24 E3: media with no audio spawns no child, on any route into the panel. That is the
+    // empty list below and not the fallback inside `track_to_peak`.
+    let Some(track) = track_to_peak(&tracks).cloned() else {
+        log::info!("waveform: {media} carries no audio track, so nothing is peaked");
         return;
     };
+    if !track.playing {
+        // Said out loud rather than passed over: the panel is right either way, and this is the one
+        // line that shows mpv had not marked a track yet. See BACKLOG.md N14.
+        let listed = tracks
+            .iter()
+            .map(|other| format!("stream {} selected={}", other.ff_index, other.playing))
+            .collect::<Vec<_>>()
+            .join(", ");
+        log::info!(
+            "waveform: mpv has marked no audio track of {media} as playing, so stream {} is peaked; it listed {listed}",
+            track.ff_index
+        );
+    }
     if let Err(error) = start_job(app, PathBuf::from(&media), track.ff_index) {
         log::warn!(
             "waveform: no peaks for stream {} of {media}: {error}",
             track.ff_index
         );
     }
+}
+
+/// The track to peak: the one mpv is playing, or the first audio track when mpv has marked none.
+///
+/// `selected` is read on the thread that has just loaded the file, and mpv does not always have it
+/// set by then on a loaded machine. W5 found the same shape one field over, where asking mpv for
+/// the path right after a successful open answered `None`. A file that carries audio has a
+/// waveform to draw whichever track mpv has got round to choosing, so the panel no longer depends
+/// on that timing; a file that carries none still spawns no child, which is the empty list here.
+fn track_to_peak(tracks: &[AudioTrack]) -> Option<&AudioTrack> {
+    tracks
+        .iter()
+        .find(|track| track.playing)
+        .or_else(|| tracks.first())
 }
 
 /// Claim the slot and run the job on a blocking task. What both entry points share.
@@ -443,8 +471,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{chunk, ffmpeg_from, AudioState, JobTarget};
+    use super::{chunk, ffmpeg_from, track_to_peak, AudioState, JobTarget};
     use crate::audio::error::AudioErrorCode;
+    use crate::video::player::AudioTrack;
     use std::ffi::OsStr;
     use std::path::PathBuf;
     use sublore_audio::{Bucket, Cancel};
@@ -598,5 +627,35 @@ mod tests {
         // A set variable that is empty is not a path, and must not become the current directory.
         assert_eq!(ffmpeg_from(Some(OsStr::new(""))), PathBuf::from("ffmpeg"));
         assert_eq!(ffmpeg_from(None), PathBuf::from("ffmpeg"));
+    }
+
+    fn track(ff_index: u32, playing: bool) -> AudioTrack {
+        AudioTrack {
+            id: i64::from(ff_index),
+            ff_index,
+            lang: None,
+            title: None,
+            playing,
+        }
+    }
+
+    #[test]
+    fn the_track_mpv_is_playing_is_the_one_peaked_even_when_it_is_not_the_first() {
+        let tracks = [track(1, false), track(2, true), track(3, false)];
+        assert_eq!(track_to_peak(&tracks).expect("a track").ff_index, 2);
+    }
+
+    #[test]
+    fn a_file_whose_tracks_mpv_has_not_marked_yet_peaks_the_first_rather_than_nothing() {
+        // The panel used to depend on mpv having chosen by the time this ran, which it has not
+        // always done on a loaded machine. See BACKLOG.md N14.
+        let tracks = [track(1, false), track(2, false)];
+        assert_eq!(track_to_peak(&tracks).expect("a track").ff_index, 1);
+    }
+
+    #[test]
+    fn a_file_that_carries_no_audio_peaks_nothing_at_all() {
+        // Decision 24 E3, which the fallback above must not swallow.
+        assert!(track_to_peak(&[]).is_none());
     }
 }
