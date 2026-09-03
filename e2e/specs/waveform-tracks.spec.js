@@ -24,6 +24,10 @@ import { findToplevel } from "../lib/x11.js";
 /** W8: a switch back to a track already peaked is a cache read, not a child process. */
 const CACHED_SWITCH_MS = 200;
 
+/** How a track's job names itself to ffmpeg: the stream it maps is that track's index. */
+const CACHED_MAP = "-map 0:1";
+const SUPERSEDED_MAP = "-map 0:2";
+
 /** How far the drawing reaches from the middle, as a fraction of the half-height. */
 function reach() {
   return browser.execute(() => {
@@ -218,7 +222,11 @@ describe("the Audio menu and the track that is drawn", () => {
     });
     console.log(`W8 cached switch: ${Math.round(took)} ms, budget ${CACHED_SWITCH_MS}`);
     expect(took).toBeLessThan(CACHED_SWITCH_MS);
-    expect(ffmpegProcessesFor("waveform-tracks")).toEqual([]);
+    // For this track, not for the file: the job for the other one may still be reading, which is
+    // its work and not a child left behind. A cache hit is a switch that spawns nothing of its own.
+    expect(
+      ffmpegProcessesFor("waveform-tracks").filter((args) => args.includes(CACHED_MAP)),
+    ).toEqual([]);
   });
 
   it("leaves no ffmpeg behind when a switch lands on top of another", async () => {
@@ -233,7 +241,19 @@ describe("the Audio menu and the track that is drawn", () => {
       },
       { timeout: 30000, message: "the drawing to settle on the track chosen last" },
     );
-    expect(ffmpegProcessesFor("waveform-tracks")).toEqual([]);
+
+    // The superseded stream, not every ffmpeg: the job for the track chosen last is still reading
+    // the rest of the file, which is what W5 built the panel to draw while it happens. Asserting
+    // that none run at all failed on CI against a job doing exactly its work.
+    //
+    // Waited for rather than read once, because a cancelled child is signalled and then takes a
+    // moment to go. A child that never goes still fails here, with what it was doing.
+    const superseded = () =>
+      ffmpegProcessesFor("waveform-tracks").filter((args) => args.includes(SUPERSEDED_MAP));
+    await waitFor(() => (superseded().length === 0 ? true : null), {
+      timeout: 15000,
+      message: `the superseded job's ffmpeg to go: ${superseded().join(" | ")}`,
+    });
   });
 
   it("lists a single-track file's one track and offers no switch it cannot make", async () => {
