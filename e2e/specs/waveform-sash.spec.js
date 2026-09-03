@@ -21,6 +21,7 @@ import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, dragAt, focusWindow } from "../lib/input.js";
 import { requireWaveformFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
+import { interfaceScale } from "../lib/scale.js";
 import { findToplevel } from "../lib/x11.js";
 
 /** This spec's own edge, and the only one it touches. The other two are `dividers.spec.js`. */
@@ -42,7 +43,10 @@ const STEP_WORST_FRAMES = 10;
 /** A step whose height has not moved after this many frames has stopped, not slowed. */
 const STEP_GIVE_UP_FRAMES = 120;
 
-/** Mirrors `MIN_WAVEFORM_HEIGHT` in src/App.tsx and src-tauri/src/layout.rs. */
+/**
+ * Mirrors `MIN_WAVEFORM_HEIGHT` in src/App.tsx and src-tauri/src/layout.rs. The number at 100 per
+ * cent: `App.tsx` takes it against the interface size before it uses it (S2).
+ */
 const MINIMUM = 64;
 
 /** The height the panel opens at before anything has been dragged. Mirrors `tools.css`. */
@@ -172,8 +176,9 @@ describe("the waveform sash", () => {
   it("stops at a floor rather than letting the panel reach zero", async () => {
     await dragSashBy(toplevel, -1000);
     const waveform = await heightOf(".waveform");
-    expect(`the floor is ${MINIMUM} and the panel is ${waveform}`).toBe(
-      `the floor is ${MINIMUM} and the panel is ${MINIMUM}`,
+    const floor = Math.round(MINIMUM * (await interfaceScale()));
+    expect(`the floor is ${floor} and the panel is ${Math.round(waveform)}`).toBe(
+      `the floor is ${floor} and the panel is ${floor}`,
     );
     expect(await heightOf(".currentline")).toBeGreaterThan(0);
   });

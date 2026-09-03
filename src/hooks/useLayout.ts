@@ -7,6 +7,8 @@ export type Layout = {
   /** The video panel's share of the top row, not a width: see the note in `layout.rs`. */
   videoFraction: number;
   topHeight: number;
+  /** A multiplier on the root font size, not a panel bound: see `layout.rs`. */
+  interfaceScale: number;
 };
 
 /**

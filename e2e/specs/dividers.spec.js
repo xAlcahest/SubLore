@@ -20,6 +20,7 @@ import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, dragAt, focusWindow, pressAndTravel, releaseButton } from "../lib/input.js";
 import { repoRoot, requireWaveformFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
+import { interfaceScale } from "../lib/scale.js";
 import { waitForSurfaceOnStage } from "../lib/surface.js";
 import { findToplevel } from "../lib/x11.js";
 
@@ -28,7 +29,11 @@ const GRID_SASH = ".sash--grid";
 
 const SUBTITLE = path.join(repoRoot, "fixtures", "subtitles", "srt", "clean", "basic-lf.srt");
 
-/** Mirrors the bounds `src/App.tsx` measured off the rendered shell at this window size. */
+/**
+ * Mirrors the bounds `src/App.tsx` measured off the rendered shell at this window size. Each is the
+ * number at 100 per cent, and `App.tsx` takes it against the interface size before it uses it (S2),
+ * so a check against the bare number is a check on a floor the app no longer has.
+ */
 const MIN_VIDEO_WIDTH = 220;
 const MIN_TOOLS_WIDTH = 176;
 const MIN_GRID_HEIGHT = 109;
@@ -238,9 +243,12 @@ describe("the shell's three edges", () => {
   it("stops the video edge at a floor and a ceiling where both panels are still usable", async () => {
     await dragSash(toplevel, VIDEO_SASH, -2000, 0);
     const atFloor = await shellSizes();
-    expect(
-      `the video floor is ${MIN_VIDEO_WIDTH} and the panel is ${Math.round(atFloor.video)}`,
-    ).toBe(`the video floor is ${MIN_VIDEO_WIDTH} and the panel is ${MIN_VIDEO_WIDTH}`);
+    // Rounded on both sides: a share of a row that is stored and multiplied back lands a tenth of a
+    // pixel off the bound it was clamped to.
+    const floor = Math.round(MIN_VIDEO_WIDTH * (await interfaceScale()));
+    expect(`the video floor is ${floor} and the panel is ${Math.round(atFloor.video)}`).toBe(
+      `the video floor is ${floor} and the panel is ${floor}`,
+    );
     // Still a transport, not a sliver: the floor was measured as the width that keeps it on one row.
     expect((await boxOf(".controls")).height).toBeLessThan(60);
 

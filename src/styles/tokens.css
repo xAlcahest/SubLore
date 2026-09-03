@@ -8,6 +8,10 @@
 :root {
   color-scheme: dark;
 
+  /* Multiplies the root font size (shell.css). App.tsx sets this from the stored layout; the
+     fallback of 1 is what a load before that write, or a stylesheet under test, draws at. */
+  --interface-scale: 1;
+
   --bg-window: #131317;
   --bg-panel: #202026;
   --bg-sunken: #17171b;

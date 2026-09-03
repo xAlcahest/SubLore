@@ -26,6 +26,8 @@ export const en = {
       title: "View",
       waveform: "Waveform",
       subtitles: "Subtitles on video",
+      /** One of the five interface size radio items (S1). `{percent}` is a whole number. */
+      scale: "{percent}%",
     },
     audio: {
       title: "Audio",

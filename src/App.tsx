@@ -25,6 +25,7 @@ import { useSubtitleFile } from "./hooks/useSubtitleFile";
 import { useTranscription } from "./hooks/useTranscription";
 import { useVideoPlayer } from "./hooks/useVideoPlayer";
 import { en } from "./i18n/en";
+import { fill } from "./i18n/format";
 import { requestQuit } from "./quit";
 import { type Command } from "./types/chrome";
 import { type EpisodeFileView } from "./types/project";
@@ -49,43 +50,79 @@ function acceleratorFor(
   return null;
 }
 
-/** A frozen contract with `MIN_WAVEFORM_HEIGHT` in src-tauri/src/layout.rs, which clamps the file. */
+/*
+ * Every bound below was read off the rendered shell at 1024x700, never worked out on paper: W6 put
+ * a ceiling under its own panel's default height that way and the panel could not be dragged back.
+ *
+ * Each is the number at 100 per cent, and each is taken against the interface size before it is
+ * used (S2): at 150 the transport under the video is wider, so a fixed 220 stops keeping it on one
+ * row. Each was read again at 90 and at 150, in WebKitGTK because that is the engine the app's
+ * webview is, and both ends are written beside it. The instrument gave D1's own numbers back at
+ * 100, which is what says it is the same measurement.
+ */
+
+/**
+ * A frozen contract with `MIN_WAVEFORM_HEIGHT` in src-tauri/src/layout.rs, which clamps the file.
+ * The one bound with nothing to measure: it is the room the wave needs on either side of its middle
+ * line, so it moves with the size to keep the panel's proportion, 58 at 90 and 96 at 150. Only at
+ * 100 does it still equal the file guard, which does not scale, so a height left at 58 is stored as
+ * 64 and opens there.
+ */
 const MIN_WAVEFORM_HEIGHT = 64;
 
 /**
  * What the current line keeps: its times row and one line of text under it. Measured against the
  * layout at the smallest supported window, where the tools column is 216px and the default gives
- * the line 84 of them — a larger number here would put the ceiling under the default height and the
+ * the line 84 of them. A larger number here would put the ceiling under the default height and the
  * panel could never be dragged back to it.
+ *
+ * Read again: the line needs 60 at 90 per cent and 66 at 100, which the scaled bound covers. At 125
+ * and 150 the times row wraps onto three rows in the column the default layout leaves and the line
+ * needs 101 and 119, more than the bound. What is short there is the stored default height, which
+ * is a pixel count that does not move with the interface; a floor tall enough to cover it would be
+ * the W6 ceiling above.
  */
 const MIN_CURRENT_LINE = 72;
 
 /**
- * Every bound below was read off the rendered shell at 1024x700, never worked out on paper: W6 put
- * a ceiling under its own panel's default height that way and the panel could not be dragged back.
- *
  * The narrowest video panel whose transport is still one row. Squeezed further the transport wraps
  * onto four rows and eats the picture, which is the sliver D1 refuses; measured by growing the
- * panel until `.controls` came back to its unwrapped height.
+ * panel until `.controls` came back to its unwrapped height. It came back at 196 at 90 per cent and
+ * at 326 at 150, and the scaled bound stops above both.
  */
 const MIN_VIDEO_WIDTH = 220;
 
 /**
  * The narrowest tools column whose current line still fits the height the column gives it: at 176
  * the times row wraps onto three rows and the line needs the 84px it has, at 160 it wraps onto four
- * and needs 94.
+ * and needs 94. The fourth row arrives at 157 at 90 per cent and at 258 at 150, and the scaled
+ * bound stops above both.
  */
 const MIN_TOOLS_WIDTH = 176;
 
 /**
  * The video column's own floor: the transport measures 46px and the stage is never smaller than its
  * own transport. What the tools column needs is taller than this and is measured below, live. A
- * frozen contract with `MIN_TOP_HEIGHT` in src-tauri/src/layout.rs, which clamps the file.
+ * frozen contract with `MIN_TOP_HEIGHT` in src-tauri/src/layout.rs, which clamps the file, and one
+ * that holds at 100 only: the guard does not scale.
+ *
+ * The transport measures 41.6 at 90 per cent and 67 at 150, so twice it is 83.1 and 133.9 against a
+ * scaled 82.8 and 138. The third of a pixel it falls short by at 90 is the transport's 1px border,
+ * which is a pixel at every size.
  */
 const MIN_TOP_HEIGHT = 92;
 
-/** The grid's header measured 25px and a row 28, so this is the header and three rows. */
+/**
+ * The grid's header measured 25px and a row 28, so this is the header and three rows. The one bound
+ * that does not scale whole: `ROW_HEIGHT` in CueList.tsx is a fixed 28 at every interface size and
+ * only the header moves, measuring 23.2 at 90 per cent and 36 at 150, which puts the floor at 107.2
+ * and 120. A scaled 109 would give 98 and 164, and 98 clips the third row, so the header alone is
+ * scaled and it is not scaled downwards: at 90 the bound stays 109, two pixels over what fits.
+ */
 const MIN_GRID_HEIGHT = 109;
+
+/** The part of the bound above that moves with the interface size. */
+const MIN_GRID_HEAD = 25;
 
 export default function App() {
   // Every HTML layer registers here while it is open, and the video surface hides for as long as
@@ -93,6 +130,15 @@ export default function App() {
   const layers = useLayerRegistry();
   const peaks = useAudioPeaks();
   const { layout, changeLayout, storeLayout } = useLayout();
+  // The root declaration in shell.css reads this custom property; nothing else may set it (S1).
+  useEffect(() => {
+    if (layout !== null) {
+      document.documentElement.style.setProperty(
+        "--interface-scale",
+        String(layout.interfaceScale),
+      );
+    }
+  }, [layout?.interfaceScale]);
   // Decision 24 A4: View arrives with the first panel worth hiding. The choice lasts the session;
   // only the height outlives it (W6).
   const [waveformShown, setWaveformShown] = useState(true);
@@ -156,12 +202,22 @@ export default function App() {
     return () => observer.disconnect();
   }, [subtitle.openId]);
 
+  // Every bound above is a number at 100 per cent, so each is taken against the size the user
+  // picked; 1 is what the fallback in tokens.css draws at, before the layout has been read (S2).
+  const scale = layout?.interfaceScale ?? 1;
+  const minVideoWidth = MIN_VIDEO_WIDTH * scale;
+  const minCurrentLine = MIN_CURRENT_LINE * scale;
+  const minWaveformHeight = MIN_WAVEFORM_HEIGHT * scale;
+  // The grid's three rows are a fixed 28px at every size, so only its header is scaled, and never
+  // downwards: a floor short of a whole row clips it.
+  const minGridHeight = MIN_GRID_HEIGHT + MIN_GRID_HEAD * Math.max(0, scale - 1);
+
   // The video panel is stored as a share of the row, so it keeps its proportion when the window
   // changes width; the sash works in pixels, which is what the row measures.
   const videoWidth = layout === null ? 0 : layout.videoFraction * frame.topWidth;
   const maxVideoWidth = Math.max(
-    MIN_VIDEO_WIDTH,
-    frame.videoWidth + frame.toolsWidth - MIN_TOOLS_WIDTH,
+    minVideoWidth,
+    frame.videoWidth + frame.toolsWidth - MIN_TOOLS_WIDTH * scale,
   );
   const asFraction = (width: number) =>
     frame.topWidth > 0 ? width / frame.topWidth : (layout?.videoFraction ?? 0);
@@ -169,13 +225,10 @@ export default function App() {
   // How far the block may shrink before the column stops shrinking the current line and starts
   // pushing it out: the slack the line has over its own minimum, read off the rendered line.
   const minTopHeight = Math.max(
-    MIN_TOP_HEIGHT,
-    frame.toolsHeight - Math.max(0, frame.lineHeight - MIN_CURRENT_LINE),
+    MIN_TOP_HEIGHT * scale,
+    frame.toolsHeight - Math.max(0, frame.lineHeight - minCurrentLine),
   );
-  const maxTopHeight = Math.max(
-    minTopHeight,
-    frame.toolsHeight + frame.gridHeight - MIN_GRID_HEIGHT,
-  );
+  const maxTopHeight = Math.max(minTopHeight, frame.toolsHeight + frame.gridHeight - minGridHeight);
   const activeCue: CueRow | null =
     selection.active === null ? null : (subtitle.cues[selection.active] ?? null);
   // Saving writes the document, so it has to include the text sitting in either editor, and text
@@ -383,6 +436,14 @@ export default function App() {
   // Only while an open was refused for unsaved edits, in both routes at once: there is nothing to
   // discard the rest of the time.
   const discardable = blocked ? [commands.discard] : [];
+  // S1: the View menu's five interface sizes, matching the Rust bounds in layout.rs.
+  const interfaceScales = [
+    { percent: 90, scale: 0.9 },
+    { percent: 100, scale: 1 },
+    { percent: 110, scale: 1.1 },
+    { percent: 125, scale: 1.25 },
+    { percent: 150, scale: 1.5 },
+  ];
   const menus = [
     {
       id: "file",
@@ -406,7 +467,18 @@ export default function App() {
     {
       id: "view",
       title: en.menu.view.title,
-      items: [commands.subtitlePreview, commands.waveformPanel],
+      items: [
+        commands.subtitlePreview,
+        commands.waveformPanel,
+        // Radio items, drawn the way the Audio menu draws its track list.
+        ...interfaceScales.map(({ percent, scale }) => ({
+          id: `interface-scale-${percent}`,
+          label: fill(en.menu.view.scale, { percent }),
+          checked: layout !== null && layout.interfaceScale === scale,
+          enabled: true,
+          run: () => storeLayout({ interfaceScale: scale }),
+        })),
+      ],
     },
     // Decision 24 A2: no title without something behind it, so this one is absent for a media with
     // no audio and for no media at all.
@@ -494,7 +566,7 @@ export default function App() {
                 axis="x"
                 edge="video"
                 size={videoWidth}
-                min={MIN_VIDEO_WIDTH}
+                min={minVideoWidth}
                 max={maxVideoWidth}
                 label={en.shell.videoSash}
                 onResize={(width) => changeLayout({ videoFraction: asFraction(width) })}
@@ -524,8 +596,8 @@ export default function App() {
                       axis="y"
                       edge="waveform"
                       size={layout.waveformHeight}
-                      min={MIN_WAVEFORM_HEIGHT}
-                      max={Math.max(MIN_WAVEFORM_HEIGHT, frame.toolsHeight - MIN_CURRENT_LINE)}
+                      min={minWaveformHeight}
+                      max={Math.max(minWaveformHeight, frame.toolsHeight - minCurrentLine)}
                       label={en.waveform.sash}
                       onResize={(height) => changeLayout({ waveformHeight: height })}
                       onRelease={(height) => storeLayout({ waveformHeight: height })}

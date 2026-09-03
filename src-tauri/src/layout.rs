@@ -9,6 +9,9 @@
 //! grows sideways has no panel that is supposed to swallow the extra columns, so the video keeps
 //! its share of them; a window that grows downwards has one, the cue grid, so the block above it
 //! keeps the height it was given.
+//!
+//! S1 adds a fourth number beside the three edges: the interface scale, a multiplier on the root
+//! font size rather than a panel bound, stored and read the same way.
 
 use std::path::{Path, PathBuf};
 
@@ -53,6 +56,15 @@ const MIN_TOP_HEIGHT: f64 = 92.0;
 
 const MAX_TOP_HEIGHT: f64 = 1200.0;
 
+/// The root font-size multiplier the interface opens at. S1 moves this off 1.0, today's size, to
+/// 1.1 (110%): the controls it scales read small for a tool used for hours.
+const DEFAULT_INTERFACE_SCALE: f64 = 1.1;
+
+/// The View submenu's own ends, 90 and 150 per cent (S1): nothing hand-written in the file can open
+/// the interface outside what the menu offers.
+const MIN_INTERFACE_SCALE: f64 = 0.9;
+const MAX_INTERFACE_SCALE: f64 = 1.5;
+
 /// What the panels were left at. Every field carries a default so a file written by an older
 /// version, or one a hand has been in, reads as far as it goes and defaults the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -61,6 +73,7 @@ pub struct Layout {
     pub waveform_height: f64,
     pub video_fraction: f64,
     pub top_height: f64,
+    pub interface_scale: f64,
 }
 
 impl Default for Layout {
@@ -69,6 +82,7 @@ impl Default for Layout {
             waveform_height: DEFAULT_WAVEFORM_HEIGHT,
             video_fraction: DEFAULT_VIDEO_FRACTION,
             top_height: DEFAULT_TOP_HEIGHT,
+            interface_scale: DEFAULT_INTERFACE_SCALE,
         }
     }
 }
@@ -110,6 +124,13 @@ impl Layout {
                 MAX_TOP_HEIGHT,
                 DEFAULT_TOP_HEIGHT,
                 "a top block height",
+            ),
+            interface_scale: sane_number(
+                self.interface_scale,
+                MIN_INTERFACE_SCALE,
+                MAX_INTERFACE_SCALE,
+                DEFAULT_INTERFACE_SCALE,
+                "an interface scale",
             ),
         }
     }
@@ -218,6 +239,7 @@ mod tests {
             waveform_height: 211.0,
             video_fraction: 0.62,
             top_height: 305.0,
+            interface_scale: 1.25,
         };
         write_to(&path, left).expect("a layout written under the temp dir");
         assert_eq!(read_from(&path), left);
@@ -269,6 +291,28 @@ mod tests {
         );
     }
 
+    /// The same upgrade as above, one field later: a file D1 wrote has the three edges but no
+    /// interface scale, and S1 must default the field it never heard of rather than fail to parse.
+    #[test]
+    fn a_layout_written_before_the_interface_scale_existed_keeps_the_edges_it_names() {
+        let dir = TempDir::new("no-scale");
+        let path = dir.join(LAYOUT_FILE);
+        std::fs::write(
+            &path,
+            "{\"waveformHeight\": 200, \"videoFraction\": 0.5, \"topHeight\": 260}",
+        )
+        .expect("a layout written before S1");
+        assert_eq!(
+            read_from(&path),
+            Layout {
+                waveform_height: 200.0,
+                video_fraction: 0.5,
+                top_height: 260.0,
+                ..Layout::default()
+            }
+        );
+    }
+
     #[test]
     fn a_size_off_either_end_is_brought_back_into_range_rather_than_used() {
         let dir = TempDir::new("out-of-range");
@@ -283,6 +327,9 @@ mod tests {
             ("topHeight", "1", MIN_TOP_HEIGHT),
             ("topHeight", "-9", MIN_TOP_HEIGHT),
             ("topHeight", "99999", MAX_TOP_HEIGHT),
+            ("interfaceScale", "0", MIN_INTERFACE_SCALE),
+            ("interfaceScale", "-1", MIN_INTERFACE_SCALE),
+            ("interfaceScale", "40", MAX_INTERFACE_SCALE),
         ] {
             std::fs::write(&path, format!("{{\"{field}\": {stored}}}"))
                 .expect("a layout with a size off the end");
@@ -290,7 +337,8 @@ mod tests {
             let got = match field {
                 "waveformHeight" => read.waveform_height,
                 "videoFraction" => read.video_fraction,
-                _ => read.top_height,
+                "topHeight" => read.top_height,
+                _ => read.interface_scale,
             };
             assert_eq!(got, expected, "a stored {field} of {stored}");
         }
@@ -302,8 +350,11 @@ mod tests {
         // defaults, and the value the frontend sent, which `sane` catches on the way out.
         let dir = TempDir::new("not-a-number");
         let path = dir.join(LAYOUT_FILE);
-        std::fs::write(&path, "{\"waveformHeight\": null, \"videoFraction\": null}")
-            .expect("a layout with null sizes");
+        std::fs::write(
+            &path,
+            "{\"waveformHeight\": null, \"videoFraction\": null, \"interfaceScale\": null}",
+        )
+        .expect("a layout with null sizes");
         assert_eq!(read_from(&path), Layout::default());
         for broken in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert_eq!(
@@ -311,6 +362,7 @@ mod tests {
                     waveform_height: broken,
                     video_fraction: broken,
                     top_height: broken,
+                    interface_scale: broken,
                 }
                 .sane(),
                 Layout::default(),
@@ -354,6 +406,7 @@ mod tests {
             waveform_height: 300.0,
             video_fraction: 0.5,
             top_height: 260.0,
+            interface_scale: 1.25,
         };
         write_to(&path, second).expect("the second layout");
         assert_eq!(read_from(&path), second);
