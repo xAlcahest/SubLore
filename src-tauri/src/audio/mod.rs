@@ -270,6 +270,38 @@ fn ffmpeg_binary() -> PathBuf {
 /// The audio tracks of the open media, as mpv sees them, with the playing one marked. mpv is the
 /// authority on which track that is (decision 24 E2), so nothing else is asked and no second
 /// dependency is added to answer it.
+/// Play a different audio track, and draw it.
+///
+/// The two go together on purpose: a panel still showing the track that stopped playing is a panel
+/// telling the user something untrue. Peaks already computed for this stream come from the cache,
+/// so switching back costs no child process (decision 20, M2.4 W8).
+#[tauri::command]
+pub async fn audio_switch_track(
+    app: AppHandle,
+    video: State<'_, VideoState>,
+    id: i64,
+) -> Result<Vec<AudioTrack>, AudioError> {
+    let player = video.player();
+    blocking(move || {
+        player.set_audio_track(id)?;
+        let tracks = player.audio_tracks()?;
+        let Some(track) = tracks.iter().find(|track| track.id == id) else {
+            return Err(AudioError::new(
+                AudioErrorCode::CommandFailed,
+                format!("mpv has no audio track {id} to switch to"),
+            ));
+        };
+        let media = player
+            .loaded_path()
+            .ok_or_else(|| AudioError::new(AudioErrorCode::CommandFailed, "no media is open"))?;
+        // The job in flight for the old track is superseded by this one, which is what the slot
+        // already does for any other media or stream.
+        start_job(&app, PathBuf::from(media), track.ff_index)?;
+        Ok(tracks)
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn audio_tracks(video: State<'_, VideoState>) -> Result<Vec<AudioTrack>, AudioError> {
     let player = video.player();

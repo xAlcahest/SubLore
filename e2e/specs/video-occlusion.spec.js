@@ -185,6 +185,9 @@ async function position() {
   return Number(raw);
 }
 
+/** More steps than the bar can have titles, so a walk that never arrives still ends. */
+const TITLE_WALK_LIMIT = 12;
+
 describe("the picture gets out of the way for an HTML layer", () => {
   let toplevel = null;
 
@@ -277,13 +280,19 @@ describe("the picture gets out of the way for an HTML layer", () => {
       timeout: 15000,
       message: "the File dropdown to open on Alt",
     });
-    // File, Edit, View, Help: three steps to the right, and the walk is asserted at the end of it.
-    pressKey("Right");
-    pressKey("Right");
-    pressKey("Right");
+    // Walked to the end rather than counted: decision 24 A2 gives the bar a title only when
+    // something is behind it, so how many titles there are depends on what is open, and Audio comes
+    // and goes with the media. Help is the last of them, which is what this needs.
+    for (let step = 0; step < TITLE_WALK_LIMIT; step += 1) {
+      if ((await openDropdown()) === "Help") {
+        break;
+      }
+      pressKey("Right");
+      await browser.pause(150);
+    }
     await waitFor(async () => ((await openDropdown()) === "Help" ? true : null), {
       timeout: 15000,
-      message: "the Help dropdown to be the open one",
+      message: `the Help dropdown to be the open one after walking right (saw ${await openDropdown()})`,
     });
     await waitFor(async () => ((await cursorCommand()) === "about" ? true : null), {
       timeout: 15000,

@@ -26,6 +26,11 @@ export const en = {
       title: "View",
       waveform: "Waveform",
     },
+    audio: {
+      title: "Audio",
+      /** For a track the file gives neither a title nor a language, numbered as the file lists them. */
+      track: "Track",
+    },
     help: {
       title: "Help",
       about: "About Sublore",

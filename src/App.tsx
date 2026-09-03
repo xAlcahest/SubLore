@@ -16,6 +16,7 @@ import VideoStage from "./components/VideoStage";
 import { useAudioPeaks } from "./hooks/useAudioPeaks";
 import { useCueSelection } from "./hooks/useCueSelection";
 import { LayerContext, useLayerRegistry } from "./hooks/useLayers";
+import { useAudioTracks } from "./hooks/useAudioTracks";
 import { useLayout } from "./hooks/useLayout";
 import { useProject } from "./hooks/useProject";
 import { useStartupFiles } from "./hooks/useStartupFiles";
@@ -86,6 +87,7 @@ export default function App() {
   const { state, position, errorCode, open, togglePlayback, seek, setRegion } = useVideoPlayer(
     layers.covered,
   );
+  const audio = useAudioTracks(state.path, state.status === "ready");
   const subtitle = useSubtitleFile();
   const project = useProject();
   // A finished transcription becomes the open document, and the backend asks about unsaved work on
@@ -315,6 +317,25 @@ export default function App() {
       items: [commands.undo, commands.redo, commands.transcribe],
     },
     { id: "view", title: en.menu.view.title, items: [commands.waveformPanel] },
+    // Decision 24 A2: no title without something behind it, so this one is absent for a media with
+    // no audio and for no media at all.
+    ...(audio.tracks.length > 0
+      ? [
+          {
+            id: "audio",
+            title: en.menu.audio.title,
+            items: audio.tracks.map((track, index) => ({
+              id: `audio-track-${track.id}`,
+              label: track.title ?? track.lang ?? `${en.menu.audio.track} ${index + 1}`,
+              checked: track.id === audio.currentId,
+              // A single track is listed and cannot be switched away from: there is nowhere to go,
+              // and an item that does nothing when clicked is worse than one that says so.
+              enabled: audio.tracks.length > 1,
+              run: () => audio.switchTo(track.id),
+            })),
+          },
+        ]
+      : []),
     { id: "help", title: en.menu.help.title, items: [commands.about] },
   ];
   const toolbar = [

@@ -78,6 +78,13 @@ export function requireSilentFixture() {
   return requireFile(silentFixture, "sh fixtures/video/make-waveform-fixtures.sh");
 }
 
+/** The M2.4 fixture with two audio tracks: full scale first, a quarter of it second. */
+export const tracksFixture = path.join(repoRoot, "fixtures", "video", "waveform-tracks.mkv");
+
+export function requireTracksFixture() {
+  return requireFile(tracksFixture, "sh fixtures/video/make-waveform-fixtures.sh");
+}
+
 /** A command the harness drives the app with. Missing means one sentence, never a cryptic error. */
 export function requireTool(name, what) {
   try {

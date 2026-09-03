@@ -129,6 +129,7 @@ pub fn run() -> tauri::Result<()> {
             audio::audio_tracks,
             audio::audio_peaks_start,
             audio::audio_peaks_cancel,
+            audio::audio_switch_track,
             chooser::choose_path,
             layout::layout_read,
             layout::layout_write,
