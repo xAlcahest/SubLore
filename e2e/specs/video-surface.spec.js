@@ -91,6 +91,11 @@ function currentSurface(toplevel) {
  * `Math.floor`ed to whole seconds (VideoControls.tsx:6-11), so a restart shorter than a second is
  * invisible to it. The slider carries hundredths, and both are written from mpv's own `time-pos`.
  */
+/** What the transport button says: "Play" when paused, "Pause" while playing. */
+function transportLabel() {
+  return browser.execute(() => document.querySelector(".controls__button")?.textContent ?? null);
+}
+
 async function position() {
   const raw = await browser.execute(
     () => document.querySelector(".controls__slider")?.value ?? null,
@@ -199,20 +204,33 @@ describe("video surface hide and show", () => {
   });
 
   it("brings the picture back with the video paused, without restarting playback", async () => {
+    // This test pauses, so it needs something playing, which the test above leaves behind. Checked
+    // rather than inherited: if it is already paused the click below starts playback instead of
+    // stopping it, and the wait then times out saying the opposite of what happened.
+    const before = await transportLabel();
+    expect(`the transport before the pause click: ${before}`).toBe(
+      "the transport before the pause click: Pause",
+    );
+
     const pause = await centreOf(".controls__button");
     clickAt(toplevel.absX + pause.x, toplevel.absY + pause.y);
 
     // Anchored to the value the app is supposed to show, not to itself: comparing the label with
     // its own earlier reading passes even when the click never landed and nothing was paused.
-    await waitFor(
-      async () =>
-        (await browser.execute(
-          () => document.querySelector(".controls__button")?.textContent ?? null,
-        )) === "Play"
-          ? true
-          : null,
-      { timeout: 10000, message: 'the transport button to read "Play", meaning paused' },
-    );
+    try {
+      await waitFor(async () => ((await transportLabel()) === "Play" ? true : null), {
+        timeout: 10000,
+        message: 'the transport button to read "Play", meaning paused',
+      });
+    } catch (error) {
+      // What it actually reads, in the failure itself. The old message named the value it wanted
+      // and never the one it saw, and two opposite causes produce it: a click that never landed
+      // leaves "Pause", a video already stopped leaves "Play" because the click started it.
+      throw new Error(
+        `${error.message}\nthe button reads "${await transportLabel()}" and the position is ` +
+          `${await position()}, so the click either missed the button or toggled the other way.`,
+      );
+    }
     // mpv's own position, held still across a real interval. A `waitFor` here would return on its
     // first evaluation and compare a reading with itself: that is the defect the previous pass
     // blocked, and it came back inside its own correction.
