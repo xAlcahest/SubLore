@@ -30,6 +30,9 @@ const EVENT_STARTED: &str = "audio://started";
 const EVENT_PEAKS: &str = "audio://peaks";
 const EVENT_DONE: &str = "audio://done";
 const EVENT_ERROR: &str = "audio://error";
+/// Decision 24 E3: the media carries no audio at all. Not a failure, and not the same thing as a
+/// job that has produced nothing yet, which is what the panel's absence used to mean on its own.
+const EVENT_NONE: &str = "audio://none";
 
 /// Which media and which of its streams a job is peaking. Two starts that name the same pair are
 /// the same job, which is what makes the second one a refusal rather than a queue.
@@ -335,6 +338,14 @@ pub fn start_for_playing_track(app: &AppHandle, player: &Player, media: &str) {
     // empty list below and not the fallback inside `track_to_peak`.
     let Some(track) = track_to_peak(&tracks).cloned() else {
         log::info!("waveform: {media} carries no audio track, so nothing is peaked");
+        // Said to the page as well as to the log: with no event the shell cannot tell a media with
+        // no audio from one whose peaks have not arrived, and E3 asks it to say which.
+        let _ = app.emit(
+            EVENT_NONE,
+            AudioNone {
+                media: media.to_owned(),
+            },
+        );
         return;
     };
     if !track.playing {
@@ -370,6 +381,13 @@ fn track_to_peak(tracks: &[AudioTrack]) -> Option<&AudioTrack> {
         .iter()
         .find(|track| track.playing)
         .or_else(|| tracks.first())
+}
+
+/// What the page is told when a media carries no audio at all.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AudioNone {
+    media: String,
 }
 
 /// Claim the slot and run the job on a blocking task. What both entry points share.

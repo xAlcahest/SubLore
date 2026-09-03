@@ -77,6 +77,16 @@
   background: var(--bg-media);
 }
 
+/* Where the panel would be when the media carries no audio (decision 24 E3). A line of prose, in
+   the muted ink the rest of the column uses for what it is telling you rather than asking. */
+.tools__silent {
+  flex: none;
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-dim);
+}
+
 /* The waveform's bottom edge, and the one draggable thing in v1 (decision 24 A5). It draws no line
    of its own: the panel above already has one, and this is the hit area over it. */
 .sash {

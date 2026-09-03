@@ -151,6 +151,7 @@ export const en = {
   waveform: {
     sash: "Waveform height",
     canvas: "Waveform, arrows to scroll, plus and minus to zoom",
+    noAudio: "This video has no audio, so there is no waveform to draw.",
     label: "Waveform",
     /** Shown in the status bar when a peak job fails. The detail is technical and stays in the log. */
     failed: "The waveform could not be read for this file. The video is unaffected.",
