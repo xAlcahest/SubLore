@@ -93,7 +93,8 @@ describe("a media with no audio", () => {
     expect(duration).toBeGreaterThan(0);
 
     expect(await present(".waveform")).toBe(false);
-    expect(await present(".sash")).toBe(false);
+    // Named, not a bare `.sash`: D1 gave the shell two more edges and both are on screen here.
+    expect(await present(".sash--waveform")).toBe(false);
     expect(await textOf(".tools__silent")).toBe(
       "This video has no audio, so there is no waveform to draw.",
     );

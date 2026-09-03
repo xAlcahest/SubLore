@@ -6,7 +6,11 @@
  * The drag is a real press, move and release through X11, the way `video.spec.js` drives the seek
  * slider: a synthetic pointer event dispatched into the page would exercise React and prove nothing
  * about whether a hand can grab a four-pixel strip.
+ *
+ * D1 gave the shell two more edges, so every reading here names this one: a bare `.sash` would now
+ * pick up whichever of the three the document lists first, which is the video's.
  */
+
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -18,6 +22,9 @@ import { clickAt, dragAt, focusWindow } from "../lib/input.js";
 import { requireWaveformFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
+
+/** This spec's own edge, and the only one it touches. The other two are `dividers.spec.js`. */
+const SASH = ".sash--waveform";
 
 /**
  * What one step of a drag may cost, in frames.
@@ -77,9 +84,9 @@ function present(selector) {
  * that asks for one fails as an error rather than as a sash that stopped where it was told to.
  */
 async function dragSashBy(toplevel, dy) {
-  const sash = await rectOf(".sash");
+  const sash = await rectOf(SASH);
   if (sash === null) {
-    throw new Error(".sash is missing from the DOM, so there is nothing to drag");
+    throw new Error(`${SASH} is missing from the DOM, so there is nothing to drag`);
   }
   const fromX = toplevel.absX + sash.midX;
   const fromY = toplevel.absY + sash.midY;
@@ -222,7 +229,7 @@ describe("the waveform sash", () => {
       timeout: 5000,
       message: "the waveform panel to go",
     });
-    expect(`the sash went with it: ${await present(".sash")}`).toBe("the sash went with it: false");
+    expect(`the sash went with it: ${await present(SASH)}`).toBe("the sash went with it: false");
     expect(`the line took the space: ${(await heightOf(".currentline")) > withPanel}`).toBe(
       "the line took the space: true",
     );
@@ -239,43 +246,47 @@ describe("the waveform sash", () => {
     // Driven from the page, the way `editor.spec.js` drives a scroll step: what is measured here is
     // what a height change costs to render, and the X11 tests above already prove that a hand can
     // grab the strip and that the release stores what it left.
-    await browser.execute((giveUp) => {
-      const sash = document.querySelector(".sash");
-      const panel = document.querySelector(".waveform");
-      const box = sash.getBoundingClientRect();
-      const at = (kind, y) =>
-        new PointerEvent(kind, { bubbles: true, clientY: y, button: 0, pointerId: 1 });
-      const startY = box.y + box.height / 2;
-      sash.dispatchEvent(at("pointerdown", startY));
+    await browser.execute(
+      (giveUp, css) => {
+        const sash = document.querySelector(css);
+        const panel = document.querySelector(".waveform");
+        const box = sash.getBoundingClientRect();
+        const at = (kind, y) =>
+          new PointerEvent(kind, { bubbles: true, clientY: y, button: 0, pointerId: 1 });
+        const startY = box.y + box.height / 2;
+        sash.dispatchEvent(at("pointerdown", startY));
 
-      const times = [];
-      let done = 0;
-      const runStep = () => {
-        if (done >= 20) {
-          window.dispatchEvent(at("pointerup", startY - done));
-          window.__subloreSash = times;
-          return;
-        }
-        const before = panel.getBoundingClientRect().height;
-        const started = performance.now();
-        // Upwards, one pixel a step: the panel opens above its floor with room to give.
-        window.dispatchEvent(at("pointermove", startY - done - 1));
-        const settle = (frames) => {
-          const moved = panel.getBoundingClientRect().height !== before;
-          if (moved || frames >= giveUp) {
-            times.push({ frames, ms: performance.now() - started, moved });
-            done += 1;
-            window.setTimeout(runStep, 0);
+        const times = [];
+        let done = 0;
+        const runStep = () => {
+          if (done >= 20) {
+            window.dispatchEvent(at("pointerup", startY - done));
+            window.__subloreSash = times;
             return;
           }
-          // A frame, not a timer, for the reason `editor.spec.js` gives: polling between frames
-          // starves the re-render it is waiting for on a software renderer.
-          window.requestAnimationFrame(() => settle(frames + 1));
+          const before = panel.getBoundingClientRect().height;
+          const started = performance.now();
+          // Upwards, one pixel a step: the panel opens above its floor with room to give.
+          window.dispatchEvent(at("pointermove", startY - done - 1));
+          const settle = (frames) => {
+            const moved = panel.getBoundingClientRect().height !== before;
+            if (moved || frames >= giveUp) {
+              times.push({ frames, ms: performance.now() - started, moved });
+              done += 1;
+              window.setTimeout(runStep, 0);
+              return;
+            }
+            // A frame, not a timer, for the reason `editor.spec.js` gives: polling between frames
+            // starves the re-render it is waiting for on a software renderer.
+            window.requestAnimationFrame(() => settle(frames + 1));
+          };
+          settle(0);
         };
-        settle(0);
-      };
-      runStep();
-    }, STEP_GIVE_UP_FRAMES);
+        runStep();
+      },
+      STEP_GIVE_UP_FRAMES,
+      SASH,
+    );
 
     const times = await waitFor(() => browser.execute(() => window.__subloreSash), {
       timeout: 30000,

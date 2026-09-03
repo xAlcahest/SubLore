@@ -200,21 +200,39 @@ export function doubleClickAt(x, y) {
  * step skips the move when the pointer is already there, for the `--sync` reason `clickAt` gives.
  */
 export function dragAt(fromX, fromY, toX, toY, steps = 8) {
+  try {
+    pressAndTravel(fromX, fromY, toX, toY, steps);
+  } finally {
+    // A button left down lands on whatever the next check clicks, in a run nobody is watching.
+    releaseButton();
+  }
+}
+
+/**
+ * The first half of a drag: press and travel, with the button still down.
+ *
+ * **The caller must call `releaseButton` from a `finally`.** It exists so a check can read the
+ * layout while the gesture is still happening, which `dragAt` cannot see: everything asserted after
+ * a release is equally true of a panel that ignores the pointer and only jumps when it is let go.
+ * A mutation that emptied the live resize left every divider assertion green, which is what this
+ * was added for.
+ */
+export function pressAndTravel(fromX, fromY, toX, toY, steps = 8) {
   const start = { x: Math.round(fromX), y: Math.round(fromY) };
   const end = { x: Math.round(toX), y: Math.round(toY) };
   moveTo(start);
   xdotool(["mousedown", "1"]);
-  try {
-    for (let step = 1; step <= steps; step += 1) {
-      moveTo({
-        x: Math.round(start.x + ((end.x - start.x) * step) / steps),
-        y: Math.round(start.y + ((end.y - start.y) * step) / steps),
-      });
-    }
-  } finally {
-    // A button left down lands on whatever the next check clicks, in a run nobody is watching.
-    xdotool(["mouseup", "1"]);
+  for (let step = 1; step <= steps; step += 1) {
+    moveTo({
+      x: Math.round(start.x + ((end.x - start.x) * step) / steps),
+      y: Math.round(start.y + ((end.y - start.y) * step) / steps),
+    });
   }
+}
+
+/** The second half. Harmless when nothing is pressed, so a `finally` can always call it. */
+export function releaseButton() {
+  xdotool(["mouseup", "1"]);
 }
 
 /** Move the pointer, unless it is already there. See the `--sync` note in `clickAt`. */

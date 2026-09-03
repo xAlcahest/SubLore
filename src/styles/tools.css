@@ -103,21 +103,6 @@
   color: var(--ink-dim);
 }
 
-/* The waveform's bottom edge, and the one draggable thing in v1 (decision 24 A5). It draws no line
-   of its own: the panel above already has one, and this is the hit area over it. */
-.sash {
-  flex: none;
-  height: 4px;
-  cursor: row-resize;
-}
-
-.sash:hover,
-.sash--dragging,
-.sash:focus-visible {
-  background: var(--accent);
-  outline: none;
-}
-
 /* Sized by the box, drawn in device pixels: the element carries no width of its own, so a resize
    changes the backing store rather than stretching what was already drawn. */
 .waveform__canvas {

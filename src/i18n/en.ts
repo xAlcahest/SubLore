@@ -57,6 +57,12 @@ export const en = {
     licence: "GNU General Public License, version 3 or later.",
     close: "Close",
   },
+  /** The draggable edges between the panels (D1). Read aloud where a separator is announced. */
+  shell: {
+    videoSash: "Video panel width",
+    gridSash: "Top block height",
+  },
+
   video: {
     play: "Play",
     pause: "Pause",

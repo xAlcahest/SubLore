@@ -8,12 +8,11 @@ import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow, resizeWindow } from "../lib/input.js";
 import { repoRoot, requireVideoFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
-import { childWindows, findToplevel, mapState, rootTree } from "../lib/x11.js";
+import { surfaceRect, waitForSurfaceOnStage } from "../lib/surface.js";
+import { findToplevel, rootTree } from "../lib/x11.js";
 
 /** Percentage widths land on fractions of a pixel, and every edge here is compared to another. */
 const EDGE_SLOP_PX = 1;
-/** The surface travels over IPC after layout, so its geometry lags the DOM by a frame or two. */
-const TOLERANCE_PX = 2;
 
 /** The second size the layout is asserted at. `e2e-check.sh` sizes the screen to hold it exactly. */
 const WIDE_WIDTH = 1920;
@@ -23,7 +22,11 @@ const REGIONS = {
   chrome: ".shell__chrome",
   rail: ".shell__rail",
   video: ".shell__video",
+  // The two edges D1 added. Regions in their own right here: a relation that skipped them would
+  // pass just as well with the panels overlapping them.
+  videoSash: ".sash--video",
   tools: ".shell__tools",
+  gridSash: ".sash--grid",
   grid: ".shell__grid",
   status: ".statusbar",
 };
@@ -156,60 +159,9 @@ function toolsColumn() {
   });
 }
 
-/** The rectangle the native surface should be sitting on, in the physical pixels X reports. */
-async function surfaceRect() {
-  const stage = await browser.execute(() => {
-    const element = document.querySelector(".stage__surface");
-    if (element === null) {
-      return null;
-    }
-    const rect = element.getBoundingClientRect();
-    return {
-      x: rect.x,
-      y: rect.y,
-      width: rect.width,
-      height: rect.height,
-      dpr: window.devicePixelRatio,
-    };
-  });
-  if (stage === null) {
-    throw new Error(".stage__surface is missing from the DOM");
-  }
-  return {
-    x: Math.round(stage.x * stage.dpr),
-    y: Math.round(stage.y * stage.dpr),
-    width: Math.round(stage.width * stage.dpr),
-    height: Math.round(stage.height * stage.dpr),
-  };
-}
-
-/** Wait for a viewable X11 child of the app window sitting on the rectangle the stage reports. */
+/** Only the presence question, which the surface helpers in ../lib/surface.js do not answer. */
 function present(selector) {
   return browser.execute((css) => document.querySelector(css) !== null, selector);
-}
-
-async function waitForSurfaceOnStage(toplevel) {
-  const expected = await surfaceRect();
-  expect(expected.width).toBeGreaterThan(0);
-  expect(expected.height).toBeGreaterThan(0);
-  const near = (a, b) => Math.abs(a - b) <= TOLERANCE_PX;
-  return waitFor(
-    () =>
-      childWindows(toplevel.id).find(
-        (child) =>
-          near(child.relX, expected.x) &&
-          near(child.relY, expected.y) &&
-          near(child.width, expected.width) &&
-          near(child.height, expected.height) &&
-          mapState(child.id) === "IsViewable",
-      ) ?? null,
-    {
-      timeout: 15000,
-      message:
-        `a viewable direct child of ${toplevel.id} at ${expected.width}x${expected.height}+` +
-        `${expected.x}+${expected.y} (+/-${TOLERANCE_PX}px).\n${rootTree()}`,
-    },
-  );
 }
 
 function centreOf(selector) {
@@ -260,7 +212,7 @@ async function expectLayoutHolds(size) {
   if (missing.length > 0) {
     throw new Error(`these regions are missing from the DOM ${at}: ${missing.join(", ")}`);
   }
-  const { chrome, rail, video, tools, grid, status } = layout.regions;
+  const { chrome, rail, video, videoSash, tools, gridSash, grid, status } = layout.regions;
   const viewport = layout.viewport;
   const near = (a, b) => Math.abs(a - b) <= EDGE_SLOP_PX;
 
@@ -306,17 +258,25 @@ async function expectLayoutHolds(size) {
   expect(near(video.left, rail.right)).toBe(true);
   expect(near(video.top, rail.top)).toBe(true);
 
-  // The tools column to the video's right, the same height, and not a pixel of it under the video.
-  // This is the criterion "the current-line band is not full width under video and waveform".
-  expect(near(tools.left, video.right)).toBe(true);
+  // The tools column to the video's right with only the draggable edge between them, the same
+  // height, and not a pixel of it under the video. This is the criterion "the current-line band is
+  // not full width under video and waveform".
+  expect(near(videoSash.left, video.right)).toBe(true);
+  expect(near(tools.left, videoSash.right)).toBe(true);
+  expect(near(videoSash.top, video.top)).toBe(true);
+  expect(near(videoSash.bottom, video.bottom)).toBe(true);
   expect(near(tools.top, video.top)).toBe(true);
   expect(near(tools.bottom, video.bottom)).toBe(true);
   expect(near(tools.right, viewport.width)).toBe(true);
   expect(tools.width).toBeLessThan(viewport.width - rail.width);
 
   // The grid below the top block and across the whole width, crossing under the rail, taking what
-  // is left above the status bar. Owner ruling 2026-09-02.
-  expect(near(grid.top, video.bottom)).toBe(true);
+  // is left above the status bar, with its own draggable edge between it and the block above.
+  // Owner ruling 2026-09-02.
+  expect(near(gridSash.top, video.bottom)).toBe(true);
+  expect(near(gridSash.left, 0)).toBe(true);
+  expect(near(gridSash.right, viewport.width)).toBe(true);
+  expect(near(grid.top, gridSash.bottom)).toBe(true);
   expect(near(grid.left, 0)).toBe(true);
   expect(near(grid.right, viewport.width)).toBe(true);
   expect(near(grid.bottom, status.top)).toBe(true);
@@ -421,7 +381,7 @@ describe("the shell layout", () => {
     expect(await clippedAtWindowEdge(EDGE_SLOP_PX)).toEqual([]);
   });
 
-  it("puts the five regions where the layout says, at the size the app opens at", async () => {
+  it("puts the regions and the edges between them where the layout says, at the size the app opens at", async () => {
     await expectLayoutHolds({ width: windowWidth, height: windowHeight });
   });
 
@@ -498,7 +458,7 @@ describe("the shell layout", () => {
     expect(withProbe.children.map((child) => child.name)).toEqual([
       "div.waveform-probe",
       "section.waveform",
-      "div.sash",
+      "div.sash sash--y sash--waveform",
       "section.currentline",
     ]);
     expect(withProbe.children[1].top).toBeGreaterThan(EDGE_SLOP_PX);
@@ -515,7 +475,7 @@ describe("the shell layout", () => {
     const column = await toolsColumn();
     expect(column.children.map((child) => child.name)).toEqual([
       "section.waveform",
-      "div.sash",
+      "div.sash sash--y sash--waveform",
       "section.currentline",
     ]);
     // Flush against both edges of the column, so nothing above or below holds any space either.
