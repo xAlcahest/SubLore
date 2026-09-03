@@ -208,6 +208,15 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # Every app launch here waited 30 s before it ran a line of its own, and that is 60 per cent
+      # of this job. The runner declares org.freedesktop.portal.Desktop activatable through
+      # libwebkit2gtk-4.1-dev's dependencies and has no session that can start it, so GtkApplication
+      # waits out a D-Bus timeout before the window exists. Measured in one job on 2026-09-03: the
+      # same check is 0m02s with this file moved aside and 0m31s with it in place. Moved rather than
+      # purged: the build needs the package it belongs to. See BACKLOG.md N10.
+      - name: Take away the portal nothing here can start
+        run: sudo mv /usr/share/dbus-1/services/org.freedesktop.portal.Desktop.service /tmp/portal.service.away
+
       # The harness never builds implicitly; every prerequisite is made here, explicitly.
       - name: Generate video fixture
         run: sh fixtures/video/make-sample.sh
