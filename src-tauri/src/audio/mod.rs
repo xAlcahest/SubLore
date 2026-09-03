@@ -340,6 +340,38 @@ fn ffmpeg_binary() -> PathBuf {
 /// The audio tracks of the open media, as mpv sees them, with the playing one marked. mpv is the
 /// authority on which track that is (decision 24 E2), so nothing else is asked and no second
 /// dependency is added to answer it.
+/// Play a different audio track, and draw it.
+///
+/// The two go together on purpose: a panel still showing the track that stopped playing is a panel
+/// telling the user something untrue. Peaks already computed for this stream come from the cache,
+/// so switching back costs no child process (decision 20, M2.4 W8).
+#[tauri::command]
+pub async fn audio_switch_track(
+    app: AppHandle,
+    video: State<'_, VideoState>,
+    id: i64,
+) -> Result<Vec<AudioTrack>, AudioError> {
+    let player = video.player();
+    blocking(move || {
+        player.set_audio_track(id)?;
+        let tracks = player.audio_tracks()?;
+        let Some(track) = tracks.iter().find(|track| track.id == id) else {
+            return Err(AudioError::new(
+                AudioErrorCode::CommandFailed,
+                format!("mpv has no audio track {id} to switch to"),
+            ));
+        };
+        let media = player
+            .loaded_path()
+            .ok_or_else(|| AudioError::new(AudioErrorCode::CommandFailed, "no media is open"))?;
+        // The job in flight for the old track is superseded by this one, which is what the slot
+        // already does for any other media or stream.
+        start_job(&app, PathBuf::from(media), track.ff_index)?;
+        Ok(tracks)
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn audio_tracks(video: State<'_, VideoState>) -> Result<Vec<AudioTrack>, AudioError> {
     let player = video.player();
@@ -473,8 +505,9 @@ fn start_job(app: &AppHandle, media: PathBuf, ff_index: u32) -> Result<u64, Audi
         media: media.clone(),
         ff_index,
     };
-    // Cloned before the target is handed over, because the job outlives this call on a blocking
-    // task. `PeaksCache` is a directory and a cap, so the clone is two fields.
+    // Both cloned before the target is handed over, because the job outlives this call on a
+    // blocking task. `PeaksCache` is a directory and a cap, so its clone is two fields.
+    let peaked = target.clone();
     let cache = state.cache.clone();
     let job_id = state.begin(target, cancel.clone())?;
     // Announced before the first chunk: a job started by `video_open` is nobody's return value, so
@@ -499,7 +532,7 @@ fn start_job(app: &AppHandle, media: PathBuf, ff_index: u32) -> Result<u64, Audi
             job_id,
             &request,
             &cancel,
-            &|event| emit_event(&handle, event),
+            &|event| emit_event(&handle, event, &peaked),
             cache.as_ref(),
         );
         slot.release();
@@ -507,20 +540,33 @@ fn start_job(app: &AppHandle, media: PathBuf, ff_index: u32) -> Result<u64, Audi
     Ok(job_id)
 }
 
-fn emit_event(app: &AppHandle, event: AudioEvent) {
+/// The log lines name what the job was reading. CI keeps these logs now, and one that says only
+/// "job 4 peaked 30000 ms" cannot be read back against a run with several media in it.
+fn emit_event(app: &AppHandle, event: AudioEvent, target: &JobTarget) {
     match event {
         AudioEvent::Peaks(peaks) => {
             let _ = app.emit(EVENT_PEAKS, peaks);
         }
         AudioEvent::Done(done) => {
-            log::info!("waveform: job {} peaked {} ms", done.job_id, done.buckets);
+            log::info!(
+                "waveform: job {} peaked {} ms of stream {} of {}",
+                done.job_id,
+                done.buckets,
+                target.ff_index,
+                target.media.display()
+            );
             let _ = app.emit(EVENT_DONE, done);
         }
         AudioEvent::Failed(failed) => {
             // A cancel is what every media change does, so it is not a warning: a log full of
             // them would bury the failures a translator can act on.
             if AudioError::new(failed.code, "").is_cancelled() {
-                log::info!("waveform: job {} was cancelled", failed.job_id);
+                log::info!(
+                    "waveform: job {} on stream {} of {} was cancelled",
+                    failed.job_id,
+                    target.ff_index,
+                    target.media.display()
+                );
             } else {
                 log::warn!(
                     "waveform: job {} ended {:?}: {}",

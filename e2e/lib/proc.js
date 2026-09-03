@@ -77,3 +77,35 @@ export function killGroup(pgid, signal = "SIGKILL") {
     // Already gone, which is the outcome we wanted anyway.
   }
 }
+
+/**
+ * Live ffmpeg processes whose arguments name `needle`, and nothing else.
+ *
+ * Matched on the executable and then on the arguments, never on the whole command line at once:
+ * `pgrep -f ffmpeg` also matches the shell that launched the test, whose own command line quotes
+ * this function, and a check that counts its own caller answers whatever it likes.
+ */
+export function ffmpegProcessesFor(needle) {
+  let pids = [];
+  try {
+    pids = execFileSync("pgrep", ["-x", "ffmpeg"], { encoding: "utf8", timeout: 10000 })
+      .split("\n")
+      .filter((line) => line.trim() !== "");
+  } catch {
+    // pgrep exits non-zero when nothing matches, which is the answer this wants most of the time.
+    return [];
+  }
+  return pids
+    .map((pid) => {
+      try {
+        return execFileSync("ps", ["-p", pid, "-o", "args="], {
+          encoding: "utf8",
+          timeout: 10000,
+        }).trim();
+      } catch {
+        // It exited between the two calls, which is not a process left behind.
+        return "";
+      }
+    })
+    .filter((args) => args.includes(needle));
+}

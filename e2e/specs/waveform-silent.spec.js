@@ -7,8 +7,6 @@
  * is that the absence is explained rather than merely silent, and that the explanation is not a
  * failure: nothing here is an alert and nothing lands in the status bar.
  */
-import { execFileSync } from "node:child_process";
-
 import { browser, expect } from "@wdio/globals";
 
 import { answerChooser, waitForChooser } from "../lib/chooser.js";
@@ -21,7 +19,7 @@ import {
   windowHeight,
   windowWidth,
 } from "../lib/paths.js";
-import { waitFor } from "../lib/proc.js";
+import { ffmpegProcessesFor, waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
 
 function present(selector) {
@@ -64,18 +62,6 @@ async function openVideo(toplevel, fixture) {
   focusWindow(toplevel.id);
 }
 
-/** Every ffmpeg on this machine whose command line names the file, which is none of anyone else's. */
-function ffmpegFor(fixture) {
-  try {
-    return execFileSync("pgrep", ["-fa", "ffmpeg"], { encoding: "utf8", timeout: 10000 })
-      .split("\n")
-      .filter((line) => line.includes(fixture));
-  } catch {
-    // pgrep exits non-zero when nothing matches, which is the answer this wants most of the time.
-    return [];
-  }
-}
-
 describe("a media with no audio", () => {
   let toplevel = null;
 
@@ -114,7 +100,7 @@ describe("a media with no audio", () => {
   });
 
   it("spawns no ffmpeg for it, and says nothing that reads as a failure", async () => {
-    expect(ffmpegFor("waveform-silent")).toEqual([]);
+    expect(ffmpegProcessesFor("waveform-silent")).toEqual([]);
 
     const alarming = await browser.execute(() =>
       Array.from(document.querySelectorAll('[role="alert"]')).map((node) => node.textContent),

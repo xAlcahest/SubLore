@@ -579,6 +579,15 @@ impl Player {
         }
     }
 
+    /// Switch which audio track mpv plays. `aid` is mpv's own numbering, which is what the track
+    /// list reports as `id`.
+    pub fn set_audio_track(&self, id: i64) -> Result<(), VideoError> {
+        let mpv = self.handle()?;
+        self.loaded_duration()?;
+        mpv.set_property("aid", id)
+            .map_err(|error| from_mpv(error, "aid"))
+    }
+
     fn set_pause(&self, paused: bool) -> Result<(), VideoError> {
         let mpv = self.handle()?;
         self.loaded_duration()?;
