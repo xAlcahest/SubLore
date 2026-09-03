@@ -327,6 +327,14 @@ never as a missing selector, and shows the reading catching a panel it inserts i
 reads the real column. A waveform shipped under another name walks past the second and not past the
 first.
 
+T9 restyled the shell to the mockup and added, removed and renamed nothing: every name above is
+still on the element it was on, and the 93 tests pass with their assertions untouched. What moved
+is one pixel. The first cue row sits at y 307..334 rather than at 306..333, because the chrome over
+it is a pixel taller at the smaller type, so `firstCueText` in `lib/paths.js` was re-measured the
+way its own comment asks — off a screenshot of the launch the close-gate scripts make — and stayed
+where it was: y 320 is still the middle of that row. The row height itself is untouched, and
+`editor.spec.js` still reads a sizer of 2000 × 28.
+
 Readiness has no dedicated signal: a video is loaded when `.stage__empty` is gone **and**
 `.controls__button` is enabled. A subtitle file is open when `.statusbar__document` stops saying
 "No subtitle file open."; `.statusbar__error` is absent from the DOM when there is nothing wrong.

@@ -17,15 +17,15 @@
   box-sizing: border-box;
 }
 
+/* The window's own type, which every panel inherits: small, and set once. The mockup puts the
+   whole drawing at 11.5px over a 1.6 line, and the regions below only name what departs from it. */
 body {
   margin: 0;
-  font-family:
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
   background: var(--bg-window);
   color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--text);
+  line-height: 1.6;
 }
 
 /* The window itself never scrolls: the regions inside it do, except the one holding the video. */
@@ -36,10 +36,12 @@ body {
   overflow: hidden;
 }
 
+/* The window colour, not the panel colour: the mockup's menu strip sits on the background and only
+   the toolbar under it is a panel, which is what separates the two bands without a second rule. */
 .shell__chrome {
   flex: none;
   border-bottom: 1px solid var(--line);
-  background: var(--bg-panel);
+  background: var(--bg-window);
 }
 
 /* The top block: the rail beside the video and the tools column, and nothing else. Fixed height,
@@ -105,11 +107,11 @@ body {
   flex: none;
   align-items: flex-start;
   gap: 0.75rem;
-  padding: 0.3rem 0.75rem;
+  padding: 0.25rem 0.5625rem;
   border-top: 1px solid var(--line);
   background: var(--bg-panel);
-  color: var(--ink-muted);
-  font-size: 0.8125rem;
+  color: var(--ink-dim);
+  font-size: var(--text-small);
 }
 
 .statusbar__document,

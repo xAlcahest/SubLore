@@ -1,25 +1,38 @@
 /*
- * Every colour in the interface, named for the job it does. No other file writes a value: T3 to T9
- * name a token or they name nothing (decision 22).
+ * Every colour in the interface and the type it is set in, named for the job each one does. No
+ * other file writes a colour: T3 to T9 name a token or they name nothing (decision 22).
  *
- * The values are the shell mockup's palette. v1 is dark only (decision 24), so there is no light
- * set and no theme switch; a light theme, if it ever ships, is a second set of values here.
+ * The values are the shell mockup's palette and type scale. v1 is dark only (decision 24), so
+ * there is no light set and no theme switch; a light theme, if it ever ships, is a second set of
+ * values here.
  */
 :root {
   color-scheme: dark;
+  /* The checkbox and the progress bar are native widgets, and this is what keeps them off the
+     system grey the finish rules out. */
+  accent-color: var(--accent);
 
   --bg-window: #131317;
   --bg-panel: #202026;
   --bg-sunken: #17171b;
   --bg-media: #0c0c0e;
+  /* Behind the rail's question. The only translucent value in the palette. */
+  --scrim: rgb(0 0 0 / 45%);
 
   --line: #2a2a31;
   --line-strong: #34343c;
+  /* The rule between cue rows, dimmer than a panel edge: the mockup's `.gr` border-bottom. */
+  --line-row: #23232a;
 
   --ink: #e6e6ea;
   --ink-muted: #b6b6c0;
   --ink-dim: #9a9aa6;
   --ink-faint: #71717f;
+  /* A panel with nothing in it yet, and a field nobody has filled: the mockup's `.frame` and
+     `.todo`. Recessive on purpose; it never carries a message that matters. */
+  --ink-ghost: #4a4a54;
+  /* Row text over the accent fill, which the muted ink is too dark for (the mockup's `.gr.on`). */
+  --ink-selected: #cfe4ee;
   /* The mockup draws no error state, so this one is the dark palette Sublore already shipped. */
   --ink-error: #ff8a80;
   /* Over a limit but not wrong, which is what a line past 21 cps is (decision 24 A8). */
@@ -27,4 +40,14 @@
 
   --accent: #4fb3d9;
   --accent-bg: #2d4a5c;
+
+  /* The mockup's own stacks. Named rather than chosen by the system, so the chrome is the same
+     drawing on Windows and Linux. */
+  --font-ui: "Inter", "Segoe UI", "DejaVu Sans", system-ui, sans-serif;
+  --font-mono: ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+
+  /* Small type, from the mockup's `.win` and the 10.5px it drops to for captions and readouts.
+     Exact conversions of 11.5px and 10.5px at the 16px root. */
+  --text: 0.71875rem;
+  --text-small: 0.65625rem;
 }

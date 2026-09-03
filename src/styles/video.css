@@ -14,6 +14,8 @@
   height: 100%;
 }
 
+/* The mockup's own placeholder ink, which is dimmer than anything that carries a message: an empty
+   frame says there is nothing here, and it says it quietly. */
 .stage__empty {
   position: absolute;
   inset: 0;
@@ -21,40 +23,84 @@
   align-items: center;
   justify-content: center;
   margin: 0;
-  color: var(--ink-dim);
-  font-size: 0.875rem;
+  color: var(--ink-ghost);
 }
 
-/* Wraps rather than clips: the panel is a third of the window wide and the transport has to fit
-   inside it at 1024x700. */
+/* The mockup's `.vbar`: a panel strip 4px deep and 6px in, in mono, under the slider. It wraps
+   rather than clips, since the panel is a third of the window wide at 1024x700. */
 .controls {
   display: flex;
   flex: none;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
+  gap: 0.4375rem;
+  padding: 0.25rem 0.375rem;
   border-top: 1px solid var(--line);
   background: var(--bg-panel);
+  color: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
 }
 
 .controls__label {
-  font-size: 0.875rem;
+  color: var(--ink-faint);
   white-space: nowrap;
 }
 
 .controls__button {
-  padding: 0.35rem 0.9rem;
+  padding: 0 0.375rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  color: var(--ink-muted);
   font: inherit;
-  font-size: 0.875rem;
 }
 
+.controls__button:hover:enabled {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.controls__button:disabled {
+  color: var(--ink-faint);
+}
+
+/*
+ * The mockup's `.vslider`: a 3px rule with a 9px accent dot on it, and no widget under it. The
+ * element stays 14px tall while the track is 3px, because the whole box is what a drag has to land
+ * on and a 3px target is one rounding away from the strip beside it.
+ */
 .controls__slider {
   flex: 1;
   min-width: 0;
+  height: 0.875rem;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+}
+
+.controls__slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+.controls__slider::-webkit-slider-thumb {
+  width: 9px;
+  height: 9px;
+  margin-top: -3px;
+  border: 0;
+  border-radius: 50%;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--accent);
+}
+
+.controls__slider:disabled::-webkit-slider-thumb {
+  background: var(--line-strong);
 }
 
 .controls__time {
   font-variant-numeric: tabular-nums;
-  font-size: 0.875rem;
 }

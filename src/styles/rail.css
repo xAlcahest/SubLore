@@ -6,23 +6,22 @@
  * width instead of the 18rem T2 left it at.
  */
 
+/* 7px above and 6px in, over rows on a 1.95 line: the mockup's `.rail` and its `.row`. */
 .rail {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  padding: 0.45rem 0.4rem;
-  font-size: 0.8125rem;
-  line-height: 1.6;
+  padding: 0.4375rem 0.375rem;
+  line-height: 1.95;
 }
 
 .rail__cap {
-  margin: 0 0 0.3rem 0.2rem;
+  margin: 0 0 0.3125rem 0.375rem;
   color: var(--ink-faint);
-  font-size: 0.6875rem;
+  font-size: var(--text-small);
   font-weight: 400;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  line-height: 1.6;
 }
 
 /* Every node is a button: focusable, activated by Enter and Space, and no roving tabindex to get
@@ -33,7 +32,7 @@
 .rail__empty {
   display: block;
   width: 100%;
-  padding: 0.05rem 0.35rem;
+  padding: 0 0.375rem;
   border: 0;
   border-radius: 3px;
   background: none;
@@ -85,7 +84,7 @@
 
 .rail__file {
   color: var(--ink-dim);
-  font-size: 0.75rem;
+  font-size: var(--text-small);
 }
 
 /* Marked, never dropped and never searched for: the record stands and Locate re-points it (D3). */
@@ -103,7 +102,7 @@
   margin: 0;
   padding-left: 0.95rem;
   color: var(--ink-faint);
-  font-size: 0.75rem;
+  font-size: var(--text-small);
 }
 
 /*
@@ -122,7 +121,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(0 0 0 / 45%);
+  background: var(--scrim);
 }
 
 .railmenu {
@@ -130,18 +129,17 @@
   z-index: 11;
   min-width: 11rem;
   margin: 0;
-  padding: 0.2rem;
+  padding: 0.1875rem;
   border: 1px solid var(--line-strong);
   border-radius: 4px;
   background: var(--bg-panel);
   list-style: none;
-  font-size: 0.8125rem;
 }
 
 .railmenu__item {
   display: block;
   width: 100%;
-  padding: 0.25rem 0.5rem;
+  padding: 0.1875rem 0.4375rem;
   border: 0;
   border-radius: 3px;
   background: none;
@@ -155,7 +153,7 @@
 .railmenu__item:hover,
 .railmenu__item:focus {
   background: var(--accent-bg);
-  color: var(--ink);
+  color: var(--ink-selected);
   outline: none;
 }
 
@@ -167,10 +165,9 @@
   width: min(28rem, calc(100vw - 4rem));
   padding: 0.9rem;
   border: 1px solid var(--line-strong);
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--bg-panel);
   color: var(--ink);
-  font-size: 0.8125rem;
 }
 
 .raildialog__title {
@@ -191,9 +188,9 @@
 }
 
 .raildialog__field {
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--line-strong);
-  border-radius: 3px;
+  padding: 0.1875rem 0.375rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
   background: var(--bg-sunken);
   color: var(--ink);
   font: inherit;
@@ -206,7 +203,7 @@
 }
 
 .raildialog__buttons button {
-  padding: 0.3rem 0.9rem;
+  padding: 0.1875rem 0.75rem;
   border: 1px solid var(--line-strong);
   border-radius: 3px;
   background: var(--bg-sunken);
