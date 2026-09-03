@@ -57,8 +57,8 @@ export default function Waveform({ peaks, positionMs, durationMs }: WaveformProp
     // already drawn under the playhead.
     const span = Math.max(1, durationMs > 0 ? durationMs : peaks.filled);
     const middle = height / 2;
-    const wave = ink(element, "--ink-dim");
-    context.fillStyle = wave === "" ? "#9a9aa6" : wave;
+    const wave = ink(element, "--wave");
+    context.fillStyle = wave === "" ? "#3fbf7f" : wave;
 
     for (let x = 0; x < width; x += 1) {
       const from = Math.floor((x / width) * span);

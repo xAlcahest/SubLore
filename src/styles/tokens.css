@@ -40,6 +40,9 @@
 
   --accent: #4fb3d9;
   --accent-bg: #2d4a5c;
+  /* The drawn waveform. Read by name from the canvas, which is why it is a token and not a
+     literal in `Waveform.tsx`: the peaks are painted, so the paint belongs in the palette. */
+  --wave: #3fbf7f;
 
   /* The mockup's own stacks. Named rather than chosen by the system, so the chrome is the same
      drawing on Windows and Linux. */
