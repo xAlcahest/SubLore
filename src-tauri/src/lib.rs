@@ -186,7 +186,7 @@ pub fn run() -> tauri::Result<()> {
             }
             crash::force::trip(ForcePoint::Startup);
             app.manage(asr::AsrState::default());
-            app.manage(audio::AudioState::default());
+            app.manage(audio::AudioState::new(app.handle()));
             // A killed process cannot run its own cleanup, so abandoned run directories are swept
             // here, off the main thread. See BACKLOG.md M3.1.
             asr::sweep_scratch(app.handle());

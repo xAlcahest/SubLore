@@ -82,7 +82,15 @@ function sourceModel() {
   return path.join(cacheHome(), "sublore", "models", TINY_EN.file);
 }
 
-function cacheHome() {
+/**
+ * Where a real whisper model would be, before anything redirects it.
+ *
+ * Exported so `wdio.conf.js` can pin `SUBLORE_TEST_MODEL_DIR` to it *before* the harness gets a
+ * cache directory of its own: `appEnv` points `XDG_CACHE_HOME` at the run's own temp tree so the
+ * peaks cache never lands in the developer's, and `sourceModel` falls back to this when the pin is
+ * absent, so without the pin the model would be looked for inside a tree that has just been made.
+ */
+export function cacheHome() {
   const xdg = process.env.XDG_CACHE_HOME;
   if (typeof xdg === "string" && xdg !== "") {
     return xdg;

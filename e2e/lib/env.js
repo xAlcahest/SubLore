@@ -1,3 +1,4 @@
+import path from "node:path";
 import process from "node:process";
 
 /**
@@ -32,5 +33,11 @@ export function appEnv(overrides = {}) {
     ...overrides,
   };
   delete env.WAYLAND_DISPLAY;
+  // The peaks cache follows the data home it belongs to, so a run never writes into the developer's
+  // own cache and two harnesses never share one. Only when there is a data home to follow: the
+  // docstring above says a launcher needs a base environment, and that stays true.
+  if (typeof env.XDG_DATA_HOME === "string" && env.XDG_DATA_HOME !== "") {
+    env.XDG_CACHE_HOME = path.join(env.XDG_DATA_HOME, "cache");
+  }
   return env;
 }
