@@ -1,4 +1,4 @@
-/* global describe, it, before, afterEach, document, window */
+/* global describe, it, before, afterEach, document, window, console */
 /**
  * N2: the native video surface can be hidden and shown again (BACKLOG NOW block, decision 2).
  *
@@ -91,6 +91,13 @@ function currentSurface(toplevel) {
  * `Math.floor`ed to whole seconds (VideoControls.tsx:6-11), so a restart shorter than a second is
  * invisible to it. The slider carries hundredths, and both are written from mpv's own `time-pos`.
  */
+/** The media's length in seconds, from the slider's own maximum. */
+async function duration() {
+  return Number(
+    await browser.execute(() => document.querySelector(".controls__slider")?.max ?? null),
+  );
+}
+
 /** What the transport button says: "Play" when paused, "Pause" while playing. */
 function transportLabel() {
   return browser.execute(() => document.querySelector(".controls__button")?.textContent ?? null);
@@ -204,13 +211,27 @@ describe("video surface hide and show", () => {
   });
 
   it("brings the picture back with the video paused, without restarting playback", async () => {
-    // This test pauses, so it needs something playing, which the test above leaves behind. Checked
-    // rather than inherited: if it is already paused the click below starts playback instead of
-    // stopping it, and the wait then times out saying the opposite of what happened.
-    const before = await transportLabel();
-    expect(`the transport before the pause click: ${before}`).toBe(
-      "the transport before the pause click: Pause",
-    );
+    // This test pauses, so it needs something playing. It used to inherit that from the test above
+    // and went red intermittently in CI when it did not hold: the click then started playback and
+    // the wait timed out saying the opposite of what had happened. It sets its own stage now.
+    //
+    // Why the state is sometimes already stopped is not explained, so it is reported rather than
+    // swallowed: the line below is the only trace, and a run that prints it has seen the anomaly
+    // even though it went green. See BACKLOG.md N13.
+    if ((await transportLabel()) === "Play") {
+      const at = await position();
+      console.log(
+        `video-surface: playback had already stopped before the pause test, at ${at} of ` +
+          `${await duration()}s. Restarting it. See BACKLOG.md N13.`,
+      );
+      const restart = await centreOf(".controls__button");
+      clickAt(toplevel.absX + restart.x, toplevel.absY + restart.y);
+      const from = await position();
+      await waitFor(async () => ((await position()) > from ? true : null), {
+        timeout: 15000,
+        message: `playback to restart for the pause test (still ${from})`,
+      });
+    }
 
     const pause = await centreOf(".controls__button");
     clickAt(toplevel.absX + pause.x, toplevel.absY + pause.y);

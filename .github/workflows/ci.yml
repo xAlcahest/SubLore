@@ -303,6 +303,25 @@ jobs:
       # check would be green for the wrong reason, so it refuses to run instead. Same owner-machine
       # rule. Neither is silently skippable: both fail loudly when their prerequisite is absent.
 
+      # WebDriver forwards the app's stderr and drops its stdout, so the log the app writes about
+      # itself never reached CI and a failing check could only be read from the outside. Every
+      # harness gives the app a data home of its own under the temp directory, so there is one log
+      # directory per harness rather than one for the job, and each is taken here under its own
+      # number with the path it came from written beside it.
+      - name: Take the log the app writes about itself
+        if: always()
+        run: |
+          mkdir -p ci-logs/app-log
+          found=0
+          for logs in "${TMPDIR:-/tmp}"/sublore-*/com.sublore.app/logs \
+            "${XDG_DATA_HOME:-$HOME/.local/share}/com.sublore.app/logs"; do
+            [ -d "$logs" ] || continue
+            found=$((found + 1))
+            cp -r "$logs" "ci-logs/app-log/$found"
+            echo "$found $logs" >> ci-logs/app-log/where-each-came-from.txt
+          done
+          echo "app log directories collected: $found"
+
       # A diagnostic run collects every failure instead of stopping at the first, but it must not
       # end green while a check is red: the artefact is the evidence, this step is the verdict.
       - name: Collect the diagnostic logs
