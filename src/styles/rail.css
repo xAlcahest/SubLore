@@ -56,8 +56,11 @@
   color: var(--ink);
 }
 
+/* The one line here that is a sentence and not a name: at the mockup's 104px it does not fit on
+   one, and ellipsising it clips it mid-word. Names keep the ellipsis; this wraps. */
 .rail__empty {
   color: var(--ink-dim);
+  white-space: normal;
 }
 
 /* The one part of the rail that grows: it takes whatever the cap and the folder line leave. */
