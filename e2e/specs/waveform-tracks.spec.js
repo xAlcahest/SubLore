@@ -250,26 +250,30 @@ describe("the Audio menu and the track that is drawn", () => {
     expect(items.map((item) => item.checked)).toEqual([false, true]);
   });
 
-  it("switches back to a peaked track faster than it read it, with no child of its own", async () => {
-    // Against the same switch made cold on the same machine, not against a number of milliseconds.
-    // W8 says 200 ms, and M2.3 already found that axis wrong for this kind of claim: a fixed
-    // millisecond ceiling is a number about one machine, and a runner is a third slower at
-    // arithmetic while ten times slower at rendering. `editor.spec.js` carries the reasoning. What
-    // "immediate, because those peaks are cached" means is that it beats reading the media again,
-    // and that sentence holds on any machine. The owner's machine's figure is in STATE.md, where
-    // W10's two numbers are.
+  it("switches back to a track already peaked without reading the media again", async () => {
+    // Both times are logged and neither is asserted against the other, because measuring them
+    // showed the comparison to be the wrong one: on this fixture the cold switch paints first in
+    // about the same time or sooner, and its figure swings between runs (74 ms and 4 ms in two). A live run streams, so its first chunk is on screen while
+    // ffmpeg is still reading, while a cache hit loads and decodes the whole entry before it hands
+    // over anything. The cache buys completion, not first paint, and W10 measures that: the
+    // 24-minute fixture is read in 4436 ms cold and 512 ms warm.
+    //
+    // W8's own figure of 200 ms is a number about one machine, which M2.3 already found to be the
+    // wrong axis for this kind of claim; `editor.spec.js` carries the reasoning and STATE.md carries
+    // the owner's machine's figures. What is asserted here is the part that holds on any machine.
     const cold = await timeSwitch(toplevel, 2, { low: 0.05, high: 0.5 });
     const warm = await timeSwitch(toplevel, 1, { low: 0.8, high: 1.01 });
     console.log(
-      `W8 switch: ${Math.round(cold)} ms reading the media, ${Math.round(warm)} ms from the cache`,
+      `W8 switch to first paint: ${Math.round(cold)} ms reading the media, ${Math.round(warm)} ms from the cache`,
     );
 
-    expect(warm).toBeLessThan(cold);
-    // For this track, not for the file: the job for the other one may still be reading, which is
-    // its work and not a child left behind. A cache hit is a switch that spawns nothing of its own.
+    // The criterion this test is for: the peaks came from the cache, so nothing was spawned to read
+    // that stream again. For this stream and not for the file, because the job for the other track
+    // may still be reading, which is its work and not a child left behind.
     expect(
       ffmpegProcessesFor("waveform-tracks").filter((args) => args.includes(CACHED_MAP)),
     ).toEqual([]);
+    expect(await reach()).toBeGreaterThan(0.8);
   });
 
   it("leaves no ffmpeg behind when a switch lands on top of another", async () => {
