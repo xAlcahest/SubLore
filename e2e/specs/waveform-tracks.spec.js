@@ -103,6 +103,12 @@ function present(selector) {
 
 /** Every item of the Audio menu, with whether it is marked and whether it can be chosen. */
 async function audioItems(toplevel) {
+  // Waited for: the title appears when the track list comes back from the backend, which is a
+  // separate answer from the one the panel waits on, and on a slower machine it lands after it.
+  await waitFor(() => present(".menubar__title--audio"), {
+    timeout: 30000,
+    message: "the Audio title to appear, which needs the track list to have arrived",
+  });
   await clickElement(toplevel, ".menubar__title--audio");
   return browser.execute(() =>
     Array.from(document.querySelectorAll(".menubar__menu [role='menuitemcheckbox']")).map(
