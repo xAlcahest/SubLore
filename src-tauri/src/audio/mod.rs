@@ -332,8 +332,20 @@ pub fn start_for_playing_track(app: &AppHandle, player: &Player, media: &str) {
         }
     };
     // Decision 24 E3: media with no audio spawns no child, on any route into the panel.
-    let Some(track) = tracks.into_iter().find(|track| track.playing) else {
-        log::info!("waveform: {media} has no playing audio track, so nothing is peaked");
+    let Some(track) = tracks.iter().find(|track| track.playing).cloned() else {
+        // What mpv listed, and not only that nothing was chosen: a file with no audio at all and a
+        // file whose one audio track mpv has not marked `selected` yet leave the panel equally
+        // empty, and only this line can tell them apart. See BACKLOG.md N14.
+        let listed = tracks
+            .iter()
+            .map(|track| format!("stream {} selected={}", track.ff_index, track.playing))
+            .collect::<Vec<_>>()
+            .join(", ");
+        log::info!(
+            "waveform: {media} has no playing audio track, so nothing is peaked; mpv listed {} audio tracks{}{listed}",
+            tracks.len(),
+            if tracks.is_empty() { "" } else { ": " }
+        );
         return;
     };
     if let Err(error) = start_job(app, PathBuf::from(&media), track.ff_index) {
