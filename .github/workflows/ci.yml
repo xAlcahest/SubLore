@@ -225,6 +225,20 @@ jobs:
         timeout-minutes: 25
         run: .github/scripts/e2e-check.sh smoke e2e
 
+      # N10's experiment, one step and one file. The runner declares org.freedesktop.portal.Desktop
+      # activatable through libwebkit2gtk-4.1-dev's dependencies and has no session that can start
+      # it, and GtkApplication's registration waits 30 s for it before the window exists. Moved
+      # aside for this one check: the wrapper prints the check's wall time, so this run measures
+      # both halves, the other checks still having the file. See BACKLOG.md N10.
+      - name: Shutdown test with the portal service moved aside (N10 experiment)
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          sudo mv /usr/share/dbus-1/services/org.freedesktop.portal.Desktop.service /tmp/portal.service.away
+          .github/scripts/e2e-check.sh shutdown-no-portal e2e:shutdown || true
+          sudo mv /tmp/portal.service.away /usr/share/dbus-1/services/org.freedesktop.portal.Desktop.service
+          rm -f ci-logs/shutdown-no-portal.exit
+
       - name: Shutdown test (clean exit, no survivors)
         continue-on-error: true
         timeout-minutes: 3
