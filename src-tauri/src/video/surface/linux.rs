@@ -81,6 +81,10 @@ impl Surface {
 
     pub fn destroy(self) -> Result<(), VideoError> {
         self.window.destroy();
+        // The X window goes; the GObject wrapping it deliberately does not. GDK walks its own
+        // window list while the app is quitting and type-checks what it finds, and a freed one
+        // makes that read a class pointer that is no longer mapped. See BACKLOG.md N11.
+        std::mem::forget(self);
         Ok(())
     }
 }
