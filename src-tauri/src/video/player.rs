@@ -14,6 +14,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use super::error::{from_mpv, VideoError, VideoErrorCode};
+use crate::log;
 
 pub const EVENT_POSITION: &str = "video://position";
 pub const EVENT_STATE: &str = "video://state";
@@ -134,6 +135,9 @@ struct Shared {
     app: Option<AppHandle>,
     state: Mutex<VideoPlayerState>,
     pending_open: Mutex<Option<SyncSender<Result<f64, VideoError>>>>,
+    /// The last pause this app asked mpv for. A `pause` that arrives while this is false is one
+    /// nobody here wanted, and BACKLOG N13 is exactly that going unrecorded.
+    asked_paused: AtomicBool,
 }
 
 impl Shared {
@@ -279,6 +283,8 @@ impl Player {
             app,
             state: Mutex::new(VideoPlayerState::idle()),
             pending_open: Mutex::new(None),
+            // Nothing is loaded yet, so nothing has been asked to play.
+            asked_paused: AtomicBool::new(true),
         });
         let stop = Arc::new(AtomicBool::new(false));
 
@@ -340,6 +346,8 @@ impl Player {
         })?;
         self.shared.emit_state();
 
+        // A file opens stopped, and that is a pause this app asked for.
+        self.shared.asked_paused.store(true, Ordering::Relaxed);
         let issued = mpv
             .set_property("pause", true)
             .and_then(|()| mpv.command("loadfile", &[&target]));
@@ -574,6 +582,9 @@ impl Player {
     fn set_pause(&self, paused: bool) -> Result<(), VideoError> {
         let mpv = self.handle()?;
         self.loaded_duration()?;
+        // Recorded before the property is set, so the event thread never sees the change while the
+        // flag still says the app wanted the other thing.
+        self.shared.asked_paused.store(paused, Ordering::Relaxed);
         mpv.set_property("pause", paused)
             .map_err(|error| from_mpv(error, "pause"))
     }
@@ -647,6 +658,16 @@ fn event_loop(mpv: &Mpv, shared: &Shared, stop: &AtomicBool) {
                 change: PropertyData::Flag(paused),
                 ..
             })) => {
+                // A pause the app never asked for is the only kind worth a line: it is playback
+                // stopping on its own, and until now the only sign of it was a test going red on a
+                // machine nobody could look at. See BACKLOG.md N13.
+                if paused && !shared.asked_paused.load(Ordering::Relaxed) {
+                    let at = match mpv.get_property::<f64>("time-pos") {
+                        Ok(seconds) => format!("{seconds} s"),
+                        Err(_) => "a position mpv would not report".to_owned(),
+                    };
+                    log::info!("playback: mpv paused itself at {at}, which nothing here asked for");
+                }
                 if let Ok(mut state) = shared.state.lock() {
                     state.paused = paused;
                 }
