@@ -382,6 +382,7 @@ export default function App() {
                     positionMs={Math.round(position * 1000)}
                     durationMs={Math.round((state.duration ?? 0) * 1000)}
                     height={layout?.waveformHeight}
+                    paused={state.paused}
                   />
                   {layout !== null && (
                     <Sash

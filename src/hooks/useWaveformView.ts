@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /** What part of the media the panel is drawing, and at what scale. */
 export type WaveformView = {
@@ -16,6 +16,9 @@ export const DEEPEST_MS_PER_PIXEL = 1;
 
 /** One press or one wheel notch. Six of them cross a minute-long file from whole to deepest. */
 const ZOOM_FACTOR = 2;
+
+/** Where the playhead is put when the view has to move on, and the band it may wander in. */
+const EDGE_FRACTION = 0.1;
 
 function clamp(value: number, low: number, high: number): number {
   return Math.min(Math.max(value, low), Math.max(low, high));
@@ -41,8 +44,12 @@ export function useWaveformView(
   view: WaveformView;
   zoomBy: (steps: number, atMs?: number) => void;
   scrollBy: (pixels: number) => void;
+  followTo: (atMs: number) => void;
+  startFollowing: () => void;
 } {
   const [view, setView] = useState<WaveformView>({ fromMs: 0, msPerPixel: DEEPEST_MS_PER_PIXEL });
+  // Not state: it changes on every drag and every frame of playback, and nothing draws it.
+  const following = useRef(true);
 
   useEffect(() => {
     setView({ fromMs: 0, msPerPixel: fitting(spanMs, widthPx) });
@@ -50,6 +57,7 @@ export function useWaveformView(
 
   const zoomBy = useCallback(
     (steps: number, atMs?: number) => {
+      following.current = false;
       setView((current) => {
         const shallowest = fitting(spanMs, widthPx);
         const msPerPixel = clamp(
@@ -69,6 +77,7 @@ export function useWaveformView(
 
   const scrollBy = useCallback(
     (pixels: number) => {
+      following.current = false;
       setView((current) => ({
         ...current,
         fromMs: clamp(
@@ -81,5 +90,36 @@ export function useWaveformView(
     [spanMs, widthPx],
   );
 
-  return { view, zoomBy, scrollBy };
+  /**
+   * Keep the playhead on screen while playback runs, by the page rather than by the pixel.
+   *
+   * A window that slides under a still playhead is a moving background, and it costs a redraw of
+   * the whole panel every frame. This leaves the drawing alone until the head reaches the last
+   * tenth and then moves it on by most of a page, which is the gesture a reader already knows.
+   */
+  const followTo = useCallback(
+    (atMs: number) => {
+      if (!following.current) {
+        return;
+      }
+      setView((current) => {
+        const window = widthPx * current.msPerPixel;
+        const ahead = current.fromMs + window * (1 - EDGE_FRACTION);
+        const behind = current.fromMs + window * EDGE_FRACTION;
+        if (atMs <= ahead && atMs >= behind) {
+          return current;
+        }
+        const fromMs = clamp(atMs - window * EDGE_FRACTION, 0, spanMs - window);
+        return fromMs === current.fromMs ? current : { ...current, fromMs };
+      });
+    },
+    [spanMs, widthPx],
+  );
+
+  /** Playback starting takes the view back, whatever the hand did while it was stopped. */
+  const startFollowing = useCallback(() => {
+    following.current = true;
+  }, []);
+
+  return { view, zoomBy, scrollBy, followTo, startFollowing };
 }
