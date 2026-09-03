@@ -375,6 +375,11 @@ export default function App() {
             <section className="shell__tools" ref={toolsRef}>
               {/* Absent until the first chunk arrives, never an empty panel waiting for one, and
                 absent again while View has it turned off. */}
+              {/* Decision 24 E3: a media with no audio says so where the panel would be, in one
+                line and not as a failure. */}
+              {waveformShown && peaks.silent && (
+                <p className="tools__silent">{en.waveform.noAudio}</p>
+              )}
               {waveformShown && peaks.filled > 0 && (
                 <>
                   <Waveform

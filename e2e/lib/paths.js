@@ -71,6 +71,13 @@ export function requireWaveformFixture() {
   return requireFile(waveformFixture, "sh fixtures/video/make-waveform-fixtures.sh");
 }
 
+/** The M2.4 fixture with a picture and no audio at all (decision 24 E3). Generated, not committed. */
+export const silentFixture = path.join(repoRoot, "fixtures", "video", "waveform-silent.mkv");
+
+export function requireSilentFixture() {
+  return requireFile(silentFixture, "sh fixtures/video/make-waveform-fixtures.sh");
+}
+
 /** A command the harness drives the app with. Missing means one sentence, never a cryptic error. */
 export function requireTool(name, what) {
   try {

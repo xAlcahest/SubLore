@@ -19,6 +19,11 @@ export type Waveform = {
   total: number | null;
   /** A sentence the user can act on, or null. A cancel is never one: every media change cancels. */
   error: AudioFailed | null;
+  /**
+   * The open media carries no audio at all (decision 24 E3). Distinct from `filled === 0`, which is
+   * also true of a job that has simply not produced anything yet.
+   */
+  silent: boolean;
 };
 
 const EMPTY: Waveform = {
@@ -27,6 +32,7 @@ const EMPTY: Waveform = {
   filled: 0,
   total: null,
   error: null,
+  silent: false,
 };
 
 /** Grow to hold `wanted` buckets, doubling, so a long episode costs a handful of copies. */
@@ -61,6 +67,14 @@ export function useAudioPeaks(): Waveform {
 
   useEffect(() => {
     const listeners = Promise.all([
+      // A media with no audio, which arrives instead of a job rather than after one.
+      listen("audio://none", () => {
+        current.current = null;
+        min.current = EMPTY.min;
+        max.current = EMPTY.max;
+        filled.current = 0;
+        setWaveform({ ...EMPTY, silent: true });
+      }),
       listen<AudioJobStarted>("audio://started", (event) => {
         current.current = event.payload.jobId;
         min.current = EMPTY.min;
