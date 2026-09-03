@@ -51,6 +51,34 @@ export function timecode(milliseconds: number): string {
 }
 
 /**
+ * A time a person typed, back into milliseconds. Hours and minutes are optional and either
+ * separator introduces the milliseconds, because a translator types `9.1` and pastes `00:00:09,100`
+ * for the same instant. Null when the string is not a time, and a null is never committed.
+ *
+ * The digit counts are the bound on the result: three digits of the leading unit is at most
+ * 999:59:59.999, which is inside the `u32` the command takes. See M2.7 E1.
+ */
+const TYPED_TIME = /^(\d{1,3}(?::\d{1,2}){0,2})[.,](\d{1,3})$/;
+
+export function parseTimecode(value: string): number | null {
+  const match = TYPED_TIME.exec(value.trim());
+  if (match === null) {
+    return null;
+  }
+  const units = match[1].split(":").map(Number);
+  // Everything but the leading unit is a sexagesimal digit: `1:75.000` is not a time.
+  if (units.slice(1).some((unit) => unit > 59)) {
+    return null;
+  }
+  const millis = Number(match[2].padEnd(3, "0"));
+  // Read from the right, so that seconds, minutes and hours all land in the right place.
+  const seconds = units.pop() ?? 0;
+  const minutes = units.pop() ?? 0;
+  const hours = units.pop() ?? 0;
+  return hours * 3_600_000 + minutes * 60_000 + seconds * 1000 + millis;
+}
+
+/**
  * A cue's length in seconds, to the millisecond the product reasons in (decision 11). Shown as
  * seconds rather than as a timecode: a length is judged against the second, not against the hour.
  */

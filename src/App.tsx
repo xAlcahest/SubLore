@@ -430,6 +430,7 @@ export default function App() {
                 flushRef={flushLine}
                 onDraftChange={setLineEdited}
                 onCommit={subtitle.setText}
+                onCommitTimes={subtitle.setTimes}
               />
             </section>
           </div>

@@ -30,6 +30,14 @@ const THIRD = {
 };
 /** Typed over the third cue from the tools column. */
 const EDITED_TEXT = "Typed into the current line";
+/** Typed into the start field. The duration beside it is derived, so it has to follow. */
+const EDITED_START = "00:00:09.500";
+const EDITED_DURATION = "2.260";
+/** A second one, so that a refusal between them can be counted rather than assumed. */
+const SECOND_START = "00:00:09.750";
+/** What the SRT writer puts on the third cue's timing line, before and after. */
+const THIRD_TIMING_LINE = "00:00:09,100 --> 00:00:11,760";
+const SECOND_TIMING_LINE = "00:00:09,750 --> 00:00:11,760";
 
 function dataHome() {
   const home = process.env.SUBLORE_E2E_DATA_HOME;
@@ -119,10 +127,14 @@ function currentLine() {
   return browser.execute(() => {
     const box = document.querySelector(".currentline__text");
     const read = (css) => document.querySelector(css)?.textContent ?? null;
+    // Start and end are fields since M2.7 E1; duration and CPS are derived and are still text.
+    const field = (css) => document.querySelector(css)?.value ?? null;
+    const start = document.querySelector(".currentline__start");
     return {
       text: box === null ? null : box.value,
-      start: read(".currentline__start"),
-      end: read(".currentline__end"),
+      start: field(".currentline__start"),
+      end: field(".currentline__end"),
+      startInvalid: start === null ? null : start.classList.contains("currentline__time--invalid"),
       duration: read(".currentline__duration"),
       cps: read(".currentline__cps"),
       empty: read(".currentline__empty"),
@@ -149,6 +161,54 @@ function gridRow(position) {
       cursor: row.classList.contains("cuelist__row--active"),
     };
   }, String(position));
+}
+
+/**
+ * Every subtitle command that crosses the boundary from here until `takeCommands`, in order. It
+ * goes on `fetch`, which is what every command travels on, the way editor.spec.js measures the same
+ * boundary: a second route into the document shows up here as a second name.
+ */
+function watchCommands() {
+  return browser.execute(() => {
+    window.__subloreCommands = [];
+    const passThrough = window.fetch;
+    window.__subloreFetch = passThrough;
+    window.fetch = (...rest) => {
+      const url = String(rest[0]?.url ?? rest[0]);
+      const name = url.split("/").pop();
+      if (typeof name === "string" && name.startsWith("subtitle_")) {
+        window.__subloreCommands.push(name);
+      }
+      return passThrough.apply(window, rest);
+    };
+    if (window.fetch === passThrough) {
+      throw new Error("the probe did not take: fetch is not writable here either");
+    }
+  });
+}
+
+function takeCommands() {
+  return browser.execute(() => {
+    window.fetch = window.__subloreFetch;
+    return window.__subloreCommands;
+  });
+}
+
+/** Replace what a time field holds, the way a person would: click it, select all, type. */
+async function typeIntoTime(toplevel, field, value) {
+  const className = `currentline__${field}`;
+  await clickElement(toplevel, `.${className}`);
+  await waitFor(
+    () =>
+      browser.execute((css) => document.activeElement?.classList.contains(css) === true, className),
+    { timeout: 15000, message: `the ${field} field to take the keyboard` },
+  );
+  key("ctrl+a");
+  typeText(value);
+  await waitFor(async () => (await currentLine())[field] === value, {
+    timeout: 15000,
+    message: `the ${field} field to hold exactly ${value}`,
+  });
 }
 
 /** Replace what the box holds, the way a person would: click it, select all, type. */
@@ -235,26 +295,7 @@ describe("the current line", () => {
   });
 
   it("commits through the command the grid commits with, and the grid row shows it", async () => {
-    // Every subtitle command that crosses the boundary while the commit happens, in order. It goes
-    // on `fetch`, which is what every command travels on, the way editor.spec.js measures the same
-    // boundary: a second route into the document would show up here as a second name.
-    await browser.execute(() => {
-      window.__subloreCommands = [];
-      const passThrough = window.fetch;
-      window.__subloreFetch = passThrough;
-      window.fetch = (...rest) => {
-        const url = String(rest[0]?.url ?? rest[0]);
-        const name = url.split("/").pop();
-        if (typeof name === "string" && name.startsWith("subtitle_")) {
-          window.__subloreCommands.push(name);
-        }
-        return passThrough.apply(window, rest);
-      };
-      if (window.fetch === passThrough) {
-        throw new Error("the probe did not take: fetch is not writable here either");
-      }
-    });
-
+    await watchCommands();
     await typeIntoBox(toplevel, EDITED_TEXT);
     key("Return");
 
@@ -262,12 +303,8 @@ describe("the current line", () => {
       timeout: 20000,
       message: "the third grid row to show what the tools column committed",
     });
-    const commands = await browser.execute(() => {
-      window.fetch = window.__subloreFetch;
-      return window.__subloreCommands;
-    });
 
-    expect(commands).toEqual(["subtitle_set_text"]);
+    expect(await takeCommands()).toEqual(["subtitle_set_text"]);
     expect(await present(".statusbar__dirty")).toBe(true);
     expect(await present(".statusbar__error")).toBe(false);
     // The inline editor never opened: this edit was made in the tools column and nowhere else.
@@ -293,5 +330,90 @@ describe("the current line", () => {
     // The box holds the document again, not the text that was undone out from under it.
     expect((await currentLine()).text).toBe(THIRD.text);
     expect(readFileSync(copy).equals(originalBytes)).toBe(true);
+  });
+
+  it("commits a typed start through subtitle_set_times, and both views follow it", async () => {
+    await watchCommands();
+    await typeIntoTime(toplevel, "start", EDITED_START);
+    key("Return");
+
+    await waitFor(async () => (await gridRow(3))?.start === EDITED_START, {
+      timeout: 20000,
+      message: "the third grid row to show the timing the tools column committed",
+    });
+    // One command, and the one that carries both times. A field that sent its own would be two.
+    expect(await takeCommands()).toEqual(["subtitle_set_times"]);
+
+    const line = await currentLine();
+    expect(line.start).toBe(EDITED_START);
+    expect(line.end).toBe(THIRD.end);
+    // Duration is derived from the pair and is stored nowhere, so it has to have moved with them.
+    expect(line.duration).toBe(EDITED_DURATION);
+    expect(line.startInvalid).toBe(false);
+    expect(await present(".statusbar__dirty")).toBe(true);
+    // A commit is not a save, exactly as it is not one for the text.
+    expect(readFileSync(copy).equals(originalBytes)).toBe(true);
+  });
+
+  it("sends nothing for a value that is not a time, and one command once it is one", async () => {
+    await watchCommands();
+    await typeIntoTime(toplevel, "start", "nonsense");
+    key("Return");
+
+    await waitFor(async () => ((await currentLine()).startInvalid === true ? true : null), {
+      timeout: 15000,
+      message: "the start field to mark itself as holding something that is not a time",
+    });
+    expect((await gridRow(3)).start).toBe(EDITED_START);
+
+    // The barrier the assertion above needs: the same field, now holding a time. If the Return on
+    // "nonsense" had sent anything, two names land here rather than one.
+    await typeIntoTime(toplevel, "start", SECOND_START);
+    key("Return");
+    await waitFor(async () => (await gridRow(3))?.start === SECOND_START, {
+      timeout: 20000,
+      message: "the third grid row to show the second timing",
+    });
+    expect(await takeCommands()).toEqual(["subtitle_set_times"]);
+    expect((await currentLine()).startInvalid).toBe(false);
+  });
+
+  it("gives each timing back one undo at a time, and a save writes the one that stands", async () => {
+    // Two timing commits stand, and the backend starts a new run for each, so they are two steps.
+    await clickElement(toplevel, ".toolbar__undo");
+    await waitFor(async () => (await gridRow(3))?.start === EDITED_START, {
+      timeout: 20000,
+      message: "one undo to put the third row back on the first timing",
+    });
+    await clickElement(toplevel, ".toolbar__undo");
+    await waitFor(async () => (await gridRow(3))?.start === THIRD.start, {
+      timeout: 20000,
+      message: "a second undo to put the third row back on the timing the file was opened with",
+    });
+    await waitFor(async () => ((await present(".statusbar__dirty")) === false ? true : null), {
+      timeout: 20000,
+      message: "the unsaved marker to clear once both timings are undone",
+    });
+    expect(readFileSync(copy).equals(originalBytes)).toBe(true);
+
+    await clickElement(toplevel, ".toolbar__redo");
+    await clickElement(toplevel, ".toolbar__redo");
+    await waitFor(async () => (await gridRow(3))?.start === SECOND_START, {
+      timeout: 20000,
+      message: "two redos to bring the second timing back",
+    });
+
+    await clickElement(toplevel, ".toolbar__save");
+    await waitFor(
+      () => {
+        const written = readFileSync(copy).toString("utf8");
+        return written.includes(SECOND_TIMING_LINE) ? written : null;
+      },
+      { timeout: 20000, message: `the saved file to carry ${SECOND_TIMING_LINE}` },
+    );
+    const written = readFileSync(copy).toString("utf8");
+    expect(written).not.toContain(THIRD_TIMING_LINE);
+    // Round trip: what the file now holds is what the box shows, read back off the disk.
+    expect((await currentLine()).start).toBe(SECOND_START);
   });
 });

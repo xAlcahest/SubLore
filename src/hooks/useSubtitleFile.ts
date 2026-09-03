@@ -89,6 +89,7 @@ export type SubtitleFile = {
   discardAndOpen: () => Promise<void>;
   adoptTranscription: (runId: number) => Promise<void>;
   setText: (cue: number, text: string) => Promise<void>;
+  setTimes: (cue: number, startMs: number, endMs: number) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   save: () => Promise<void>;
@@ -251,6 +252,12 @@ export function useSubtitleFile(): SubtitleFile {
     [command],
   );
 
+  const setTimes = useCallback(
+    (cue: number, startMs: number, endMs: number) =>
+      command("subtitle_set_times", { cue, startMs, endMs }),
+    [command],
+  );
+
   const undo = useCallback(() => command("subtitle_undo", {}), [command]);
 
   const redo = useCallback(() => command("subtitle_redo", {}), [command]);
@@ -325,6 +332,7 @@ export function useSubtitleFile(): SubtitleFile {
     discardAndOpen,
     adoptTranscription,
     setText,
+    setTimes,
     undo,
     redo,
     save,
