@@ -184,6 +184,10 @@ async function surfaceRect() {
 }
 
 /** Wait for a viewable X11 child of the app window sitting on the rectangle the stage reports. */
+function present(selector) {
+  return browser.execute((css) => document.querySelector(css) !== null, selector);
+}
+
 async function waitForSurfaceOnStage(toplevel) {
   const expected = await surfaceRect();
   expect(expected.width).toBeGreaterThan(0);
@@ -474,10 +478,12 @@ describe("the shell layout", () => {
     await waitForSurfaceOnStage(narrow);
   });
 
-  // T5's second criterion, "no empty waveform placeholder is on screen". An absence is only worth
-  // asserting if it can be shown failing, so the probe goes in first and the reading is proved to
-  // name it before the real column is read.
-  it("gives the whole tools column to the current line, with no panel above it", async () => {
+  // The tools column holds exactly the panels that have something to show, and nothing else. T5
+  // wrote this to assert the waveform's absence; W5 gave the waveform a provider, so the panel it
+  // names is now expected and the absence rule moved to `waveform.spec.js`, which asserts it in the
+  // state where it still holds: before any video is open. An absence is only worth asserting if it
+  // can be shown failing, so the probe goes in first and the reading is proved to name it.
+  it("holds exactly the panels with something to show, and nothing else", async () => {
     await browser.execute(() => {
       const probe = document.createElement("div");
       probe.className = "waveform-probe";
@@ -491,15 +497,30 @@ describe("the shell layout", () => {
     expect(withProbe).not.toBe(null);
     expect(withProbe.children.map((child) => child.name)).toEqual([
       "div.waveform-probe",
+      "section.waveform",
       "section.currentline",
     ]);
     expect(withProbe.children[1].top).toBeGreaterThan(EDGE_SLOP_PX);
 
+    // Waited for, not assumed present: the waveform arrives with the peak job's first chunk, and on
+    // a slower machine that is after this point. Reading the column without waiting made this
+    // assertion depend on how fast the runner is, which is the defect e2e/README.md's own rule about
+    // environment-anchored assertions exists to catch.
+    await waitFor(() => present(".waveform"), {
+      timeout: 30000,
+      message: "the waveform panel to arrive before the column is read",
+    });
+
     const column = await toolsColumn();
-    expect(column.children.map((child) => child.name)).toEqual(["section.currentline"]);
-    // Flush against both edges of the column, so nothing above or below it holds any space either.
+    expect(column.children.map((child) => child.name)).toEqual([
+      "section.waveform",
+      "section.currentline",
+    ]);
+    // Flush against both edges of the column, so nothing above or below holds any space either.
     expect(Math.abs(column.children[0].top)).toBeLessThanOrEqual(EDGE_SLOP_PX);
-    expect(Math.abs(column.children[0].bottom - column.height)).toBeLessThanOrEqual(EDGE_SLOP_PX);
+    expect(
+      Math.abs(column.children[column.children.length - 1].bottom - column.height),
+    ).toBeLessThanOrEqual(EDGE_SLOP_PX);
     expect(column.height).toBeGreaterThan(0);
   });
 });

@@ -23,6 +23,8 @@ type StatusBarProps = {
   projectError: ProjectError | null;
   /** What a command from the menu or the toolbar could not do. See T3. */
   chromeError: string | null;
+  /** Set when a peak job failed for a reason the user can act on. A cancel is never one. See W5. */
+  waveformFailed: boolean;
 };
 
 /**
@@ -41,6 +43,7 @@ export default function StatusBar({
   projectDeleted,
   projectError,
   chromeError,
+  waveformFailed,
 }: StatusBarProps) {
   const detail = subtitleError === null ? null : subtitleErrorDetail(subtitleError);
 
@@ -71,6 +74,11 @@ export default function StatusBar({
         {chromeError !== null && (
           <p className="statusbar__chrome-error" role="alert">
             {chromeError}
+          </p>
+        )}
+        {waveformFailed && (
+          <p className="statusbar__waveform-error" role="alert">
+            {en.waveform.failed}
           </p>
         )}
         {subtitleError !== null && (
