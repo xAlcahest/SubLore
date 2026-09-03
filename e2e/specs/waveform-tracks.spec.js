@@ -59,6 +59,38 @@ function reach() {
   });
 }
 
+/**
+ * True once the drawing reaches the last of the file, which is how a finished job shows from here.
+ *
+ * The panel draws while the job runs (W5), so ink near the left says nothing about whether the
+ * peaks are complete — and W8's cache criterion is about a track that has been peaked all the way,
+ * not one whose first chunk arrived.
+ */
+function drawnToTheEnd() {
+  return browser.execute(() => {
+    const canvas = document.querySelector(".waveform__canvas");
+    if (canvas === null) {
+      return false;
+    }
+    const context = canvas.getContext("2d");
+    const panel = getComputedStyle(document.querySelector(".waveform")).backgroundColor;
+    const background = (panel.match(/\d+/g) ?? ["0", "0", "0"]).map(Number);
+    const column = context.getImageData(canvas.width - 2, 0, 1, canvas.height).data;
+    for (let y = 0; y < canvas.height; y += 1) {
+      const i = y * 4;
+      if (
+        Math.abs(column[i] - background[0]) +
+          Math.abs(column[i + 1] - background[1]) +
+          Math.abs(column[i + 2] - background[2]) >
+        24
+      ) {
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
 function rectOf(selector) {
   return browser.execute((css) => {
     const element = document.querySelector(css);
@@ -133,6 +165,12 @@ describe("the Audio menu and the track that is drawn", () => {
       timeout: 30000,
       message: "the waveform panel for the two-track fixture",
     });
+    // Peaked all the way before anything switches: W8's cache criterion is about a track that has
+    // been read to the end, and a job cancelled halfway leaves nothing to read back.
+    await waitFor(drawnToTheEnd, {
+      timeout: 60000,
+      message: "the first track to be peaked to the end of the file",
+    });
   });
 
   it("lists both tracks and marks the one being drawn", async () => {
@@ -159,6 +197,11 @@ describe("the Audio menu and the track that is drawn", () => {
     console.log(`W8 amplitude: full ${full.toFixed(3)}, second track ${quartered.toFixed(3)}`);
     expect(quartered).toBeLessThan(0.5);
     expect(quartered).toBeGreaterThan(0.05);
+
+    await waitFor(drawnToTheEnd, {
+      timeout: 60000,
+      message: "the second track to be peaked to the end of the file",
+    });
 
     const items = await audioItems(toplevel);
     await closeMenu();
