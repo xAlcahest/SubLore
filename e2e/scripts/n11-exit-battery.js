@@ -68,9 +68,10 @@ function once(display) {
 }
 
 /**
- * True when `coredumpctl` knows about this pid. Corroboration only: systemd-coredump records a
- * crash after the fact, so a run asked about too soon answers false for a crash that did happen.
- * The number N11 is counted by is the signal below, which the exit itself carries.
+ * True when `coredumpctl` knows about this pid. Corroboration only, and it errs both ways:
+ * systemd-coredump records a crash after the fact, so a run asked about too soon answers false for
+ * a crash that did happen, and pids are reused, so a clean run can inherit a number an earlier
+ * crash left behind. The number N11 is counted by is the signal below, which the exit carries.
  */
 function hadCore(pid) {
   return new Promise((resolve) => {
