@@ -257,7 +257,7 @@ describe("the chooser is the only way in", () => {
     });
     focusWindow(toplevel.id);
     await waitFor(
-      () => browser.execute(() => document.querySelector(".toolbar__open-subtitle") !== null),
+      () => browser.execute(() => document.querySelector(".toolbar__file-open-subtitle") !== null),
       {
         timeout: 30000,
         message: "the app UI to render",
@@ -269,7 +269,7 @@ describe("the chooser is the only way in", () => {
     // be raised and every route below has a state to be left alone.
     await chooseFrom(
       toplevel,
-      ".toolbar__open-subtitle",
+      ".toolbar__file-open-subtitle",
       "Choose a subtitle",
       subtitle,
       "subtitle",
@@ -346,7 +346,7 @@ describe("the chooser is the only way in", () => {
     const empty = await textOf(".stage__empty");
     expect(empty).not.toBe(null);
 
-    await cancelFrom(toplevel, ".toolbar__open-video", "Choose a video", "video");
+    await cancelFrom(toplevel, ".toolbar__video-open", "Choose a video", "video");
 
     expect(await textOf(".stage__empty")).toBe(empty);
     expect(await textOf(".statusbar__video-error")).toBe(null);
@@ -355,7 +355,7 @@ describe("the chooser is the only way in", () => {
   it("leaves the open document alone when the subtitle chooser is dismissed", async () => {
     const status = await textOf(".statusbar__document");
 
-    await cancelFrom(toplevel, ".toolbar__open-subtitle", "Choose a subtitle", "subtitle");
+    await cancelFrom(toplevel, ".toolbar__file-open-subtitle", "Choose a subtitle", "subtitle");
 
     expect(await textOf(".statusbar__document")).toBe(status);
     expect(await textOf(".statusbar__error")).toBe(null);
@@ -367,7 +367,7 @@ describe("the chooser is the only way in", () => {
 
     await cancelFrom(
       toplevel,
-      ".toolbar__save-copy",
+      ".toolbar__file-save-copy",
       "Save a copy of the subtitle",
       "subtitle-save",
     );

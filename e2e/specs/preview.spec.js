@@ -190,14 +190,14 @@ async function waitForStatus(expected) {
 }
 
 async function openSubtitle(toplevel, file) {
-  await clickElement(toplevel, ".toolbar__open-subtitle");
+  await clickElement(toplevel, ".toolbar__file-open-subtitle");
   const chooser = await waitForChooser("Choose a subtitle");
   await answerChooser(chooser, file, "subtitle");
   focusWindow(toplevel.id);
 }
 
 async function openVideo(toplevel, file) {
-  await clickElement(toplevel, ".toolbar__open-video");
+  await clickElement(toplevel, ".toolbar__video-open");
   const chooser = await waitForChooser("Choose a video");
   await answerChooser(chooser, file, "video");
   focusWindow(toplevel.id);
@@ -206,21 +206,22 @@ async function openVideo(toplevel, file) {
 /** Whether View's own item is marked, read off the menu it lives in. */
 async function subtitlesChecked(toplevel) {
   await clickElement(toplevel, ".menubar__title--view");
-  await waitFor(() => present(".menubar__item--subtitle-preview"), {
+  await waitFor(() => present(".menubar__item--video-toggle-subtitle-overlay"), {
     timeout: 15000,
     message: "the View menu to open on its subtitle item",
   });
   return browser.execute(
     () =>
-      document.querySelector(".menubar__item--subtitle-preview")?.getAttribute("aria-checked") ===
-      "true",
+      document
+        .querySelector(".menubar__item--video-toggle-subtitle-overlay")
+        ?.getAttribute("aria-checked") === "true",
   );
 }
 
 /** Open View and choose the subtitle toggle. */
 async function toggleSubtitles(toplevel) {
   const before = await subtitlesChecked(toplevel);
-  await clickElement(toplevel, ".menubar__item--subtitle-preview");
+  await clickElement(toplevel, ".menubar__item--video-toggle-subtitle-overlay");
   return !before;
 }
 
@@ -247,7 +248,7 @@ describe("the document on the video frame", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => present(".toolbar__open-subtitle"), {
+    await waitFor(() => present(".toolbar__file-open-subtitle"), {
       timeout: 30000,
       message: "the app UI to render",
     });

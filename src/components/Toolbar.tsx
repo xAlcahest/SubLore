@@ -1,32 +1,48 @@
 import { Fragment } from "react";
 
-import { type Command } from "../types/chrome";
+import {
+  commandToken,
+  runCommand,
+  type Command,
+  type CommandId,
+  type CommandRegistry,
+} from "../types/chrome";
 
 type ToolbarProps = {
-  /** Groups drawn in order with a divider between them, as the layout draws the toolbar. */
-  groups: Command[][];
+  /** Groups drawn in order with a divider between them, as ids into `commands` (T3 C1). */
+  groups: CommandId[][];
+  commands: CommandRegistry;
 };
 
-/** The toolbar: the same command records the menu draws, so neither route can grow the other one. */
-export default function Toolbar({ groups }: ToolbarProps) {
+/** A group's ids resolved from the registry's records (T3 C1). */
+function resolve(ids: CommandId[], commands: CommandRegistry): Command[] {
+  return ids.map((id) => commands[id]);
+}
+
+/** The toolbar: ids into the same registry the menu bar draws from, so neither route can grow the other one. */
+export default function Toolbar({ groups, commands }: ToolbarProps) {
   return (
     <div className="toolbar">
-      {groups.map((group, index) => (
-        <Fragment key={group.map((command) => command.id).join("-")}>
-          {index > 0 && <span className="toolbar__divider" />}
-          {group.map((command) => (
-            <button
-              className={`toolbar__button toolbar__${command.id}`}
-              key={command.id}
-              type="button"
-              disabled={!command.enabled}
-              onClick={command.run}
-            >
-              {command.label}
-            </button>
-          ))}
-        </Fragment>
-      ))}
+      {groups.map((ids, index) => {
+        const items = resolve(ids, commands);
+        return (
+          <Fragment key={ids.join("-")}>
+            {index > 0 && <span className="toolbar__divider" />}
+            {items.map((command) => (
+              <button
+                className={`toolbar__button toolbar__${commandToken(command.id)}`}
+                key={command.id}
+                type="button"
+                disabled={!command.enabled}
+                aria-pressed={command.checked}
+                onClick={() => runCommand(commands, command.id)}
+              >
+                {command.label}
+              </button>
+            ))}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }

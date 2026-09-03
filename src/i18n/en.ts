@@ -2,8 +2,9 @@
 export const en = {
   appName: "Sublore",
   /**
-   * The menu bar and the toolbar. Only the titles with items behind them are here: Subtitles,
-   * Timing, Audio and Terms arrive with the milestone that fills each (decision 24 A2 and A4).
+   * The menu bar and the toolbar. Every title here is always drawn, greyed when nothing behind it
+   * can be used; Subtitles, Timing and Terms are absent because no command of theirs is registered
+   * yet, and they arrive with the milestone that writes them (decision 24 A4).
    */
   menu: {
     file: {
@@ -19,7 +20,7 @@ export const en = {
       title: "Edit",
       undo: "Undo",
       redo: "Redo",
-      /** Here until the Audio title arrives with the milestone that fills it (decision 24 A2). */
+      /** Here until an Audio title of its own arrives with the milestone that registers it. */
       transcribe: "Transcribe…",
     },
     view: {

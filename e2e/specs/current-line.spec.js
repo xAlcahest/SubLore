@@ -15,6 +15,7 @@ import { browser, expect } from "@wdio/globals";
 
 import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow, typeText } from "../lib/input.js";
+import { takeCommands, watchCommands } from "../lib/ipc.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
@@ -163,37 +164,6 @@ function gridRow(position) {
   }, String(position));
 }
 
-/**
- * Every subtitle command that crosses the boundary from here until `takeCommands`, in order. It
- * goes on `fetch`, which is what every command travels on, the way editor.spec.js measures the same
- * boundary: a second route into the document shows up here as a second name.
- */
-function watchCommands() {
-  return browser.execute(() => {
-    window.__subloreCommands = [];
-    const passThrough = window.fetch;
-    window.__subloreFetch = passThrough;
-    window.fetch = (...rest) => {
-      const url = String(rest[0]?.url ?? rest[0]);
-      const name = url.split("/").pop();
-      if (typeof name === "string" && name.startsWith("subtitle_")) {
-        window.__subloreCommands.push(name);
-      }
-      return passThrough.apply(window, rest);
-    };
-    if (window.fetch === passThrough) {
-      throw new Error("the probe did not take: fetch is not writable here either");
-    }
-  });
-}
-
-function takeCommands() {
-  return browser.execute(() => {
-    window.fetch = window.__subloreFetch;
-    return window.__subloreCommands;
-  });
-}
-
 /** Replace what a time field holds, the way a person would: click it, select all, type. */
 async function typeIntoTime(toplevel, field, value) {
   const className = `currentline__${field}`;
@@ -242,7 +212,7 @@ describe("the current line", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => present(".toolbar__open-subtitle"), {
+    await waitFor(() => present(".toolbar__file-open-subtitle"), {
       timeout: 30000,
       message: "the app UI to render",
     });
@@ -254,7 +224,7 @@ describe("the current line", () => {
     expect(before.text).toBe(null);
     expect(before.empty).not.toBe(null);
 
-    await clickElement(toplevel, ".toolbar__open-subtitle");
+    await clickElement(toplevel, ".toolbar__file-open-subtitle");
     const chooser = await waitForChooser("Choose a subtitle");
     await answerChooser(chooser, copy, "subtitle");
     focusWindow(toplevel.id);
@@ -314,7 +284,7 @@ describe("the current line", () => {
   });
 
   it("is undone in one step, which is what a grid edit costs", async () => {
-    await clickElement(toplevel, ".toolbar__undo");
+    await clickElement(toplevel, ".toolbar__edit-undo");
 
     await waitFor(async () => (await gridRow(3))?.text === THIRD.text, {
       timeout: 20000,
@@ -380,12 +350,12 @@ describe("the current line", () => {
 
   it("gives each timing back one undo at a time, and a save writes the one that stands", async () => {
     // Two timing commits stand, and the backend starts a new run for each, so they are two steps.
-    await clickElement(toplevel, ".toolbar__undo");
+    await clickElement(toplevel, ".toolbar__edit-undo");
     await waitFor(async () => (await gridRow(3))?.start === EDITED_START, {
       timeout: 20000,
       message: "one undo to put the third row back on the first timing",
     });
-    await clickElement(toplevel, ".toolbar__undo");
+    await clickElement(toplevel, ".toolbar__edit-undo");
     await waitFor(async () => (await gridRow(3))?.start === THIRD.start, {
       timeout: 20000,
       message: "a second undo to put the third row back on the timing the file was opened with",
@@ -396,14 +366,14 @@ describe("the current line", () => {
     });
     expect(readFileSync(copy).equals(originalBytes)).toBe(true);
 
-    await clickElement(toplevel, ".toolbar__redo");
-    await clickElement(toplevel, ".toolbar__redo");
+    await clickElement(toplevel, ".toolbar__edit-redo");
+    await clickElement(toplevel, ".toolbar__edit-redo");
     await waitFor(async () => (await gridRow(3))?.start === SECOND_START, {
       timeout: 20000,
       message: "two redos to bring the second timing back",
     });
 
-    await clickElement(toplevel, ".toolbar__save");
+    await clickElement(toplevel, ".toolbar__file-save");
     await waitFor(
       () => {
         const written = readFileSync(copy).toString("utf8");

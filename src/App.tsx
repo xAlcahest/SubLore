@@ -27,25 +27,27 @@ import { useVideoPlayer } from "./hooks/useVideoPlayer";
 import { en } from "./i18n/en";
 import { fill } from "./i18n/format";
 import { requestQuit } from "./quit";
-import { type Command } from "./types/chrome";
+import {
+  runCommand,
+  type Command,
+  type CommandId,
+  type CommandRegistry,
+  type Menu,
+} from "./types/chrome";
 import { type EpisodeFileView } from "./types/project";
 import { type CueRow } from "./types/subtitle";
 import "./App.css";
 
 /** The command an accelerator asks for, or null when the chrome does not own that key. */
-function acceleratorFor(
-  key: string,
-  shift: boolean,
-  commands: Record<string, Command>,
-): Command | null {
+function acceleratorFor(key: string, shift: boolean): CommandId | null {
   if (key === "o") {
-    return shift ? commands.openVideo : commands.openSubtitle;
+    return shift ? "video.open" : "file.open-subtitle";
   }
   if (key === "s" && shift) {
-    return commands.saveCopy;
+    return "file.save-copy";
   }
   if (key === "q" && !shift) {
-    return commands.quit;
+    return "app.quit";
   }
   return null;
 }
@@ -345,97 +347,6 @@ export default function App() {
   const dirty = subtitle.dirty || editorOpen || lineEdited;
   const blocked = subtitle.blockedPath !== null;
 
-  const commands = {
-    openSubtitle: {
-      id: "open-subtitle",
-      label: en.menu.file.openSubtitle,
-      accelerator: en.menu.keys.openSubtitle,
-      enabled: !choosing,
-      run: () => void pick("subtitle", undefined, (path) => void subtitle.open(path)),
-    },
-    openVideo: {
-      id: "open-video",
-      label: en.menu.file.openVideo,
-      accelerator: en.menu.keys.openVideo,
-      enabled: !choosing && state.status !== "loading",
-      run: () => void pick("video", undefined, (path) => void open(path)),
-    },
-    save: {
-      id: "save",
-      label: en.menu.file.save,
-      accelerator: en.menu.keys.save,
-      enabled: subtitle.summary !== null && dirty && !choosing,
-      run: () => void saveDocument(),
-    },
-    saveCopy: {
-      id: "save-copy",
-      label: en.menu.file.saveCopy,
-      accelerator: en.menu.keys.saveCopy,
-      enabled: subtitle.summary !== null && !choosing,
-      run: () => void saveCopy(),
-    },
-    discard: {
-      id: "discard",
-      label: en.menu.file.discard,
-      enabled: true,
-      run: () => void subtitle.discardAndOpen(),
-    },
-    quit: {
-      id: "quit",
-      label: en.menu.file.quit,
-      accelerator: en.menu.keys.quit,
-      enabled: true,
-      run: () => void quit(),
-    },
-    transcribe: {
-      id: "transcribe",
-      label: en.menu.edit.transcribe,
-      enabled: !transcribeOpen,
-      run: () => setTranscribeOpen(true),
-    },
-    undo: {
-      id: "undo",
-      label: en.menu.edit.undo,
-      accelerator: en.menu.keys.undo,
-      enabled: subtitle.canUndo,
-      run: () => void undoDocument(),
-    },
-    redo: {
-      id: "redo",
-      label: en.menu.edit.redo,
-      accelerator: en.menu.keys.redo,
-      enabled: subtitle.canRedo,
-      run: () => void redoDocument(),
-    },
-    about: {
-      id: "about",
-      label: en.menu.help.about,
-      enabled: true,
-      run: () => setAboutOpen(true),
-    },
-    subtitlePreview: {
-      id: "subtitle-preview",
-      label: en.menu.view.subtitles,
-      checked: preview.shown,
-      // Enabled with no video and no document too, for the reason the waveform's toggle is: a
-      // command that disappears when there is nothing to show reads as a command that is gone.
-      enabled: true,
-      run: () => preview.toggle(),
-    },
-    waveformPanel: {
-      id: "waveform-panel",
-      label: en.menu.view.waveform,
-      checked: waveformShown,
-      // Enabled with no audio too: a toggle that disables itself when the thing it toggles is
-      // absent tells the user the command is gone rather than that the panel has nothing to show.
-      enabled: true,
-      run: () => setWaveformShown((shown) => !shown),
-    },
-  };
-
-  // Only while an open was refused for unsaved edits, in both routes at once: there is nothing to
-  // discard the rest of the time.
-  const discardable = blocked ? [commands.discard] : [];
   // S1: the View menu's five interface sizes, matching the Rust bounds in layout.rs.
   const interfaceScales = [
     { percent: 90, scale: 0.9 },
@@ -444,66 +355,169 @@ export default function App() {
     { percent: 125, scale: 1.25 },
     { percent: 150, scale: 1.5 },
   ];
-  const menus = [
+  /*
+   * Every command the shell owns, written down once. `enabled` and `checked` are worked out here,
+   * from the state this render already holds, so nothing polls them and no route can draw a stale
+   * one (interface-spec 2.3). A generated set is entries like any other (interface-spec 2.7).
+   */
+  const declared: Command[] = [
+    {
+      id: "file.open-subtitle",
+      label: en.menu.file.openSubtitle,
+      accelerator: en.menu.keys.openSubtitle,
+      enabled: !choosing,
+      run: () => void pick("subtitle", undefined, (path) => void subtitle.open(path)),
+    },
+    {
+      id: "video.open",
+      label: en.menu.file.openVideo,
+      accelerator: en.menu.keys.openVideo,
+      enabled: !choosing && state.status !== "loading",
+      run: () => void pick("video", undefined, (path) => void open(path)),
+    },
+    {
+      id: "file.save",
+      label: en.menu.file.save,
+      accelerator: en.menu.keys.save,
+      enabled: subtitle.summary !== null && dirty && !choosing,
+      run: () => void saveDocument(),
+    },
+    {
+      id: "file.save-copy",
+      label: en.menu.file.saveCopy,
+      accelerator: en.menu.keys.saveCopy,
+      enabled: subtitle.summary !== null && !choosing,
+      run: () => void saveCopy(),
+    },
+    {
+      id: "file.discard",
+      label: en.menu.file.discard,
+      // Drawn always, usable only while an open was refused for unsaved edits: there is nothing to
+      // discard the rest of the time, and `discardAndOpen` no-ops then anyway.
+      enabled: blocked,
+      run: () => void subtitle.discardAndOpen(),
+    },
+    {
+      id: "app.quit",
+      label: en.menu.file.quit,
+      accelerator: en.menu.keys.quit,
+      enabled: true,
+      run: () => void quit(),
+    },
+    {
+      id: "asr.transcribe",
+      label: en.menu.edit.transcribe,
+      enabled: !transcribeOpen,
+      run: () => setTranscribeOpen(true),
+    },
+    {
+      id: "edit.undo",
+      label: en.menu.edit.undo,
+      accelerator: en.menu.keys.undo,
+      enabled: subtitle.canUndo,
+      run: () => void undoDocument(),
+    },
+    {
+      id: "edit.redo",
+      label: en.menu.edit.redo,
+      accelerator: en.menu.keys.redo,
+      enabled: subtitle.canRedo,
+      run: () => void redoDocument(),
+    },
+    {
+      id: "help.about",
+      label: en.menu.help.about,
+      enabled: true,
+      run: () => setAboutOpen(true),
+    },
+    {
+      id: "video.toggle-subtitle-overlay",
+      label: en.menu.view.subtitles,
+      checked: preview.shown,
+      // Enabled with no video and no document too, for the reason the waveform's toggle is: a
+      // command that disappears when there is nothing to show reads as a command that is gone.
+      enabled: true,
+      run: () => preview.toggle(),
+    },
+    {
+      id: "view.waveform-panel",
+      label: en.menu.view.waveform,
+      checked: waveformShown,
+      // Enabled with no audio too: a toggle that disables itself when the thing it toggles is
+      // absent tells the user the command is gone rather than that the panel has nothing to show.
+      enabled: true,
+      run: () => setWaveformShown((shown) => !shown),
+    },
+    // Radio items, drawn the way the Audio menu draws its track list.
+    ...interfaceScales.map(({ percent, scale }): Command => ({
+      id: `view.interface-scale-${percent}`,
+      label: fill(en.menu.view.scale, { percent }),
+      checked: layout !== null && layout.interfaceScale === scale,
+      group: "interface-scale",
+      enabled: true,
+      run: () => storeLayout({ interfaceScale: scale }),
+    })),
+    ...audio.tracks.map((track, index): Command => ({
+      id: `audio.track.${track.id}`,
+      label: track.title ?? track.lang ?? `${en.menu.audio.track} ${index + 1}`,
+      checked: track.id === audio.currentId,
+      group: "audio-track",
+      // A single track is listed and cannot be switched away from: there is nowhere to go, and an
+      // item that does nothing when clicked is worse than one that says so.
+      enabled: audio.tracks.length > 1,
+      run: () => audio.switchTo(track.id),
+    })),
+  ];
+  /** The one map both draw routes read, so an item drawn anywhere has an entry here (T3 C1). */
+  const commands: CommandRegistry = Object.fromEntries(
+    declared.map((command) => [command.id, command]),
+  );
+
+  /*
+   * The layout lists: ids only, one per route, and neither list changes with the state. What the
+   * state moves is the greying inside the records above (CLAUDE.md, owner ruling 2026-09-03).
+   */
+  const menus: Menu[] = [
     {
       id: "file",
       title: en.menu.file.title,
       items: [
-        commands.openSubtitle,
-        commands.openVideo,
-        commands.save,
-        commands.saveCopy,
-        ...discardable,
-        commands.quit,
+        "file.open-subtitle",
+        "video.open",
+        "file.save",
+        "file.save-copy",
+        "file.discard",
+        "app.quit",
       ],
     },
-    // Transcribe waits in Edit for the Audio title, which arrives with the milestone that fills it
-    // (decision 24 A2). File has no room: two keyboard routes pin its walk and its last item.
+    // Transcribe waits in Edit for an Audio title of its own, which arrives with the milestone that
+    // registers those commands. File has no room: two keyboard routes pin its walk and its last item.
     {
       id: "edit",
       title: en.menu.edit.title,
-      items: [commands.undo, commands.redo, commands.transcribe],
+      items: ["edit.undo", "edit.redo", "asr.transcribe"],
     },
     {
       id: "view",
       title: en.menu.view.title,
       items: [
-        commands.subtitlePreview,
-        commands.waveformPanel,
-        // Radio items, drawn the way the Audio menu draws its track list.
-        ...interfaceScales.map(({ percent, scale }) => ({
-          id: `interface-scale-${percent}`,
-          label: fill(en.menu.view.scale, { percent }),
-          checked: layout !== null && layout.interfaceScale === scale,
-          enabled: true,
-          run: () => storeLayout({ interfaceScale: scale }),
-        })),
+        "video.toggle-subtitle-overlay",
+        "view.waveform-panel",
+        ...interfaceScales.map(({ percent }): CommandId => `view.interface-scale-${percent}`),
       ],
     },
-    // Decision 24 A2: no title without something behind it, so this one is absent for a media with
-    // no audio and for no media at all.
-    ...(audio.tracks.length > 0
-      ? [
-          {
-            id: "audio",
-            title: en.menu.audio.title,
-            items: audio.tracks.map((track, index) => ({
-              id: `audio-track-${track.id}`,
-              label: track.title ?? track.lang ?? `${en.menu.audio.track} ${index + 1}`,
-              checked: track.id === audio.currentId,
-              // A single track is listed and cannot be switched away from: there is nowhere to go,
-              // and an item that does nothing when clicked is worse than one that says so.
-              enabled: audio.tracks.length > 1,
-              run: () => audio.switchTo(track.id),
-            })),
-          },
-        ]
-      : []),
-    { id: "help", title: en.menu.help.title, items: [commands.about] },
+    // A media with no audio, or no media at all, leaves this with no items: the title is still on
+    // the bar, greyed, because a title that comes and goes reads as a title that is gone.
+    {
+      id: "audio",
+      title: en.menu.audio.title,
+      items: audio.tracks.map((track): CommandId => `audio.track.${track.id}`),
+    },
+    { id: "help", title: en.menu.help.title, items: ["help.about"] },
   ];
-  const toolbar = [
-    [commands.openSubtitle, commands.openVideo, commands.save, commands.saveCopy, ...discardable],
-    [commands.undo, commands.redo],
+  const toolbar: CommandId[][] = [
+    ["file.open-subtitle", "video.open", "file.save", "file.save-copy", "file.discard"],
+    ["edit.undo", "edit.redo"],
   ];
 
   // Read by the accelerator listener, which is registered once and outlives every render.
@@ -518,14 +532,13 @@ export default function App() {
         return;
       }
       // Ctrl+S, Ctrl+Z and Ctrl+Y are the cue list's: it flushes an open editor before it acts.
-      const command = acceleratorFor(event.key.toLowerCase(), event.shiftKey, latest.current);
-      if (command === null) {
+      const id = acceleratorFor(event.key.toLowerCase(), event.shiftKey);
+      if (id === null) {
         return;
       }
+      // The key is ours either way, so it never reaches the page; whether it runs is the gate's.
       event.preventDefault();
-      if (command.enabled) {
-        command.run();
-      }
+      runCommand(latest.current, id);
     };
     window.addEventListener("keydown", handle, true);
     return () => window.removeEventListener("keydown", handle, true);
@@ -535,8 +548,8 @@ export default function App() {
     <LayerContext.Provider value={layers.registrar}>
       <div className="shell">
         <header className="shell__chrome">
-          <MenuBar menus={menus} />
-          <Toolbar groups={toolbar} />
+          <MenuBar menus={menus} commands={commands} />
+          <Toolbar groups={toolbar} commands={commands} />
         </header>
         <div
           className="shell__body"

@@ -195,7 +195,7 @@ function present(selector) {
 
 /** Pick one of the View menu's five sizes, through the menu, the way a person reaches it. */
 async function pickSize(toplevel, percent) {
-  const item = `.menubar__item--interface-scale-${percent}`;
+  const item = `.menubar__item--view-interface-scale-${percent}`;
   await clickElement(toplevel, ".menubar__title--view");
   await waitFor(() => present(item), {
     timeout: 5000,
@@ -232,7 +232,7 @@ async function attachToApp() {
   });
   focusWindow(toplevel.id);
   await waitFor(
-    () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+    () => browser.execute(() => document.querySelector(".toolbar__video-open") !== null),
     { timeout: 30000, message: "the app UI to render" },
   );
   return toplevel;
@@ -240,7 +240,7 @@ async function attachToApp() {
 
 /** A document in the grid and a video on the stage: all three edges sit between panels holding both. */
 async function openTheFixtures(toplevel) {
-  await clickElement(toplevel, ".toolbar__open-subtitle");
+  await clickElement(toplevel, ".toolbar__file-open-subtitle");
   const subtitleChooser = await waitForChooser("Choose a subtitle");
   await answerChooser(subtitleChooser, SUBTITLE, "subtitle");
   focusWindow(toplevel.id);
@@ -249,7 +249,7 @@ async function openTheFixtures(toplevel) {
     message: "the cue grid to fill",
   });
 
-  await clickElement(toplevel, ".toolbar__open-video");
+  await clickElement(toplevel, ".toolbar__video-open");
   const videoChooser = await waitForChooser("Choose a video");
   await answerChooser(videoChooser, requireWaveformFixture(), "video");
   focusWindow(toplevel.id);

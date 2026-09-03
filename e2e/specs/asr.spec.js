@@ -234,7 +234,7 @@ async function openPanelFromMenu(toplevel) {
     message: "the Edit dropdown to be the open one",
   });
   pressKey("Up");
-  await waitFor(async () => ((await cursorCommand()) === "transcribe" ? true : null), {
+  await waitFor(async () => ((await cursorCommand()) === "asr-transcribe" ? true : null), {
     timeout: 15000,
     message: "the menu cursor to sit on Transcribe, the last item in Edit",
   });
@@ -285,7 +285,7 @@ describe("transcription", () => {
     // The transcription controls are not here to be waited on any more (T4), so the gate is the
     // chrome that is: the panel is opened by the first test, from the menu.
     await waitFor(
-      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      () => browser.execute(() => document.querySelector(".toolbar__video-open") !== null),
       { timeout: 30000, message: "the app UI to render" },
     );
   });
@@ -329,7 +329,7 @@ describe("transcription", () => {
   });
 
   it("transcribes the open video and shows the cues", async () => {
-    await clickElement(toplevel, ".toolbar__open-video");
+    await clickElement(toplevel, ".toolbar__video-open");
     const chooser = await waitForChooser("Choose a video");
     await answerChooser(chooser, fixture, "video");
     // The chooser took the keyboard with it; the transcribe controls below are clicked, not typed,
@@ -395,8 +395,8 @@ describe("transcription", () => {
     // Unsaved from the first moment: these bytes exist nowhere but in the session.
     expect(await present(".statusbar__dirty")).toBe(true);
     // Both saves are offered: Save asks where a document with no file goes (decision 24, B2).
-    expect(await propertyOf(".toolbar__save", "disabled")).toBe(false);
-    expect(await propertyOf(".toolbar__save-copy", "disabled")).toBe(false);
+    expect(await propertyOf(".toolbar__file-save", "disabled")).toBe(false);
+    expect(await propertyOf(".toolbar__file-save-copy", "disabled")).toBe(false);
     expect(await textOf(".statusbar__error")).toBe(null);
 
     // The transcription wrote nothing at all: not beside the media, and nowhere Sublore saves.
@@ -411,10 +411,10 @@ describe("transcription", () => {
     await editRow(toplevel, 1, CORRECTION);
     expect(await present(".statusbar__error")).toBe(false);
     // The document's own undo took it, which is the undo the editor uses everywhere else.
-    expect(await propertyOf(".toolbar__undo", "disabled")).toBe(false);
+    expect(await propertyOf(".toolbar__edit-undo", "disabled")).toBe(false);
 
     const destination = path.join(saveDir, "from-transcription.srt");
-    await clickElement(toplevel, ".toolbar__save-copy");
+    await clickElement(toplevel, ".toolbar__file-save-copy");
     const chooser = await waitForChooser("Save a copy of the subtitle");
     await answerChooser(chooser, destination, "save a copy");
     focusWindow(toplevel.id);
@@ -432,7 +432,7 @@ describe("transcription", () => {
     expect(saved.toString("utf8")).toContain(CORRECTION);
 
     // Reopened from disk: the edit is there, which is the end of the milestone's own sentence.
-    await clickElement(toplevel, ".toolbar__open-subtitle");
+    await clickElement(toplevel, ".toolbar__file-open-subtitle");
     const reopen = await waitForChooser("Choose a subtitle");
     await answerChooser(reopen, destination, "subtitle");
     focusWindow(toplevel.id);
@@ -474,7 +474,7 @@ describe("transcription", () => {
     await waitForSubtitleStatus(`SRT · ${cues.length} cues · LF`);
     expect(words(await rowText(1))).toBe(words(cues[0].text));
     expect(await present(".statusbar__dirty")).toBe(true);
-    expect(await propertyOf(".toolbar__save", "disabled")).toBe(false);
+    expect(await propertyOf(".toolbar__file-save", "disabled")).toBe(false);
     // The result is the document now, so there is nothing left to offer.
     expect(await propertyOf(".asrbar__use", "tagName")).toBe(null);
     // Discarding drops edits that were never on disk; it never rewrites the file they came from.
@@ -561,7 +561,7 @@ describe("transcription", () => {
   it("asks a document with no file where it goes, and cancelling writes nothing", async () => {
     expect(await present(".statusbar__dirty")).toBe(true);
 
-    await clickElement(toplevel, ".toolbar__save");
+    await clickElement(toplevel, ".toolbar__file-save");
     const chooser = await waitForChooser(FIRST_SAVE_TITLE);
     await cancelChooser(chooser, "first save");
     focusWindow(toplevel.id);
@@ -570,7 +570,7 @@ describe("transcription", () => {
     expect(readdirSync(firstSaveDir)).toEqual([]);
     expect(await present(".statusbar__dirty")).toBe(true);
     expect(await textOf(".statusbar__error")).toBe(null);
-    expect(await propertyOf(".toolbar__save", "disabled")).toBe(false);
+    expect(await propertyOf(".toolbar__file-save", "disabled")).toBe(false);
   });
 
   it("writes it where the chooser was answered, and it is not unsaved work any more", async () => {
@@ -578,7 +578,7 @@ describe("transcription", () => {
     const firstCue = await rowText(1);
     expect(words(firstCue).length).toBeGreaterThan(0);
 
-    await clickElement(toplevel, ".toolbar__save");
+    await clickElement(toplevel, ".toolbar__file-save");
     const chooser = await waitForChooser(FIRST_SAVE_TITLE);
     await answerChooser(chooser, adopted, "first save");
     focusWindow(toplevel.id);

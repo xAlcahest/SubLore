@@ -136,10 +136,10 @@ describe("the waveform's window on the media", () => {
     });
     focusWindow(toplevel.id);
     await waitFor(
-      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      () => browser.execute(() => document.querySelector(".toolbar__video-open") !== null),
       { timeout: 30000, message: "the app UI to render" },
     );
-    await clickElement(toplevel, ".toolbar__open-video");
+    await clickElement(toplevel, ".toolbar__video-open");
     const chooser = await waitForChooser("Choose a video");
     await answerChooser(chooser, requireWaveformFixture(), "video");
     focusWindow(toplevel.id);

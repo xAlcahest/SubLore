@@ -79,7 +79,7 @@ describe("video surface with no video open", () => {
     });
     focusWindow(toplevel.id);
     await waitFor(
-      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      () => browser.execute(() => document.querySelector(".toolbar__video-open") !== null),
       {
         timeout: 30000,
         message: "the app UI to render",
@@ -120,7 +120,7 @@ describe("video surface with no video open", () => {
   });
 
   it("keeps the surface unmapped after an open that failed", async () => {
-    const button = await centreOf(".toolbar__open-video");
+    const button = await centreOf(".toolbar__video-open");
     clickAt(toplevel.absX + button.x, toplevel.absY + button.y);
     const chooser = await waitForChooser("Choose a video");
     await answerChooser(chooser, brokenVideo(), "video");

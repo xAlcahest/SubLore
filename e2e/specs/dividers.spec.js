@@ -126,7 +126,7 @@ async function attachToApp() {
   });
   focusWindow(toplevel.id);
   await waitFor(
-    () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+    () => browser.execute(() => document.querySelector(".toolbar__video-open") !== null),
     { timeout: 30000, message: "the app UI to render" },
   );
   return toplevel;
@@ -134,7 +134,7 @@ async function attachToApp() {
 
 /** A document in the grid and a video on the stage: both edges are between panels that hold both. */
 async function openTheFixtures(toplevel) {
-  await clickElement(toplevel, ".toolbar__open-subtitle");
+  await clickElement(toplevel, ".toolbar__file-open-subtitle");
   const subtitleChooser = await waitForChooser("Choose a subtitle");
   await answerChooser(subtitleChooser, SUBTITLE, "subtitle");
   focusWindow(toplevel.id);
@@ -143,7 +143,7 @@ async function openTheFixtures(toplevel) {
     message: "the cue grid to fill",
   });
 
-  await clickElement(toplevel, ".toolbar__open-video");
+  await clickElement(toplevel, ".toolbar__video-open");
   const videoChooser = await waitForChooser("Choose a video");
   await answerChooser(videoChooser, requireWaveformFixture(), "video");
   focusWindow(toplevel.id);

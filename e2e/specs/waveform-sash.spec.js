@@ -113,7 +113,7 @@ async function clickElement(toplevel, selector) {
 }
 
 async function openTheFixture(toplevel) {
-  await clickElement(toplevel, ".toolbar__open-video");
+  await clickElement(toplevel, ".toolbar__video-open");
   const chooser = await waitForChooser("Choose a video");
   await answerChooser(chooser, requireWaveformFixture(), "video");
   focusWindow(toplevel.id);
@@ -130,7 +130,7 @@ async function attachToApp() {
   });
   focusWindow(toplevel.id);
   await waitFor(
-    () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+    () => browser.execute(() => document.querySelector(".toolbar__video-open") !== null),
     {
       timeout: 30000,
       message: "the app UI to render",
@@ -229,7 +229,7 @@ describe("the waveform sash", () => {
   it("turns the panel off from the View menu and gives its space back", async () => {
     const withPanel = await heightOf(".currentline");
     await clickElement(toplevel, ".menubar__title--view");
-    await clickElement(toplevel, ".menubar__item--waveform-panel");
+    await clickElement(toplevel, ".menubar__item--view-waveform-panel");
     await waitFor(async () => !(await present(".waveform")), {
       timeout: 5000,
       message: "the waveform panel to go",
@@ -240,7 +240,7 @@ describe("the waveform sash", () => {
     );
 
     await clickElement(toplevel, ".menubar__title--view");
-    await clickElement(toplevel, ".menubar__item--waveform-panel");
+    await clickElement(toplevel, ".menubar__item--view-waveform-panel");
     await waitFor(() => present(".waveform"), {
       timeout: 5000,
       message: "the waveform panel to come back",

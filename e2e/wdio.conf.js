@@ -13,7 +13,7 @@ import { passedTests, recordPassedTest, resetTally } from "./lib/tally.js";
  * Every spec that exists must run. WebdriverIO does not reliably fail a run that executed nothing,
  * so the count is asserted here. Bump it when you add a test; see e2e/README.md.
  */
-const EXPECTED_TESTS = 148;
+const EXPECTED_TESTS = 153;
 
 // Keeps a run out of the real data dir. Created once in the launcher; workers inherit the value.
 process.env.SUBLORE_E2E_DATA_HOME ??= mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-"));
@@ -51,14 +51,21 @@ export const config = {
   waitforTimeout: 20000,
 
   onPrepare: () => {
+    // First, before anything that can throw. A throw in here is logged and every spec runs anyway,
+    // so a tally left from the last run then accumulates and the count guard below can be satisfied
+    // by running subsets until the file is long enough. Measured 2026-09-03: four tests reported as
+    // 4, 6, 9, 13 then 17 over five consecutive runs, because the model copy above was failing on a
+    // full disk and, when it ran first, taking `resetTally` down with it.
+    resetTally();
     // Fail before the first session rather than mid-assertion with a confusing message.
     requireDisplay();
     requireTool("xdotool", "click and type into the app");
     requireTool("xwininfo", "read the window tree");
     requireAppBinary();
     requireVideoFixture();
+    // Stays here, not at module load: this file is read by the launcher and again by every worker,
+    // and this copies a 75 MB model. At load it ran once per spec and they fought over the file.
     installStubSidecar();
-    resetTally();
   },
 
   afterTest: (test, context, result) => {

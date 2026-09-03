@@ -112,7 +112,7 @@ function workingCopy() {
 
 /** Open a subtitle through the system chooser, which is the only route since T1. */
 async function openSubtitle(toplevel, file) {
-  await clickElement(toplevel, ".toolbar__open-subtitle");
+  await clickElement(toplevel, ".toolbar__file-open-subtitle");
   const chooser = await waitForChooser("Choose a subtitle");
   await answerChooser(chooser, file, "subtitle");
   focusWindow(toplevel.id);
@@ -344,7 +344,7 @@ describe("cue list editing", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => present(".toolbar__open-subtitle"), {
+    await waitFor(() => present(".toolbar__file-open-subtitle"), {
       timeout: 30000,
       message: "the subtitle bar to render",
     });
@@ -663,7 +663,7 @@ describe("cue list editing", () => {
     // Undone back to the file as it was opened, so there is nothing unsaved any more.
     expect(await present(".statusbar__dirty")).toBe(false);
 
-    await clickElement(toplevel, ".toolbar__redo");
+    await clickElement(toplevel, ".toolbar__edit-redo");
     await waitFor(async () => (await rowText(EDITED_POSITION)) === EDITED_TEXT, {
       timeout: 20000,
       message: "the redone text to come back",
@@ -672,7 +672,7 @@ describe("cue list editing", () => {
   });
 
   it("saves the edit, and every other byte of the file is the byte that was there", async () => {
-    await clickElement(toplevel, ".toolbar__save");
+    await clickElement(toplevel, ".toolbar__file-save");
     await waitFor(async () => (await present(".statusbar__dirty")) === false, {
       timeout: 20000,
       message: "the dirty marker to clear after a save",
@@ -731,7 +731,7 @@ describe("cue list editing", () => {
 
     // Save without pressing Enter first: the click blurs the editor, so the commit it causes and
     // the save must both land, in that order.
-    await clickElement(toplevel, ".toolbar__save");
+    await clickElement(toplevel, ".toolbar__file-save");
     await waitFor(async () => (await present(".statusbar__dirty")) === false, {
       timeout: 20000,
       message: "the dirty marker to clear after saving an open editor",
@@ -799,7 +799,7 @@ describe("cue list editing", () => {
 
     // The toolbar undo that follows must be the first step off the top of the stack. Had the
     // keystroke above reached the document, it would be the second, and the row below moves too.
-    await clickElement(toplevel, ".toolbar__undo");
+    await clickElement(toplevel, ".toolbar__edit-undo");
     await scrollTo(THIRD_POSITION);
     await waitFor(async () => (await rowText(THIRD_POSITION)) === thirdOriginal, {
       timeout: 20000,
