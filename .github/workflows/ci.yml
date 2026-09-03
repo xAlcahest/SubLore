@@ -357,23 +357,35 @@ jobs:
         if: ${{ !cancelled() }}
         run: .github/scripts/e2e-verdict.sh
 
-  package:
-    name: package (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    # A release build of the workspace and two bundlers, on runners the check job takes 30 minutes
-    # on. Like every job here it carries its own: the default is six hours.
+  # One bundle per runner and one artifact per bundle (owner ruling 2026-09-03). The three Linux
+  # legs compile the same tree three times over, which is three times the runner minutes for about
+  # the wall clock of one; what it buys is that a bundler that fails costs its own artifact and
+  # nobody else's, and that the .deb does not wait behind linuxdeploy repacking the AppImage.
+  # Pinned to ubuntu-24.04 rather than ubuntu-latest: an AppImage starts only on the glibc it was
+  # built against or newer, so this must not drift away from the smoke jobs' container tags. Built
+  # on glibc 2.43 and started on 24.04 it dies before main (measured 2026-09-02).
+  package-linux:
+    name: package (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    # A release build of the workspace and a bundler, on runners the check job takes 30 minutes on.
+    # Like every job here it carries its own: the default is six hours.
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        # Windows builds the installers and stops there. Nothing has ever run one, so an msi from
-        # this job is a file that exists, not an install that works; MW.3 is where that is answered.
-        # A file nobody runs is not worth a release build on every pull request, so on a pull
-        # request only Linux packages, which is the half the smoke below actually starts.
-        # Pinned rather than ubuntu-latest: an AppImage starts only on the glibc it was built
-        # against or newer, so this must not drift away from the smoke job's container tag.
-        # Built on glibc 2.43 and started on 24.04 it dies before main (measured 2026-09-02).
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-24.04"]') || fromJSON('["ubuntu-24.04", "windows-latest"]') }}
+        include:
+          - name: deb
+            bundles: deb
+            artifact: linux-deb
+            path: target/release/bundle/deb/*.deb
+          - name: rpm
+            bundles: rpm
+            artifact: linux-rpm
+            path: target/release/bundle/rpm/*.rpm
+          - name: appimage
+            bundles: appimage
+            artifact: linux-appimage
+            path: target/release/bundle/appimage/*.AppImage
     defaults:
       run:
         shell: bash
@@ -385,7 +397,6 @@ jobs:
       # not optional here: the AppImage's gtk plugin reads librsvg-2.0.pc and fails the bundle
       # without it.
       - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -400,8 +411,63 @@ jobs:
             libxdo-dev \
             wget
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # One cache for the three bundles rather than three of them: they compile the same tree, and
+      # three release caches of this workspace would crowd the check and e2e jobs' out from under
+      # the repository's 10 GB ceiling. Only the deb leg writes it; the other two read what it left.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: package-linux
+          save-if: ${{ matrix.name == 'deb' }}
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # APPIMAGE_EXTRACT_AND_RUN: linuxdeploy is itself an AppImage and mounts itself with FUSE,
+      # which a runner does not have. Without this the deb builds and the AppImage step dies on
+      # "failed to run linuxdeploy" (measured on Linux, 2026-09-02).
+      - name: Build the ${{ matrix.name }}
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: pnpm tauri build --bundles ${{ matrix.bundles }}
+
+      # if-no-files-found: error, because a packaging job that uploads nothing and reports success
+      # is the one outcome worse than a red one.
+      - name: Upload the ${{ matrix.name }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}
+          if-no-files-found: error
+
+  # Windows builds the installers and stops there. Nothing has ever run one, so an msi from this job
+  # is a file that exists, not an install that works; MW.3 is where that is answered. Its own job
+  # rather than a leg of the matrix above, so the Linux smoke jobs do not wait forty minutes behind
+  # a build whose output nothing here starts. On pull requests too, owner ruling 2026-09-03.
+  package-windows:
+    name: package (windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
       - name: Install libmpv (Windows)
-        if: runner.os == 'Windows'
         shell: pwsh
         run: .github/scripts/install-libmpv-windows.ps1
 
@@ -419,37 +485,16 @@ jobs:
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: package-windows
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      # APPIMAGE_EXTRACT_AND_RUN: linuxdeploy is itself an AppImage and mounts itself with FUSE,
-      # which a runner does not have. Without this the deb builds and the AppImage step dies on
-      # "failed to run linuxdeploy" (measured on Linux, 2026-09-02).
-      - name: Build the Linux installers
-        if: runner.os == 'Linux'
-        env:
-          APPIMAGE_EXTRACT_AND_RUN: 1
-        run: pnpm tauri build --bundles deb,appimage
-
       - name: Build the Windows installers
-        if: runner.os == 'Windows'
         run: pnpm tauri build --bundles msi,nsis
 
-      # if-no-files-found: error, because a packaging job that uploads nothing and reports success
-      # is the one outcome worse than a red one.
-      - name: Upload the Linux installers
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v7
-        with:
-          name: linux-installers
-          path: |
-            target/release/bundle/deb/*.deb
-            target/release/bundle/appimage/*.AppImage
-          if-no-files-found: error
-
       - name: Upload the Windows installers
-        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
           name: windows-installers
@@ -463,7 +508,7 @@ jobs:
   # criterion belongs to MW.3, by hand, on a machine nobody has yet.
   package-smoke:
     name: package smoke (ubuntu)
-    needs: package
+    needs: package-linux
     runs-on: ubuntu-latest
     # Two downloads, a handful of packages and two launches. Nothing here compiles.
     timeout-minutes: 20
@@ -481,11 +526,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Download the Linux installers
+      - name: Download the deb
         uses: actions/download-artifact@v7
         with:
-          name: linux-installers
-          path: installers
+          name: linux-deb
+          path: installers/deb
+
+      - name: Download the AppImage
+        uses: actions/download-artifact@v7
+        with:
+          name: linux-appimage
+          path: installers/appimage
 
       - name: Install the deb and start what it installed
         run: .github/scripts/package-smoke.sh installers/deb/*.deb installers/appimage/*.AppImage
+
+  # The same criterion for the rpm, on the family it is for. An rpm nobody installs is the shape
+  # this repository already refuses on Windows, and the bundler declares its dependencies from a
+  # list rather than from the binary, so an undeclared library is only ever found by a launch.
+  package-smoke-rpm:
+    name: package smoke (fedora)
+    needs: package-linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: fedora:latest
+    steps:
+      - name: Install what the checkout needs
+        run: dnf install -y --setopt=install_weak_deps=False ca-certificates git
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Download the rpm
+        uses: actions/download-artifact@v7
+        with:
+          name: linux-rpm
+          path: installers/rpm
+
+      - name: Install the rpm and start what it installed
+        run: .github/scripts/package-smoke-rpm.sh installers/rpm/*.rpm
