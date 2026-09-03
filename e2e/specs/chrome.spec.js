@@ -25,7 +25,7 @@ import { findToplevel } from "../lib/x11.js";
 
 /** The titles M2.0 draws. Subtitles, Timing, Audio and Terms arrive with the milestone that fills
  * each one, and there is no View menu before M2.4 (decision 24 A2 and A4). */
-const TITLES = ["File", "Edit", "Help"];
+const TITLES = ["File", "Edit", "View", "Help"];
 
 /** Every command the bars T3 removed used to offer. Each has to reach both routes. */
 const FROM_THE_BARS = ["open-subtitle", "open-video", "save", "save-copy", "undo", "redo"];
@@ -229,9 +229,11 @@ describe("the menu bar and the toolbar", () => {
     pressKey("Right");
     await waitForOpenMenu("Edit");
     pressKey("Right");
+    await waitForOpenMenu("View");
+    pressKey("Right");
     await waitForOpenMenu("Help");
     pressKey("Left");
-    await waitForOpenMenu("Edit");
+    await waitForOpenMenu("View");
 
     pressKey("Escape");
     await waitForNoMenu();
@@ -254,6 +256,8 @@ describe("the menu bar and the toolbar", () => {
   it("activates the item under the cursor on Enter", async () => {
     pressKey("alt");
     await waitForOpenMenu("File");
+    // File, Edit, View, Help: the walk the test above asserts, taken here to reach About.
+    pressKey("Right");
     pressKey("Right");
     pressKey("Right");
     await waitForOpenMenu("Help");

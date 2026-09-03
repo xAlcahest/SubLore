@@ -8,6 +8,8 @@ export type Command = {
   label: string;
   /** Drawn beside the menu item. The key itself is handled by whoever owns the command. */
   accelerator?: string;
+  /** Set only on a command that turns something on and off, which is drawn with a mark. */
+  checked?: boolean;
   enabled: boolean;
   run: () => void;
 };

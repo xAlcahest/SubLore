@@ -277,6 +277,8 @@ describe("the picture gets out of the way for an HTML layer", () => {
       timeout: 15000,
       message: "the File dropdown to open on Alt",
     });
+    // File, Edit, View, Help: three steps to the right, and the walk is asserted at the end of it.
+    pressKey("Right");
     pressKey("Right");
     pressKey("Right");
     await waitFor(async () => ((await openDropdown()) === "Help" ? true : null), {

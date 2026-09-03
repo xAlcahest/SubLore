@@ -498,6 +498,7 @@ describe("the shell layout", () => {
     expect(withProbe.children.map((child) => child.name)).toEqual([
       "div.waveform-probe",
       "section.waveform",
+      "div.sash",
       "section.currentline",
     ]);
     expect(withProbe.children[1].top).toBeGreaterThan(EDGE_SLOP_PX);
@@ -514,6 +515,7 @@ describe("the shell layout", () => {
     const column = await toolsColumn();
     expect(column.children.map((child) => child.name)).toEqual([
       "section.waveform",
+      "div.sash",
       "section.currentline",
     ]);
     // Flush against both edges of the column, so nothing above or below holds any space either.

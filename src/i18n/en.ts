@@ -22,6 +22,10 @@ export const en = {
       /** Here until the Audio title arrives with the milestone that fills it (decision 24 A2). */
       transcribe: "Transcribe…",
     },
+    view: {
+      title: "View",
+      waveform: "Waveform",
+    },
     help: {
       title: "Help",
       about: "About Sublore",
@@ -145,6 +149,7 @@ export const en = {
     },
   },
   waveform: {
+    sash: "Waveform height",
     label: "Waveform",
     /** Shown in the status bar when a peak job fails. The detail is technical and stays in the log. */
     failed: "The waveform could not be read for this file. The video is unaffected.",

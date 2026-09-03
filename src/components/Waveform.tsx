@@ -12,6 +12,8 @@ type WaveformProps = {
   positionMs: number;
   /** The media's length in milliseconds, so the drawing keeps its scale while peaks arrive. */
   durationMs: number;
+  /** The height the sash was left at, in CSS pixels, or nothing before the layout has been read. */
+  height?: number;
 };
 
 /** The colours the canvas draws in, read from the tokens rather than written twice. */
@@ -26,7 +28,7 @@ function ink(element: HTMLElement, name: string): string {
  * first seconds while the rest is still being read. There is no zoom and no toolbar: those are
  * M2.5, and drawing them empty is the placeholder the layout document refuses.
  */
-export default function Waveform({ peaks, positionMs, durationMs }: WaveformProps) {
+export default function Waveform({ peaks, positionMs, durationMs, height }: WaveformProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -88,7 +90,11 @@ export default function Waveform({ peaks, positionMs, durationMs }: WaveformProp
   }, [peaks, positionMs, durationMs]);
 
   return (
-    <section className="waveform" aria-label={en.waveform.label}>
+    <section
+      className="waveform"
+      aria-label={en.waveform.label}
+      style={height === undefined ? undefined : { height }}
+    >
       <canvas ref={canvas} className="waveform__canvas" />
     </section>
   );
