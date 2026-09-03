@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-import { asrDir, installStubSidecar, stubBinary } from "./lib/asr.js";
+import { asrDir, cacheHome, installStubSidecar, stubBinary } from "./lib/asr.js";
 import { appEnv } from "./lib/env.js";
 import { driverPort, startDriver, stopDriver } from "./lib/driver.js";
 import { requireAppBinary, requireDisplay, requireTool, requireVideoFixture } from "./lib/paths.js";
@@ -18,6 +18,9 @@ const EXPECTED_TESTS = 113;
 // Keeps a run out of the real data dir. Created once in the launcher; workers inherit the value.
 process.env.SUBLORE_E2E_DATA_HOME ??= mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-"));
 process.env.XDG_DATA_HOME = process.env.SUBLORE_E2E_DATA_HOME;
+// Pinned before the line below points XDG_CACHE_HOME at this run's own tree: a real model lives in
+// the developer's cache, and `sourceModel` falls back to whatever XDG_CACHE_HOME says.
+process.env.SUBLORE_TEST_MODEL_DIR ??= path.join(cacheHome(), "sublore", "models");
 // One rule, one place: `appEnv` owns it and this copies the result onto the environment the
 // driver chain inherits.
 Object.assign(process.env, appEnv());

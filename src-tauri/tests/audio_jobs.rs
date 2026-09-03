@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use sublore_audio::{Cancel, PeakRequest, CHUNK_BUCKETS, SAMPLES_PER_BUCKET};
+use sublore_audio::{Cancel, PeakRequest, PeaksCache, CHUNK_BUCKETS, SAMPLES_PER_BUCKET};
 use sublore_lib::audio::error::AudioErrorCode;
 use sublore_lib::audio::{run_job, AudioEvent, AudioState, JobTarget};
 
@@ -240,6 +240,7 @@ fn a_job_streams_its_chunks_and_then_exactly_one_done_that_counts_them() {
         &PeakRequest::new(media(&root, "ep01.mkv"), 1),
         &Cancel::new(),
         &|event| recorder.record(event),
+        None,
     );
 
     let events = recorder.taken();
@@ -299,6 +300,7 @@ fn a_cancelled_job_ends_in_cancelled_never_in_done_and_leaves_no_child_behind() 
             &PeakRequest::new(media(&root, "ep01.mkv"), 1),
             &cancel,
             &|event| recorder.record(event),
+            None,
         );
         stopper.join().expect("the stopper thread cannot panic")
     });
@@ -369,6 +371,7 @@ fn opening_a_second_media_stops_the_first_job_with_no_done_and_no_child_left() {
             &PeakRequest::new(root.join("ep01.mkv"), 1),
             &first_cancel,
             &|event| recorder.record(event),
+            None,
         );
         opener.join().expect("the opening thread cannot panic")
     });
@@ -444,6 +447,7 @@ fn a_shutdown_mid_job_leaves_no_ffmpeg_process_behind() {
             &PeakRequest::new(root.join("ep01.mkv"), 1),
             &cancel,
             &|event| recorder.record(event),
+            None,
         );
         closer.join().expect("the closing thread cannot panic")
     });
@@ -522,6 +526,7 @@ fn a_second_start_for_the_same_media_and_track_is_refused_while_the_first_keeps_
             &PeakRequest::new(root.join("ep01.mkv"), 1),
             &cancel,
             &|event| recorder.record(event),
+            None,
         );
         asker.join().expect("the asking thread cannot panic")
     });
@@ -551,6 +556,7 @@ fn a_child_that_fails_ends_in_one_error_carrying_its_own_words_and_never_in_done
         &PeakRequest::new(media(&root, "ep01.mkv"), 1),
         &Cancel::new(),
         &|event| recorder.record(event),
+        None,
     );
 
     let (chunks, terminal) = split(recorder.taken());
@@ -625,6 +631,7 @@ fn a_missing_ffmpeg_ends_in_one_error_that_says_which_program_could_not_be_run()
         &PeakRequest::new(media(&root, "ep01.mkv"), 1),
         &Cancel::new(),
         &|event| recorder.record(event),
+        None,
     );
 
     let (chunks, terminal) = split(recorder.taken());
@@ -641,4 +648,137 @@ fn a_missing_ffmpeg_ends_in_one_error_that_says_which_program_could_not_be_run()
         other => panic!("nothing to run is an error, not {other:?}"),
     }
     fs::remove_dir_all(&root).ok();
+}
+
+/// A stand-in that records every time it is run, so "no child was spawned" is a count and not a
+/// guess about process tables.
+fn counting_stand_in(root: &Path, samples: &Path) -> (PathBuf, PathBuf) {
+    let ran = root.join("ran.log");
+    let ffmpeg = stand_in(
+        root,
+        &format!("echo ran >> {}\ncat {}", ran.display(), samples.display()),
+    );
+    (ffmpeg, ran)
+}
+
+fn times_run(ran: &Path) -> usize {
+    fs::read_to_string(ran).map_or(0, |text| text.lines().count())
+}
+
+#[test]
+fn a_second_job_for_the_same_stream_reads_the_cache_and_spawns_nothing() {
+    let _alone = alone();
+    let root = workspace("cached");
+    const BUCKETS: usize = CHUNK_BUCKETS * 2 + 41;
+    let (ffmpeg, ran) = counting_stand_in(&root, &samples(&root, BUCKETS));
+    let cache = PeaksCache::new(root.join("cache"));
+    let request = PeakRequest::new(media(&root, "ep01.mkv"), 1);
+
+    let first = Recorder::default();
+    run_job(
+        &ffmpeg,
+        1,
+        &request,
+        &Cancel::new(),
+        &|event| first.record(event),
+        Some(&cache),
+    );
+    let (cold, cold_end) = split(first.taken());
+    assert!(
+        matches!(cold_end, AudioEvent::Done(_)),
+        "the first run ends in Done"
+    );
+    assert_eq!(times_run(&ran), 1, "the first run reads the media once");
+
+    let second = Recorder::default();
+    run_job(
+        &ffmpeg,
+        2,
+        &request,
+        &Cancel::new(),
+        &|event| second.record(event),
+        Some(&cache),
+    );
+    let events = second.taken();
+    let (warm, warm_end) = split(events.clone());
+    assert!(
+        matches!(warm_end, AudioEvent::Done(_)),
+        "the second run ends in Done"
+    );
+
+    // The whole of W8's cache criterion, in three assertions: nothing was spawned, the peaks are
+    // the same ones, and they still tile the timeline under the second job's own id.
+    assert_eq!(
+        times_run(&ran),
+        1,
+        "the second run reads the cache, not the media"
+    );
+    assert_eq!(
+        covered(&warm, 2, &events),
+        covered(&cold, 1, &[]),
+        "the replay covers the same milliseconds the live run did"
+    );
+    assert_eq!(
+        warm.iter()
+            .map(|c| (c.first_ms, c.min.clone(), c.max.clone()))
+            .collect::<Vec<_>>(),
+        cold.iter()
+            .map(|c| (c.first_ms, c.min.clone(), c.max.clone()))
+            .collect::<Vec<_>>(),
+        "the replay hands over the same peaks, tile for tile"
+    );
+}
+
+#[test]
+fn a_cancelled_replay_ends_in_cancelled_and_never_in_done() {
+    let _alone = alone();
+    let root = workspace("cancelled-replay");
+    const BUCKETS: usize = CHUNK_BUCKETS * 3;
+    let (ffmpeg, _ran) = counting_stand_in(&root, &samples(&root, BUCKETS));
+    let cache = PeaksCache::new(root.join("cache"));
+    let request = PeakRequest::new(media(&root, "ep01.mkv"), 1);
+
+    let warm = Recorder::default();
+    run_job(
+        &ffmpeg,
+        1,
+        &request,
+        &Cancel::new(),
+        &|event| warm.record(event),
+        Some(&cache),
+    );
+    drop(warm);
+
+    // Cancelled between two tiles of the replay rather than at the door, which is the arm the
+    // panel's silent-empty branch depends on: a cancel is never a failure the user is told about.
+    let cancel = Cancel::new();
+    let recorder = Recorder::default();
+    run_job(
+        &ffmpeg,
+        2,
+        &request,
+        &cancel,
+        &|event| {
+            recorder.record(event);
+            cancel.cancel();
+        },
+        Some(&cache),
+    );
+    let events = recorder.taken();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, AudioEvent::Done(_))),
+        "a cancelled replay never reports Done"
+    );
+    match events.last() {
+        Some(AudioEvent::Failed(failed)) => {
+            assert_eq!(
+                failed.code,
+                AudioErrorCode::Cancelled,
+                "it ends in Cancelled"
+            );
+        }
+        other => panic!("a cancelled replay ends in one Failed event, got {other:?}"),
+    }
 }
