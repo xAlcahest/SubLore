@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { en } from "../i18n/en";
 import { type Waveform as Peaks } from "../hooks/useAudioPeaks";
+import { useSmoothPosition } from "../hooks/useSmoothPosition";
 import { useWaveformView } from "../hooks/useWaveformView";
 
 /** The largest magnitude a 16-bit sample has: -32768 read as a distance from silence. */
@@ -18,6 +19,8 @@ type WaveformProps = {
   durationMs: number;
   /** The height the sash was left at, in CSS pixels, or nothing before the layout has been read. */
   height?: number;
+  /** Playback stopped: the playhead neither moves on its own nor drags the view along.  */
+  paused: boolean;
 };
 
 /** The colours the canvas draws in, read from the tokens rather than written twice. */
@@ -32,13 +35,28 @@ function ink(element: HTMLElement, name: string): string {
  * first seconds while the rest is still being read. There is no zoom and no toolbar: those are
  * M2.5, and drawing them empty is the placeholder the layout document refuses.
  */
-export default function Waveform({ peaks, positionMs, durationMs, height }: WaveformProps) {
+export default function Waveform({ peaks, positionMs, durationMs, height, paused }: WaveformProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [widthPx, setWidthPx] = useState(0);
   // The whole media's length, not what has arrived: peaks filling in must not rescale what is
   // already drawn under the playhead.
   const spanMs = Math.max(1, durationMs > 0 ? durationMs : peaks.filled);
-  const { view, zoomBy, scrollBy } = useWaveformView(spanMs, widthPx);
+  const { view, zoomBy, scrollBy, followTo, startFollowing } = useWaveformView(spanMs, widthPx);
+  const headMs = useSmoothPosition(positionMs, paused, durationMs);
+
+  // Playback starting takes the view back from wherever a hand left it, and every frame after that
+  // keeps the head on screen.
+  useEffect(() => {
+    if (!paused) {
+      startFollowing();
+    }
+  }, [paused, startFollowing]);
+
+  useEffect(() => {
+    if (!paused) {
+      followTo(headMs);
+    }
+  }, [paused, headMs, followTo]);
 
   // In device pixels, which is what the view is scaled in and what the backing store is sized in.
   useEffect(() => {
@@ -104,7 +122,7 @@ export default function Waveform({ peaks, positionMs, durationMs, height }: Wave
     }
 
     if (durationMs > 0) {
-      const at = Math.round((Math.min(positionMs, durationMs) - view.fromMs) / view.msPerPixel);
+      const at = Math.round((Math.min(headMs, durationMs) - view.fromMs) / view.msPerPixel);
       // Off the window at either end draws nothing rather than a line stuck to an edge, which
       // would read as a playhead that is where it is not.
       if (at >= 0 && at < width) {
@@ -113,7 +131,7 @@ export default function Waveform({ peaks, positionMs, durationMs, height }: Wave
         context.fillRect(at, 0, 1, height);
       }
     }
-  }, [peaks, positionMs, durationMs, view]);
+  }, [peaks, headMs, durationMs, view]);
 
   // A native listener, not React's `onWheel`: React attaches wheel passively at the root, so the
   // handler cannot stop the page from taking the gesture as its own.
