@@ -174,7 +174,8 @@ export default function MenuBar({ menus }: MenuBarProps) {
                   id={`menuitem-${command.id}`}
                   key={command.id}
                   type="button"
-                  role="menuitem"
+                  role={command.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+                  aria-checked={command.checked}
                   tabIndex={-1}
                   disabled={!command.enabled}
                   onClick={() => activate(command)}

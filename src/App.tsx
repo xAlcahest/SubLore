@@ -6,6 +6,7 @@ import CueList from "./components/CueList";
 import CurrentLine from "./components/CurrentLine";
 import MenuBar from "./components/MenuBar";
 import ProjectRail from "./components/ProjectRail";
+import Sash from "./components/Sash";
 import StatusBar from "./components/StatusBar";
 import Toolbar from "./components/Toolbar";
 import Waveform from "./components/Waveform";
@@ -15,6 +16,7 @@ import VideoStage from "./components/VideoStage";
 import { useAudioPeaks } from "./hooks/useAudioPeaks";
 import { useCueSelection } from "./hooks/useCueSelection";
 import { LayerContext, useLayerRegistry } from "./hooks/useLayers";
+import { useLayout } from "./hooks/useLayout";
 import { useProject } from "./hooks/useProject";
 import { useStartupFiles } from "./hooks/useStartupFiles";
 import { useSubtitleFile } from "./hooks/useSubtitleFile";
@@ -45,11 +47,42 @@ function acceleratorFor(
   return null;
 }
 
+/** A frozen contract with `MIN_WAVEFORM_HEIGHT` in src-tauri/src/layout.rs, which clamps the file. */
+const MIN_WAVEFORM_HEIGHT = 64;
+
+/**
+ * What the current line keeps: its times row and one line of text under it. Measured against the
+ * layout at the smallest supported window, where the tools column is 216px and the default gives
+ * the line 84 of them — a larger number here would put the ceiling under the default height and the
+ * panel could never be dragged back to it.
+ */
+const MIN_CURRENT_LINE = 72;
+
 export default function App() {
   // Every HTML layer registers here while it is open, and the video surface hides for as long as
   // the set is not empty (decision 1, T8).
   const layers = useLayerRegistry();
   const peaks = useAudioPeaks();
+  const { layout, setWaveformHeight, storeWaveformHeight } = useLayout();
+  // Decision 24 A4: View arrives with the first panel worth hiding. The choice lasts the session;
+  // only the height outlives it (W6).
+  const [waveformShown, setWaveformShown] = useState(true);
+  const toolsRef = useRef<HTMLElement>(null);
+  const [toolsHeight, setToolsHeight] = useState(0);
+
+  // The sash's ceiling is the column's own height, so it is measured rather than guessed: a fixed
+  // maximum would clip the current line on a short window and waste room on a tall one (W6).
+  useEffect(() => {
+    const column = toolsRef.current;
+    if (column === null) {
+      return;
+    }
+    const measure = () => setToolsHeight(column.clientHeight);
+    const observer = new ResizeObserver(measure);
+    observer.observe(column);
+    measure();
+    return () => observer.disconnect();
+  }, []);
   const { state, position, errorCode, open, togglePlayback, seek, setRegion } = useVideoPlayer(
     layers.covered,
   );
@@ -247,6 +280,15 @@ export default function App() {
       enabled: true,
       run: () => setAboutOpen(true),
     },
+    waveformPanel: {
+      id: "waveform-panel",
+      label: en.menu.view.waveform,
+      checked: waveformShown,
+      // Enabled with no audio too: a toggle that disables itself when the thing it toggles is
+      // absent tells the user the command is gone rather than that the panel has nothing to show.
+      enabled: true,
+      run: () => setWaveformShown((shown) => !shown),
+    },
   };
 
   // Only while an open was refused for unsaved edits, in both routes at once: there is nothing to
@@ -272,6 +314,7 @@ export default function App() {
       title: en.menu.edit.title,
       items: [commands.undo, commands.redo, commands.transcribe],
     },
+    { id: "view", title: en.menu.view.title, items: [commands.waveformPanel] },
     { id: "help", title: en.menu.help.title, items: [commands.about] },
   ];
   const toolbar = [
@@ -329,14 +372,28 @@ export default function App() {
             </section>
             {/* The current line, and nothing above it: the waveform's provider arrives with M2.4 and
               a panel with no provider takes no space, so there is no empty box here (T5). */}
-            <section className="shell__tools">
-              {/* Absent until the first chunk arrives, never an empty panel waiting for one. */}
-              {peaks.filled > 0 && (
-                <Waveform
-                  peaks={peaks}
-                  positionMs={Math.round(position * 1000)}
-                  durationMs={Math.round((state.duration ?? 0) * 1000)}
-                />
+            <section className="shell__tools" ref={toolsRef}>
+              {/* Absent until the first chunk arrives, never an empty panel waiting for one, and
+                absent again while View has it turned off. */}
+              {waveformShown && peaks.filled > 0 && (
+                <>
+                  <Waveform
+                    peaks={peaks}
+                    positionMs={Math.round(position * 1000)}
+                    durationMs={Math.round((state.duration ?? 0) * 1000)}
+                    height={layout?.waveformHeight}
+                  />
+                  {layout !== null && (
+                    <Sash
+                      height={layout.waveformHeight}
+                      min={MIN_WAVEFORM_HEIGHT}
+                      max={Math.max(MIN_WAVEFORM_HEIGHT, toolsHeight - MIN_CURRENT_LINE)}
+                      label={en.waveform.sash}
+                      onResize={setWaveformHeight}
+                      onRelease={storeWaveformHeight}
+                    />
+                  )}
+                </>
               )}
               <CurrentLine
                 key={subtitle.openId}
