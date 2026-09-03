@@ -6,6 +6,7 @@ pub mod audio;
 pub mod chooser;
 pub mod crash;
 pub mod dialog;
+pub mod layout;
 pub mod project;
 pub mod strings;
 pub mod subtitle;
@@ -129,6 +130,8 @@ pub fn run() -> tauri::Result<()> {
             audio::audio_peaks_start,
             audio::audio_peaks_cancel,
             chooser::choose_path,
+            layout::layout_read,
+            layout::layout_write,
             project::project_add_episode,
             project::project_attach_file,
             project::project_close,
