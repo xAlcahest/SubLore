@@ -6,8 +6,11 @@
  * The fixture is the milestone's: two unbroken tones, the first at full scale and the second at a
  * quarter of it, so which track is drawn is a question the canvas answers on its own.
  */
+import process from "node:process";
+
 import { browser, expect } from "@wdio/globals";
 
+import { waitForLog } from "../lib/applog.js";
 import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow } from "../lib/input.js";
 import {
@@ -60,35 +63,18 @@ function reach() {
 }
 
 /**
- * True once the drawing reaches the last of the file, which is how a finished job shows from here.
+ * Wait until the app says it has peaked a stream to the end.
  *
- * The panel draws while the job runs (W5), so ink near the left says nothing about whether the
- * peaks are complete — and W8's cache criterion is about a track that has been peaked all the way,
- * not one whose first chunk arrived.
+ * The drawing reaching the last column is not the same event: the panel draws while the job runs
+ * (W5), and the cache entry is written when the job finishes. Waiting on the picture asked about
+ * the cache before there was one to read, and CI answered with a fresh ffmpeg every time.
  */
-function drawnToTheEnd() {
-  return browser.execute(() => {
-    const canvas = document.querySelector(".waveform__canvas");
-    if (canvas === null) {
-      return false;
-    }
-    const context = canvas.getContext("2d");
-    const panel = getComputedStyle(document.querySelector(".waveform")).backgroundColor;
-    const background = (panel.match(/\d+/g) ?? ["0", "0", "0"]).map(Number);
-    const column = context.getImageData(canvas.width - 2, 0, 1, canvas.height).data;
-    for (let y = 0; y < canvas.height; y += 1) {
-      const i = y * 4;
-      if (
-        Math.abs(column[i] - background[0]) +
-          Math.abs(column[i + 1] - background[1]) +
-          Math.abs(column[i + 2] - background[2]) >
-        24
-      ) {
-        return true;
-      }
-    }
-    return false;
-  });
+function peakedToTheEnd(stream) {
+  return waitForLog(
+    process.env.SUBLORE_E2E_DATA_HOME,
+    new RegExp(`waveform: job \\d+ peaked \\d+ ms of stream ${stream} of .*waveform-tracks\\.mkv`),
+    { timeout: 60000, what: `stream ${stream} of the two-track fixture to be peaked to the end` },
+  );
 }
 
 function rectOf(selector) {
@@ -167,10 +153,7 @@ describe("the Audio menu and the track that is drawn", () => {
     });
     // Peaked all the way before anything switches: W8's cache criterion is about a track that has
     // been read to the end, and a job cancelled halfway leaves nothing to read back.
-    await waitFor(drawnToTheEnd, {
-      timeout: 60000,
-      message: "the first track to be peaked to the end of the file",
-    });
+    await peakedToTheEnd(1);
   });
 
   it("lists both tracks and marks the one being drawn", async () => {
@@ -198,10 +181,7 @@ describe("the Audio menu and the track that is drawn", () => {
     expect(quartered).toBeLessThan(0.5);
     expect(quartered).toBeGreaterThan(0.05);
 
-    await waitFor(drawnToTheEnd, {
-      timeout: 60000,
-      message: "the second track to be peaked to the end of the file",
-    });
+    await peakedToTheEnd(2);
 
     const items = await audioItems(toplevel);
     await closeMenu();

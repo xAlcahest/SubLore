@@ -435,6 +435,7 @@ fn start_job(app: &AppHandle, media: PathBuf, ff_index: u32) -> Result<u64, Audi
         media: media.clone(),
         ff_index,
     };
+    let peaked = target.clone();
     let job_id = state.begin(target, cancel.clone())?;
     // Announced before the first chunk: a job started by `video_open` is nobody's return value, so
     // without this the page sees chunks carrying an id it has never been told about and cannot say
@@ -454,27 +455,40 @@ fn start_job(app: &AppHandle, media: PathBuf, ff_index: u32) -> Result<u64, Audi
             cancel: cancel.clone(),
         };
         run_job(&ffmpeg, job_id, &request, &cancel, &|event| {
-            emit_event(&handle, event);
+            emit_event(&handle, event, &peaked);
         });
         slot.release();
     });
     Ok(job_id)
 }
 
-fn emit_event(app: &AppHandle, event: AudioEvent) {
+/// The log lines name what the job was reading. CI keeps these logs now, and one that says only
+/// "job 4 peaked 30000 ms" cannot be read back against a run with several media in it.
+fn emit_event(app: &AppHandle, event: AudioEvent, target: &JobTarget) {
     match event {
         AudioEvent::Peaks(peaks) => {
             let _ = app.emit(EVENT_PEAKS, peaks);
         }
         AudioEvent::Done(done) => {
-            log::info!("waveform: job {} peaked {} ms", done.job_id, done.buckets);
+            log::info!(
+                "waveform: job {} peaked {} ms of stream {} of {}",
+                done.job_id,
+                done.buckets,
+                target.ff_index,
+                target.media.display()
+            );
             let _ = app.emit(EVENT_DONE, done);
         }
         AudioEvent::Failed(failed) => {
             // A cancel is what every media change does, so it is not a warning: a log full of
             // them would bury the failures a translator can act on.
             if AudioError::new(failed.code, "").is_cancelled() {
-                log::info!("waveform: job {} was cancelled", failed.job_id);
+                log::info!(
+                    "waveform: job {} on stream {} of {} was cancelled",
+                    failed.job_id,
+                    target.ff_index,
+                    target.media.display()
+                );
             } else {
                 log::warn!(
                     "waveform: job {} ended {:?}: {}",
