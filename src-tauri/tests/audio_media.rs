@@ -177,6 +177,7 @@ fn peaking_the_sixty_second_fixture_covers_it_end_to_end_and_ends_in_one_done() 
                 .unwrap_or_else(|error| error.into_inner())
                 .push(event);
         },
+        None,
     );
     let events = recorder
         .into_inner()

@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::Serialize;
-use sublore_audio::{extract_peaks, Bucket, Cancel, PeakRequest};
+use sublore_audio::{peaks_cached, Bucket, Cancel, PeakRequest, PeaksCache};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::log;
@@ -33,6 +33,9 @@ const EVENT_ERROR: &str = "audio://error";
 /// Decision 24 E3: the media carries no audio at all. Not a failure, and not the same thing as a
 /// job that has produced nothing yet, which is what the panel's absence used to mean on its own.
 const EVENT_NONE: &str = "audio://none";
+
+/// Under the app's cache directory, so a user clearing caches loses peaks and nothing else.
+const CACHE_DIR: &str = "peaks";
 
 /// Which media and which of its streams a job is peaking. Two starts that name the same pair are
 /// the same job, which is what makes the second one a refusal rather than a queue.
@@ -93,6 +96,9 @@ pub enum AudioEvent {
 pub struct AudioState {
     job: Mutex<Option<ActiveJob>>,
     next_job_id: AtomicU64,
+    /// Where peaks already read are kept, or nothing when the platform gave no cache directory.
+    /// Decision 20: derived data, so it lives in the app's own store and never beside the media.
+    cache: Option<PeaksCache>,
 }
 
 #[derive(Debug)]
@@ -103,6 +109,27 @@ struct ActiveJob {
 }
 
 impl AudioState {
+    /// Resolve the cache directory once, when the app starts, rather than per job: the path does
+    /// not change while the process runs and a job is not the place to discover it is missing.
+    pub fn new(app: &AppHandle) -> Self {
+        let cache = match app.path().app_cache_dir() {
+            Ok(dir) => {
+                let dir = dir.join(CACHE_DIR);
+                log::info!("waveform: peaks already read are kept in {}", dir.display());
+                Some(PeaksCache::new(dir))
+            }
+            Err(error) => {
+                log::warn!("waveform: no cache directory, so every peak is read again: {error}");
+                None
+            }
+        };
+        Self {
+            job: Mutex::new(None),
+            next_job_id: AtomicU64::new(1),
+            cache,
+        }
+    }
+
     /// Claim the one job slot for `target`. The id is fresh whether or not the claim succeeds, so
     /// no two jobs ever share one and every event carries an id the UI can match against.
     ///
@@ -220,10 +247,31 @@ pub fn run_job(
     request: &PeakRequest,
     cancel: &Cancel,
     emit: &(dyn Fn(AudioEvent) + Sync),
+    cache: Option<&PeaksCache>,
 ) {
-    let outcome = extract_peaks(ffmpeg, request, cancel, &|first_ms, buckets| {
+    let on_chunk = |first_ms: u32, buckets: &[Bucket]| {
         emit(AudioEvent::Peaks(chunk(job_id, first_ms, buckets)));
-    });
+    };
+    // Without a cache directory the peaks are still read, they are just read again next time: an
+    // unusable cache is a slower app, never a broken one.
+    let outcome = match cache {
+        Some(cache) => peaks_cached(cache, ffmpeg, request, cancel, &on_chunk).map(|run| {
+            // Warnings, not failures: the run produced its peaks and the cache is the only thing
+            // that went wrong. See `PeakRun`.
+            for warning in &run.warnings {
+                log::warn!("waveform: job {job_id} could not use the peaks cache: {warning}");
+            }
+            // Which side the peaks came from, because a run that says only how many it read cannot
+            // be told apart from one that read them again.
+            log::info!(
+                "waveform: job {job_id} has {} buckets, read from the cache: {}",
+                run.buckets,
+                run.from_cache
+            );
+            run.buckets
+        }),
+        None => sublore_audio::extract_peaks(ffmpeg, request, cancel, &on_chunk),
+    };
     let terminal = match outcome {
         Ok(buckets) => AudioEvent::Done(AudioDone { job_id, buckets }),
         Err(error) => {
@@ -435,7 +483,10 @@ fn start_job(app: &AppHandle, media: PathBuf, ff_index: u32) -> Result<u64, Audi
         media: media.clone(),
         ff_index,
     };
+    // Both cloned before the target is handed over, because the job outlives this call on a
+    // blocking task. `PeaksCache` is a directory and a cap, so its clone is two fields.
     let peaked = target.clone();
+    let cache = state.cache.clone();
     let job_id = state.begin(target, cancel.clone())?;
     // Announced before the first chunk: a job started by `video_open` is nobody's return value, so
     // without this the page sees chunks carrying an id it has never been told about and cannot say
@@ -454,9 +505,14 @@ fn start_job(app: &AppHandle, media: PathBuf, ff_index: u32) -> Result<u64, Audi
             job_id,
             cancel: cancel.clone(),
         };
-        run_job(&ffmpeg, job_id, &request, &cancel, &|event| {
-            emit_event(&handle, event, &peaked);
-        });
+        run_job(
+            &ffmpeg,
+            job_id,
+            &request,
+            &cancel,
+            &|event| emit_event(&handle, event, &peaked),
+            cache.as_ref(),
+        );
         slot.release();
     });
     Ok(job_id)
