@@ -18,6 +18,7 @@ import { useCueSelection } from "./hooks/useCueSelection";
 import { LayerContext, useLayerRegistry } from "./hooks/useLayers";
 import { useAudioTracks } from "./hooks/useAudioTracks";
 import { useLayout } from "./hooks/useLayout";
+import { usePreview } from "./hooks/usePreview";
 import { useProject } from "./hooks/useProject";
 import { useStartupFiles } from "./hooks/useStartupFiles";
 import { useSubtitleFile } from "./hooks/useSubtitleFile";
@@ -89,6 +90,7 @@ export default function App() {
   );
   const audio = useAudioTracks(state.path, state.status === "ready");
   const subtitle = useSubtitleFile();
+  const preview = usePreview();
   const project = useProject();
   // A finished transcription becomes the open document, and the backend asks about unsaved work on
   // the way there. See BACKLOG.md M3.5.
@@ -282,6 +284,15 @@ export default function App() {
       enabled: true,
       run: () => setAboutOpen(true),
     },
+    subtitlePreview: {
+      id: "subtitle-preview",
+      label: en.menu.view.subtitles,
+      checked: preview.shown,
+      // Enabled with no video and no document too, for the reason the waveform's toggle is: a
+      // command that disappears when there is nothing to show reads as a command that is gone.
+      enabled: true,
+      run: () => preview.toggle(),
+    },
     waveformPanel: {
       id: "waveform-panel",
       label: en.menu.view.waveform,
@@ -316,7 +327,11 @@ export default function App() {
       title: en.menu.edit.title,
       items: [commands.undo, commands.redo, commands.transcribe],
     },
-    { id: "view", title: en.menu.view.title, items: [commands.waveformPanel] },
+    {
+      id: "view",
+      title: en.menu.view.title,
+      items: [commands.subtitlePreview, commands.waveformPanel],
+    },
     // Decision 24 A2: no title without something behind it, so this one is absent for a media with
     // no audio and for no media at all.
     ...(audio.tracks.length > 0
@@ -474,6 +489,7 @@ export default function App() {
           projectError={project.error}
           chromeError={quitError}
           waveformFailed={peaks.error !== null}
+          previewFailed={preview.failed}
         />
         {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       </div>

@@ -25,6 +25,8 @@ type StatusBarProps = {
   chromeError: string | null;
   /** Set when a peak job failed for a reason the user can act on. A cancel is never one. See W5. */
   waveformFailed: boolean;
+  /** Set while the open document could not be put on the video frame (decision 7). */
+  previewFailed: boolean;
 };
 
 /**
@@ -44,6 +46,7 @@ export default function StatusBar({
   projectError,
   chromeError,
   waveformFailed,
+  previewFailed,
 }: StatusBarProps) {
   const detail = subtitleError === null ? null : subtitleErrorDetail(subtitleError);
 
@@ -79,6 +82,11 @@ export default function StatusBar({
         {waveformFailed && (
           <p className="statusbar__waveform-error" role="alert">
             {en.waveform.failed}
+          </p>
+        )}
+        {previewFailed && (
+          <p className="statusbar__preview-error" role="alert">
+            {en.preview.failed}
           </p>
         )}
         {subtitleError !== null && (

@@ -25,6 +25,7 @@ export const en = {
     view: {
       title: "View",
       waveform: "Waveform",
+      subtitles: "Subtitles on video",
     },
     audio: {
       title: "Audio",
@@ -160,6 +161,16 @@ export const en = {
     label: "Waveform",
     /** Shown in the status bar when a peak job fails. The detail is technical and stays in the log. */
     failed: "The waveform could not be read for this file. The video is unaffected.",
+  },
+
+  preview: {
+    /**
+     * Shown in the status bar when the open document could not be put on the video frame. It says
+     * what is safe as well as what failed: a preview never writes the user's file, so nothing of
+     * theirs is at stake here.
+     */
+    failed:
+      "The subtitles could not be shown on the video. Your subtitle file and video are unchanged.",
   },
 
   subtitle: {

@@ -31,10 +31,15 @@ const TEXT_TYPES = ["text", "search", "url", "email", "tel", "password", "number
 
 /**
  * Every box a person types into. The rail's question is open only while it is asked; the current
- * line's box is in the tools column whenever a document is (T5). Neither holds a path, which is
- * what the assertion below is about.
+ * line's text box and its two time fields are in the tools column whenever a document is (T5,
+ * M2.7 E1). None of them holds a path, which is what the assertion below is about.
  */
-const ALLOWED_TEXT_FIELDS = ["currentline__text", "raildialog__field"];
+const ALLOWED_TEXT_FIELDS = [
+  "currentline__text",
+  "currentline__time currentline__end",
+  "currentline__time currentline__start",
+  "raildialog__field",
+];
 
 /** The title the episode added below carries, so the rail has a row to raise a file chooser from. */
 const EPISODE_TITLE = "Episode 1";

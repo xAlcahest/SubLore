@@ -201,6 +201,12 @@ pub async fn video_open(
     .await
     .map_err(|error| VideoError::player_unavailable(format!("open task failed: {error}")))?;
 
+    // mpv drops every external subtitle track when it loads a file, so the open document goes back
+    // on the frame here. Which of the two the user opened first is not special (decision 7).
+    if opened.is_ok() {
+        crate::preview::refresh(&app).await;
+    }
+
     if opened.is_err() {
         // A failed compensation leaves the surface shown over a video that never loaded, so it is
         // said rather than dropped.

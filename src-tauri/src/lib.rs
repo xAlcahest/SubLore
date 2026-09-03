@@ -7,6 +7,7 @@ pub mod chooser;
 pub mod crash;
 pub mod dialog;
 pub mod layout;
+pub mod preview;
 pub mod project;
 pub mod strings;
 pub mod subtitle;
@@ -133,6 +134,7 @@ pub fn run() -> tauri::Result<()> {
             chooser::choose_path,
             layout::layout_read,
             layout::layout_write,
+            preview::preview_set_shown,
             project::project_add_episode,
             project::project_attach_file,
             project::project_close,
@@ -195,6 +197,9 @@ pub fn run() -> tauri::Result<()> {
                 log::error!("video setup failed: {error}");
                 return Err(error.into());
             }
+            // After the player, whose mpv core it draws the open document into (decision 7).
+            let player = app.state::<video::VideoState>().player();
+            app.manage(preview::PreviewState::new(app.handle(), player));
             Ok(())
         })
         .build(tauri::generate_context!())?;
