@@ -26,6 +26,7 @@ use crate::video::player::{AudioTrack, Player};
 use crate::video::VideoState;
 use error::{AudioError, AudioErrorCode};
 
+const EVENT_STARTED: &str = "audio://started";
 const EVENT_PEAKS: &str = "audio://peaks";
 const EVENT_DONE: &str = "audio://done";
 const EVENT_ERROR: &str = "audio://error";
@@ -319,10 +320,10 @@ pub async fn audio_peaks_cancel(
 ///
 /// Failures are logged rather than returned: the open succeeded, and the user has a video. The
 /// failures a translator can act on come from the job itself, as `audio://error`.
-pub fn start_for_playing_track(app: &AppHandle, player: &Player) {
-    let Some(media) = player.loaded_path() else {
-        return;
-    };
+pub fn start_for_playing_track(app: &AppHandle, player: &Player, media: &str) {
+    // The path comes from the caller, which has just opened it, rather than from mpv. Asking mpv
+    // gave None on a slow runner right after a successful open, and that branch returned in
+    // silence, so the waveform simply never happened and no line said why. See W5.
     let tracks = match player.audio_tracks() {
         Ok(tracks) => tracks,
         Err(error) => {
@@ -357,6 +358,10 @@ fn start_job(app: &AppHandle, media: PathBuf, ff_index: u32) -> Result<u64, Audi
         ff_index,
     };
     let job_id = state.begin(target, cancel.clone())?;
+    // Announced before the first chunk: a job started by `video_open` is nobody's return value, so
+    // without this the page sees chunks carrying an id it has never been told about and cannot say
+    // which job is the current one. See W5.
+    let _ = app.emit(EVENT_STARTED, AudioJobStarted { job_id });
 
     let ffmpeg = ffmpeg_binary();
     let request = PeakRequest::new(media, ff_index);
