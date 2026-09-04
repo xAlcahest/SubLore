@@ -446,14 +446,14 @@ Today the `check` job builds on ubuntu and windows (`.github/workflows/ci.yml:18
 - [ ] **MW.3 Owner checklist on Windows.** Every owner checklist in this file, run by the owner on a Windows machine from an installed build.
   - AC: the owner signs off. Until then no build ships to anyone.
 
-**This milestone gates release.** v1.0 is not tagged and nothing is sold while it is open, however complete the rest of the plan is.
+**This milestone gated release until 2026-09-04, when the owner ruled that v1.0 ships on Linux alone.** It still gates a Windows build: nothing is sold or handed to anyone as a Windows product while it is open. The Linux tag no longer waits for it. See the platform policy in CONTRIBUTING.md.
 
 ## M6 — Translation memory + licensing + release
 
 Goal: exact and fuzzy TM across the whole project; offline license check; pay-once purchase flow via merchant of record; v1.0 tag.
 Draft criteria: repeated lines in later episodes surface their earlier translation; fuzzy matches ranked and insertable; license file validates offline, invalid license degrades gently to free core; both installers pass the full owner checklist end to end.
 
-**Prerequisite:** MW is closed. The v1.0 tag cannot precede Windows activation.
+**Prerequisite:** none on MW since the 2026-09-04 ruling. The v1.0 Linux tag no longer waits for Windows activation; a Windows build still does.
 
 ---
 
