@@ -19,17 +19,23 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Mutex;
 use std::thread::ThreadId;
 
+use sublore_edit::history::Run;
+use sublore_edit::plan::Edit;
 use sublore_edit::session::EditSession;
 use sublore_formats::SubtitleFormat;
 use sublore_module_api::{
-    SubloreCue, SubloreDocument, SubloreHitFn, SubloreHost, SubloreStr, SUBLORE_ABI_MINOR,
-    SUBLORE_ERR_BAD_STRING, SUBLORE_ERR_NOTHING_OPEN, SUBLORE_ERR_NO_SUCH_CUE, SUBLORE_ERR_PANIC,
-    SUBLORE_ERR_UNSUPPORTED, SUBLORE_ERR_WRONG_THREAD, SUBLORE_FIND_OPTIONS, SUBLORE_FORMAT_ASS,
-    SUBLORE_FORMAT_SRT, SUBLORE_FORMAT_VTT, SUBLORE_HOST_SIZE, SUBLORE_LOG_DEBUG,
-    SUBLORE_LOG_ERROR, SUBLORE_LOG_INFO, SUBLORE_LOG_WARN, SUBLORE_OK,
+    SubloreCue, SubloreDocument, SubloreHitFn, SubloreHost, SubloreProposal, SubloreStr,
+    SUBLORE_ABI_MINOR, SUBLORE_ERR_BAD_STRING, SUBLORE_ERR_DENIED, SUBLORE_ERR_NOTHING_OPEN,
+    SUBLORE_ERR_NO_SUCH_CUE, SUBLORE_ERR_PANIC, SUBLORE_ERR_STALE_REVISION,
+    SUBLORE_ERR_UNSUPPORTED, SUBLORE_ERR_UNWRITABLE_TEXT, SUBLORE_ERR_WRONG_THREAD,
+    SUBLORE_FIND_OPTIONS, SUBLORE_FORMAT_ASS, SUBLORE_FORMAT_SRT, SUBLORE_FORMAT_VTT,
+    SUBLORE_HOST_SIZE, SUBLORE_LOG_DEBUG, SUBLORE_LOG_ERROR, SUBLORE_LOG_INFO, SUBLORE_LOG_WARN,
+    SUBLORE_OK, SUBLORE_PROPOSAL_SET_CUE_TEXT,
 };
 
 use crate::log;
+use crate::subtitle::error::{SubtitleError, SubtitleErrorCode};
+use crate::subtitle::{check_revision, describe, guard_size, CuePatchDto};
 
 /// The longest module log line this build writes.
 ///
@@ -56,6 +62,12 @@ struct InFlight {
     /// The pointer is valid for exactly as long as this record is armed, which [`Entered`] ties to
     /// the borrow it was made from.
     session: Option<*mut Option<EditSession>>,
+    /// What the module changed during this call, in the order it changed it.
+    ///
+    /// A module proposes one cue at a time and may propose more than once, and each one is an edit
+    /// the window has to be told about. They are collected here rather than returned, because
+    /// `propose` answers a code and the interface has no way back for a value (§2.2).
+    proposed: Vec<CuePatchDto>,
 }
 
 /// The host's own context: the value behind `SubloreHost::ctx`, handed to every module once and
@@ -97,6 +109,7 @@ impl HostCtx {
             thread: std::thread::current().id(),
             name: name.to_owned(),
             session: session.map(|held| held as *mut Option<EditSession>),
+            proposed: Vec::new(),
         });
         Entered {
             ctx: self,
@@ -132,6 +145,11 @@ impl HostCtx {
                 .flatten()
         })
         .flatten()
+    }
+
+    /// Change the record, holding the lock for the change and nothing else.
+    fn record<R>(&self, write: impl FnOnce(&mut InFlight) -> R) -> Option<R> {
+        self.call.lock().ok()?.as_mut().map(write)
     }
 
     /// Read the record, holding the lock for the read and nothing else.
@@ -170,6 +188,16 @@ pub struct Entered<'a> {
     borrowed: PhantomData<&'a mut Option<EditSession>>,
 }
 
+impl Entered<'_> {
+    /// What the module changed during this call. Taken before the guard goes, because the record it
+    /// reads is what the guard clears.
+    pub fn proposed(&self) -> Vec<CuePatchDto> {
+        self.ctx
+            .record(|call| std::mem::take(&mut call.proposed))
+            .unwrap_or_default()
+    }
+}
+
 impl Drop for Entered<'_> {
     fn drop(&mut self) {
         // Recovered on the same terms as `enter`, so a poisoned lock cannot leave a record behind
@@ -199,7 +227,7 @@ pub fn table(ctx: &HostCtx) -> SubloreHost {
         document: Some(host_document),
         cue_at: Some(host_cue_at),
         for_each_line: None,
-        propose: None,
+        propose: Some(host_propose),
         find: Some(host_find),
         db_run: None,
         db_transaction: None,
@@ -390,6 +418,117 @@ unsafe extern "C" fn host_cue_at(host: *mut c_void, index: u64, out: *mut Sublor
             number: cue.number.unwrap_or(0),
         };
         unsafe { out.write(answer) };
+        SUBLORE_OK
+    })
+}
+
+/// What a refused edit is, on the interface's own closed list.
+///
+/// Written as a total match so a new `SubtitleErrorCode` is a compile error here rather than a
+/// silent `DENIED`. The five that map to something specific are the five a module can act on; every
+/// other refusal is the host's guard saying no, which is what `DENIED` means, and the detail is in
+/// the log rather than in the code.
+fn refusal_of(error: &SubtitleError) -> i32 {
+    match error.code {
+        SubtitleErrorCode::InvalidCue => SUBLORE_ERR_NO_SUCH_CUE,
+        SubtitleErrorCode::UnwritableText => SUBLORE_ERR_UNWRITABLE_TEXT,
+        SubtitleErrorCode::StaleRevision => SUBLORE_ERR_STALE_REVISION,
+        SubtitleErrorCode::NoDocument => SUBLORE_ERR_NOTHING_OPEN,
+        SubtitleErrorCode::UnsupportedEncoding => SUBLORE_ERR_BAD_STRING,
+        SubtitleErrorCode::InvalidPath
+        | SubtitleErrorCode::NotAFile
+        | SubtitleErrorCode::TooLarge
+        | SubtitleErrorCode::ReadFailed
+        | SubtitleErrorCode::UnknownFormat
+        | SubtitleErrorCode::ParseFailed
+        | SubtitleErrorCode::WriteFailed
+        | SubtitleErrorCode::BackupFailed
+        | SubtitleErrorCode::PermissionDenied
+        | SubtitleErrorCode::EditRefused
+        | SubtitleErrorCode::UnsavedChanges
+        | SubtitleErrorCode::NoPath
+        | SubtitleErrorCode::TranscriptionGone
+        | SubtitleErrorCode::CommandFailed => SUBLORE_ERR_DENIED,
+    }
+}
+
+/// The module proposes and the host edits (§4.5).
+///
+/// Nothing here is a new mutation path. The revision check, the size guard and `EditSession::apply`
+/// are the three the interactive commands run, in that order, so everything under them holds
+/// without a line written for it: the plan, the splice refusing unless the bytes it recorded are
+/// the bytes that are there, the coverage guard, the verify, and the undo entry.
+///
+/// **There is no save on this boundary and there will not be one.** The document goes dirty and the
+/// user saves.
+///
+/// # Safety
+/// `host` is the context pointer and `proposal` points at one `SubloreProposal` valid for this call.
+unsafe extern "C" fn host_propose(host: *mut c_void, proposal: *const SubloreProposal) -> i32 {
+    guarded(|| {
+        let Some(ctx) = (unsafe { ctx_of(host) }) else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        if proposal.is_null() {
+            return SUBLORE_ERR_BAD_STRING;
+        }
+        let Some(name) = ctx.name() else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let proposal = unsafe { &*proposal };
+        // One defined kind, and every other value refused. That is what keeps the field from
+        // freezing into a wall when the core grows a second thing to address (§4.5).
+        if proposal.kind != SUBLORE_PROPOSAL_SET_CUE_TEXT {
+            return SUBLORE_ERR_UNSUPPORTED;
+        }
+        let Ok(text) = (unsafe { proposal.text.as_str() }) else {
+            return SUBLORE_ERR_BAD_STRING;
+        };
+        let Ok(cue) = usize::try_from(proposal.cue) else {
+            return SUBLORE_ERR_NO_SUCH_CUE;
+        };
+
+        let Some(held) = ctx.session() else {
+            return SUBLORE_ERR_NOTHING_OPEN;
+        };
+        // Safety: armed for this call on this thread, so the host holds the lock for the whole of
+        // it. The mutable reference is made here, used here, and not kept.
+        let Some(session) = (unsafe { &mut *held }).as_mut() else {
+            return SUBLORE_ERR_NOTHING_OPEN;
+        };
+
+        let edit = Edit::SetText {
+            cue,
+            text: text.to_owned(),
+        };
+        if let Err(error) =
+            check_revision(session, proposal.revision).and_then(|()| guard_size(session, &edit))
+        {
+            log::warn!(
+                "modules: {name} proposed an edit that was refused: {}",
+                error.detail
+            );
+            return refusal_of(&error);
+        }
+        let patch = match session.apply(&edit, Run::New, std::time::Instant::now()) {
+            Ok(patch) => patch,
+            Err(error) => {
+                let refused = SubtitleError::from_edit(error);
+                log::warn!(
+                    "modules: {name} proposed an edit that would not apply: {}",
+                    refused.detail
+                );
+                return refusal_of(&refused);
+            }
+        };
+        log::info!(
+            "modules: {name} changed cue {cue}, revision {} now",
+            session.revision()
+        );
+        let told = describe(session, patch);
+        // Collected rather than answered: `propose` returns a code, and the window is told by the
+        // call that carried the module into this one.
+        ctx.record(|call| call.proposed.push(told));
         SUBLORE_OK
     })
 }
@@ -844,6 +983,203 @@ mod tests {
             elsewhere,
             (SUBLORE_ERR_WRONG_THREAD, SUBLORE_ERR_WRONG_THREAD)
         );
+    }
+
+    fn propose(ctx: &HostCtx, revision: u64, cue: u64, text: &str) -> i32 {
+        let asked = SubloreProposal {
+            kind: SUBLORE_PROPOSAL_SET_CUE_TEXT,
+            revision,
+            cue,
+            text: SubloreStr::borrowed(text),
+        };
+        unsafe { host_propose(pointer(ctx), &asked) }
+    }
+
+    /// The text of a cue, read the way a module reads it.
+    ///
+    /// Through the host and not out of the session, because `Entered` holds the session's mutable
+    /// borrow for its own lifetime: nothing can look behind the gate while a call is armed, a check
+    /// included. That is the invariant working rather than an inconvenience, and reading through
+    /// `cue_at` is what a module would see anyway.
+    fn text_of(ctx: &HostCtx, index: u64) -> String {
+        let (code, cue) = cue_of(ctx, index);
+        assert_eq!(code, SUBLORE_OK);
+        unsafe { cue.text.as_str() }
+            .expect("the text should be valid")
+            .to_owned()
+    }
+
+    fn revision_of(ctx: &HostCtx) -> u64 {
+        let (code, document) = document_of(ctx);
+        assert_eq!(code, SUBLORE_OK);
+        document.revision
+    }
+
+    fn dirty(ctx: &HostCtx) -> bool {
+        let (code, document) = document_of(ctx);
+        assert_eq!(code, SUBLORE_OK);
+        document.dirty == 1
+    }
+
+    #[test]
+    fn a_proposal_changes_the_cue_and_the_window_is_handed_the_patch() {
+        let ctx = HostCtx::new();
+        let mut session = opened();
+        let entered = ctx.enter(NAME, Some(&mut session));
+
+        let before = revision_of(&ctx);
+        assert!(!dirty(&ctx));
+        assert_eq!(
+            propose(&ctx, before, 0, "The fog had eaten nothing."),
+            SUBLORE_OK
+        );
+
+        assert_eq!(text_of(&ctx, 0), "The fog had eaten nothing.");
+        assert!(dirty(&ctx));
+        assert_ne!(
+            revision_of(&ctx),
+            before,
+            "the revision moved with the edit"
+        );
+
+        // One patch, naming the row that changed, so the grid splices exactly that row.
+        let patches = entered.proposed();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].from, 0);
+        assert_eq!(patches[0].revision, revision_of(&ctx));
+        assert!(
+            patches[0].can_undo,
+            "it went through the history like any other edit"
+        );
+        // And taken means taken: a second call collects only what it changed itself.
+        assert!(entered.proposed().is_empty());
+    }
+
+    #[test]
+    fn one_undo_puts_a_proposed_edit_back() {
+        let ctx = HostCtx::new();
+        let mut session = opened();
+        let was = {
+            let entered = ctx.enter(NAME, Some(&mut session));
+            let was = text_of(&ctx, 0);
+            let revision = revision_of(&ctx);
+            assert_eq!(
+                propose(&ctx, revision, 0, "Something else entirely."),
+                SUBLORE_OK
+            );
+            assert_eq!(entered.proposed().len(), 1);
+            was
+        };
+        // The guard is gone, so the session can be reached directly again, which is what the app
+        // does between module calls.
+        let session = session.as_mut().expect("the document is open");
+        session
+            .undo()
+            .expect("one undo")
+            .expect("something to undo");
+        assert_eq!(session.views()[0].text, was);
+        assert!(!session.dirty(), "and the document is clean again");
+    }
+
+    #[test]
+    fn a_stale_revision_changes_nothing_and_is_said_rather_than_applied() {
+        let ctx = HostCtx::new();
+        let mut session = opened();
+        let _entered = ctx.enter(NAME, Some(&mut session));
+        let was = text_of(&ctx, 0);
+
+        let behind = revision_of(&ctx).wrapping_sub(1);
+        assert_eq!(
+            propose(&ctx, behind, 0, "read from a list that has moved"),
+            SUBLORE_ERR_STALE_REVISION
+        );
+        assert_eq!(text_of(&ctx, 0), was);
+        assert!(!dirty(&ctx));
+    }
+
+    #[test]
+    fn a_kind_this_build_has_no_meaning_for_is_refused_and_changes_nothing() {
+        let ctx = HostCtx::new();
+        let mut session = opened();
+        let _entered = ctx.enter(NAME, Some(&mut session));
+        let was = text_of(&ctx, 0);
+
+        // The next value up. Section 4.5 keeps this field open for a segment the core cannot
+        // address yet, and every value but the one is refused until it can.
+        let asked = SubloreProposal {
+            kind: SUBLORE_PROPOSAL_SET_CUE_TEXT + 1,
+            revision: revision_of(&ctx),
+            cue: 0,
+            text: SubloreStr::borrowed("never applied"),
+        };
+        assert_eq!(
+            unsafe { host_propose(pointer(&ctx), &asked) },
+            SUBLORE_ERR_UNSUPPORTED
+        );
+        assert_eq!(text_of(&ctx, 0), was);
+        assert!(!dirty(&ctx));
+    }
+
+    #[test]
+    fn a_cue_past_the_end_is_refused_rather_than_appended() {
+        let ctx = HostCtx::new();
+        let mut session = opened();
+        let _entered = ctx.enter(NAME, Some(&mut session));
+        let revision = revision_of(&ctx);
+        assert_eq!(
+            propose(&ctx, revision, 3, "nowhere"),
+            SUBLORE_ERR_NO_SUCH_CUE
+        );
+        assert_eq!(
+            propose(&ctx, revision, u64::MAX, "nowhere"),
+            SUBLORE_ERR_NO_SUCH_CUE
+        );
+        assert!(!dirty(&ctx));
+    }
+
+    #[test]
+    fn text_this_format_cannot_write_is_refused_by_the_guard_the_commands_run() {
+        let ctx = HostCtx::new();
+        let mut session = opened();
+        let _entered = ctx.enter(NAME, Some(&mut session));
+        // An ASS event is one line in the file, so a line break inside its text has nowhere to go.
+        // The refusal is the planner's own, reached through the same guard `apply_edit` runs.
+        let revision = revision_of(&ctx);
+        assert_eq!(
+            propose(&ctx, revision, 0, "one line\nand a second"),
+            SUBLORE_ERR_UNWRITABLE_TEXT
+        );
+        assert!(!dirty(&ctx));
+    }
+
+    #[test]
+    fn a_proposal_with_no_document_and_one_with_no_proposal_are_both_refused() {
+        let ctx = HostCtx::new();
+        let mut none: Option<EditSession> = None;
+        let _entered = ctx.enter(NAME, Some(&mut none));
+        assert_eq!(
+            propose(&ctx, 0, 0, "nothing to change"),
+            SUBLORE_ERR_NOTHING_OPEN
+        );
+        assert_eq!(
+            unsafe { host_propose(pointer(&ctx), std::ptr::null()) },
+            SUBLORE_ERR_BAD_STRING
+        );
+    }
+
+    #[test]
+    fn a_proposal_from_another_thread_never_reaches_the_document() {
+        let ctx = HostCtx::new();
+        let mut session = opened();
+        let _entered = ctx.enter(NAME, Some(&mut session));
+        let elsewhere = std::thread::scope(|scope| {
+            scope
+                .spawn(|| propose(&ctx, 0, 0, "from a thread of its own"))
+                .join()
+                .expect("the other thread must return rather than block")
+        });
+        assert_eq!(elsewhere, SUBLORE_ERR_WRONG_THREAD);
+        assert!(!dirty(&ctx));
     }
 
     #[test]

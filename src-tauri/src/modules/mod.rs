@@ -17,15 +17,16 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 use sublore_module_api::{
-    SubloreHost, SubloreItem, SubloreStr, SUBLORE_ENABLE_ALWAYS, SUBLORE_ENABLE_DOCUMENT_OPEN,
-    SUBLORE_ENABLE_PROJECT_OPEN, SUBLORE_ENABLE_SELECTION_NON_EMPTY, SUBLORE_ITEM_FLAG_LAYER,
-    SUBLORE_ITEM_MENU_ITEM, SUBLORE_ITEM_MENU_TITLE, SUBLORE_ITEM_PANEL, SUBLORE_ITEM_SEPARATOR,
-    SUBLORE_ITEM_TOOLBAR_BUTTON, SUBLORE_OK,
+    SubloreHost, SubloreInvocation, SubloreItem, SubloreStr, SUBLORE_ENABLE_ALWAYS,
+    SUBLORE_ENABLE_DOCUMENT_OPEN, SUBLORE_ENABLE_PROJECT_OPEN, SUBLORE_ENABLE_SELECTION_NON_EMPTY,
+    SUBLORE_ERR_UNSUPPORTED, SUBLORE_ITEM_FLAG_LAYER, SUBLORE_ITEM_MENU_ITEM,
+    SUBLORE_ITEM_MENU_TITLE, SUBLORE_ITEM_PANEL, SUBLORE_ITEM_SEPARATOR,
+    SUBLORE_ITEM_TOOLBAR_BUTTON, SUBLORE_NO_CUE, SUBLORE_OK,
 };
 use sublore_module_host::{scan, Loaded, Refusal};
 
 use crate::log;
-use crate::subtitle::SessionSlot;
+use crate::subtitle::{CuePatchDto, SessionSlot};
 use host::HostCtx;
 
 /// Why a file that looked like a module was not used, as the frontend receives it.
@@ -124,6 +125,21 @@ pub struct ContributionDto {
     pub layer: bool,
     /// Already rendered in the locale the module was given.
     pub label: String,
+}
+
+/// What one activation did, as the window receives it.
+///
+/// The two halves are independent on purpose. A module that changed three cues and then answered a
+/// refusal changed three cues, and the window has to be told about them or the grid draws a
+/// document that is not the one the session holds.
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvokeOutcome {
+    /// What the module answered. Zero is success and every other value is its own refusal, which
+    /// the core logs and does not translate: it does not know what the module was doing.
+    pub code: i32,
+    /// The edits it made before it answered, in the order it made them.
+    pub patches: Vec<CuePatchDto>,
 }
 
 /// The kinds a contribution may be, as an allowlist. Anything else costs that item, which is the
@@ -372,6 +388,65 @@ impl ModuleState {
         }
     }
 
+    /// Carry a user's activation of a contributed item into the module that contributed it.
+    ///
+    /// The session is locked here and lent to the gate for the whole call, which is what makes a
+    /// borrowed cue safe to read and what lets `propose` edit (§2.5). Nothing about the item is
+    /// interpreted: the core hands back the id the module gave it and the state the gesture
+    /// carried, and learns nothing about what happens next.
+    pub fn invoke(
+        &self,
+        module: usize,
+        item: u32,
+        at: &SubloreInvocation,
+        session: &SessionSlot,
+    ) -> InvokeOutcome {
+        let Ok(mut held) = self.held.lock() else {
+            log::error!("modules: the module lock is poisoned, so nothing can be activated");
+            return InvokeOutcome {
+                code: SUBLORE_ERR_UNSUPPORTED,
+                patches: Vec::new(),
+            };
+        };
+        let held = &mut *held;
+        let Some(running) = held.modules.get_mut(module) else {
+            // The window asked for a module that is not there, which is a core defect rather than
+            // a module one: the list it drew from is the list this holds.
+            log::error!("modules: item {item} named module {module}, which is not loaded");
+            return InvokeOutcome {
+                code: SUBLORE_ERR_UNSUPPORTED,
+                patches: Vec::new(),
+            };
+        };
+        let name = file_name(running.module.path());
+        let (Some(invoke), false) = (running.module.table().invoke, running.ctx.is_null()) else {
+            log::warn!("modules: {name} has no way to be activated, so item {item} does nothing");
+            return InvokeOutcome {
+                code: SUBLORE_ERR_UNSUPPORTED,
+                patches: Vec::new(),
+            };
+        };
+
+        let mut session = match session.lock() {
+            Ok(held) => Some(held),
+            Err(_) => {
+                log::warn!("modules: the session lock is poisoned, so {name} is lent none");
+                None
+            }
+        };
+        let entered = held.ctx.enter(&name, session.as_deref_mut());
+        // Safety: the module's own function, given the instance its `create` wrote and a record
+        // valid for the call, with the session locked for the whole of it.
+        let code = unsafe { invoke(running.ctx, item, at) };
+        let patches = entered.proposed();
+        drop(entered);
+
+        if code != SUBLORE_OK {
+            log::warn!("modules: {name} refused item {item}, reporting {code}");
+        }
+        InvokeOutcome { code, patches }
+    }
+
     fn contributions(&self) -> Vec<ContributionDto> {
         self.contributions
             .lock()
@@ -483,4 +558,41 @@ pub fn module_report(state: tauri::State<'_, ModuleState>) -> ModuleReport {
 #[tauri::command]
 pub fn module_contributions(state: tauri::State<'_, ModuleState>) -> Vec<ContributionDto> {
     state.inner().contributions()
+}
+
+/// A contributed item was activated. Everything about which item is the module's own (§5.3).
+///
+/// On the blocking pool rather than the async runtime's poll thread, because a module's own work
+/// can be long and CONTRIBUTING.md §7 keeps the window responsive while it runs.
+#[tauri::command]
+pub async fn module_invoke(
+    app: tauri::AppHandle,
+    module: usize,
+    item: u32,
+    revision: u64,
+    cue: Option<u64>,
+    row: u64,
+    panel_id: u32,
+    project_key: i64,
+) -> InvokeOutcome {
+    let at = SubloreInvocation {
+        revision,
+        // A selection the module can act on, or the sentinel that says there is none.
+        cue: cue.unwrap_or(SUBLORE_NO_CUE),
+        // Zero unless a panel row carried it, which is the rule §4.1 gives for reading it at all.
+        row: if panel_id == 0 { 0 } else { row },
+        panel_id,
+        project_key,
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        let session = app.state::<crate::subtitle::SubtitleState>().slot();
+        app.state::<ModuleState>()
+            .invoke(module, item, &at, &session)
+    })
+    .await
+    .unwrap_or_else(|error| {
+        log::error!("modules: the activation task failed: {error}");
+        InvokeOutcome::default()
+    })
 }

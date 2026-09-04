@@ -225,6 +225,7 @@ pub fn run() -> tauri::Result<()> {
             video::video_set_region,
             video::video_set_layers,
             modules::module_contributions,
+            modules::module_invoke,
             modules::module_report,
             startup_files_command,
             quit

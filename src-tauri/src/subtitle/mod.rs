@@ -908,7 +908,7 @@ fn current<'a>(
 
 /// The caller's cue indices describe the list at its revision. If the session has moved on, the
 /// safe answer is a refusal and a refetch, never an edit at a guessed index.
-fn check_revision(session: &EditSession, revision: u64) -> Result<(), SubtitleError> {
+pub(crate) fn check_revision(session: &EditSession, revision: u64) -> Result<(), SubtitleError> {
     if session.revision() == revision {
         return Ok(());
     }
@@ -923,7 +923,7 @@ fn check_revision(session: &EditSession, revision: u64) -> Result<(), SubtitleEr
 
 /// An edit that would grow the file past what Sublore re-opens is refused before it is applied:
 /// a document that cannot be opened again must not be creatable.
-fn guard_size(session: &EditSession, edit: &Edit) -> Result<(), SubtitleError> {
+pub(crate) fn guard_size(session: &EditSession, edit: &Edit) -> Result<(), SubtitleError> {
     let planned = plan::plan(session.document(), edit).map_err(SubtitleError::from_edit)?;
     let grown = session
         .document()
@@ -961,7 +961,7 @@ fn opened_payload(session: &EditSession, summary: SubtitleSummary) -> SubtitleOp
     }
 }
 
-fn describe(session: &EditSession, patch: CuePatch) -> CuePatchDto {
+pub(crate) fn describe(session: &EditSession, patch: CuePatch) -> CuePatchDto {
     CuePatchDto {
         revision: session.revision(),
         from: patch.from,
