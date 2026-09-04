@@ -407,6 +407,28 @@ pub struct SubloreModule {
     >,
 }
 
+impl SubloreModule {
+    /// A table with every slot empty, for the host to hand to `sublore_module_load`.
+    ///
+    /// The host allocates both tables, so the module never allocates one the host would have to
+    /// free. `size` carries the host's own `sizeof` before the call, as section 3.3 requires, and
+    /// the module overwrites it with its own for the host to check afterwards.
+    pub const fn empty() -> Self {
+        Self {
+            size: SUBLORE_MODULE_SIZE,
+            minor: 0,
+            create: None,
+            destroy: None,
+            describe: None,
+            project_opened: None,
+            project_closing: None,
+            schema_version: None,
+            schema_upgrade: None,
+            invoke: None,
+        }
+    }
+}
+
 /// What a module may ask the host for. The host fills it and lends it for the life of the module.
 #[repr(C)]
 pub struct SubloreHost {

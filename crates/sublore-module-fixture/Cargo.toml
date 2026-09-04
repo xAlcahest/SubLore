@@ -1,0 +1,44 @@
+[package]
+name = "sublore-module-fixture"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Five artifacts, all of them examples: that is the one target shape `cargo test --workspace`
+# rebuilds. The lib below is a plain rlib holding the good module's logic, which the example beside
+# it exports.
+
+[[example]]
+name = "sublore_module_fixture"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sublore_module_wrong_major"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sublore_module_wrong_minor"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sublore_module_lying_minor"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sublore_module_lying_table_minor"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sublore_module_lying_table_size"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sublore_module_no_abi_symbol"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "sublore_module_load_fails"
+crate-type = ["cdylib"]
+
+[dependencies]
+sublore-module-api = { path = "../sublore-module-api" }

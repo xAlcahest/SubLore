@@ -3208,6 +3208,22 @@ name = "sublore-module-api"
 version = "0.1.0"
 
 [[package]]
+name = "sublore-module-fixture"
+version = "0.1.0"
+dependencies = [
+ "sublore-module-api",
+]
+
+[[package]]
+name = "sublore-module-host"
+version = "0.1.0"
+dependencies = [
+ "libloading",
+ "sublore-module-api",
+ "sublore-module-fixture",
+]
+
+[[package]]
 name = "sublore-project"
 version = "0.1.0"
 dependencies = [
