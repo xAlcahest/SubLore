@@ -56,7 +56,7 @@ pub type SubloreLoadFn =
     unsafe extern "C" fn(host: *const SubloreHost, out: *mut SubloreModule) -> i32;
 
 /// The value a writer stamps into `SubloreHost::size`: its own `sizeof`, checked by the reader.
-pub const SUBLORE_HOST_SIZE: u32 = 120;
+pub const SUBLORE_HOST_SIZE: u32 = 128;
 
 /// The value a writer stamps into `SubloreModule::size`.
 pub const SUBLORE_MODULE_SIZE: u32 = 72;
@@ -192,8 +192,14 @@ pub struct SubloreCue {
 pub const SUBLORE_ROLE_SOURCE: u32 = 1;
 pub const SUBLORE_ROLE_TARGET: u32 = 2;
 
-/// One line of one file of one episode, pushed by `for_each_line`. A file that is gone has no
-/// field here to be reported through; see BACKLOG.md N8a.
+/// Set in `SubloreLine::flags` for the one push that stands in for a file that is gone.
+pub const SUBLORE_LINE_FLAG_FILE_MISSING: u32 = 1;
+
+/// One line of one file of one episode, pushed by `for_each_line`.
+///
+/// A file that is gone arrives as exactly one push in the place its lines would have occupied,
+/// with `SUBLORE_LINE_FLAG_FILE_MISSING` set, `index` at `SUBLORE_NO_CUE` and a zeroed cue. A walk
+/// that aborted because episode fourteen was moved is a walk that fails for the whole series.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct SubloreLine {
@@ -201,7 +207,9 @@ pub struct SubloreLine {
     /// The episode's position in the series, 1-based.
     pub ordinal: u32,
     pub role: u32,
-    /// The cue's index within its own file.
+    /// Bit 0: this file is gone and the cue below is empty.
+    pub flags: u32,
+    /// The cue's index within its own file, `SUBLORE_NO_CUE` when the file is gone.
     pub index: u64,
     pub cue: SubloreCue,
 }
@@ -314,6 +322,9 @@ pub struct SubloreInvocation {
     pub revision: u64,
     /// The selected cue, or `SUBLORE_NO_CUE`.
     pub cue: u64,
+    /// The `SubloreCell::ref` of the activated panel row, and zero when `panel_id` is zero. A
+    /// module that reads it without looking at `panel_id` is reading a handle it was not given.
+    pub row: u64,
     pub panel_id: u32,
     pub project_key: i64,
 }
@@ -403,6 +414,8 @@ pub struct SubloreHost {
     pub size: u32,
     /// The minor version this table is filled to.
     pub minor: u32,
+    /// The host's own and opaque. This is the `host` argument every call below takes.
+    pub ctx: *mut c_void,
 
     pub log: Option<unsafe extern "C" fn(host: *mut c_void, level: u32, message: SubloreStr)>,
     /// Non-zero once the work should stop. A module that never asks cannot be interrupted.
@@ -466,10 +479,190 @@ pub struct SubloreHost {
     pub status: Option<unsafe extern "C" fn(host: *mut c_void, message: SubloreStr)>,
 }
 
+/// Every field of every table, named with the type it must keep.
+///
+/// Never called: the body is the pin. A field added, removed or renamed stops the destructuring
+/// compiling, and one whose type changes stops the binding under it compiling.
+///
+/// This exists because neither of the two pins in the tests can see a field widened into its own
+/// padding. Taking `SubloreLine::flags` from `u32` to `u64` leaves the size at sixty-four, the
+/// alignment at eight, and all six offsets exactly where they were, while a module compiled
+/// against the old header now writes four bytes where the host reads eight. Found by mutation on
+/// 2026-09-04, after the offset pin had been added and still let it through.
+#[allow(dead_code, clippy::too_many_arguments)]
+fn every_field_holds_its_type(
+    sublorestr: SubloreStr,
+    subloredocument: SubloreDocument,
+    sublorecue: SubloreCue,
+    subloreline: SubloreLine,
+    subloreproposal: SubloreProposal,
+    sublorevalue: SubloreValue,
+    subloreitem: SubloreItem,
+    sublorecell: SubloreCell,
+    subloreinvocation: SubloreInvocation,
+    subloremodule: SubloreModule,
+    sublorehost: SubloreHost,
+) {
+    let SubloreStr { ptr, len } = sublorestr;
+    let _: *const u8 = ptr;
+    let _: usize = len;
+    let SubloreDocument {
+        format,
+        cue_count,
+        revision,
+        dirty,
+        path,
+    } = subloredocument;
+    let _: u32 = format;
+    let _: u64 = cue_count;
+    let _: u64 = revision;
+    let _: u8 = dirty;
+    let _: SubloreStr = path;
+    let SubloreCue {
+        start_ms,
+        end_ms,
+        text,
+        is_comment,
+        has_number,
+        number,
+    } = sublorecue;
+    let _: u32 = start_ms;
+    let _: u32 = end_ms;
+    let _: SubloreStr = text;
+    let _: u8 = is_comment;
+    let _: u8 = has_number;
+    let _: u32 = number;
+    let SubloreLine {
+        episode_id,
+        ordinal,
+        role,
+        flags,
+        index,
+        cue,
+    } = subloreline;
+    let _: i64 = episode_id;
+    let _: u32 = ordinal;
+    let _: u32 = role;
+    let _: u32 = flags;
+    let _: u64 = index;
+    let _: SubloreCue = cue;
+    let SubloreProposal {
+        kind,
+        revision,
+        cue,
+        text,
+    } = subloreproposal;
+    let _: u32 = kind;
+    let _: u64 = revision;
+    let _: u64 = cue;
+    let _: SubloreStr = text;
+    let SubloreValue { kind, i, f, s } = sublorevalue;
+    let _: u32 = kind;
+    let _: i64 = i;
+    let _: f64 = f;
+    let _: SubloreStr = s;
+    let SubloreItem {
+        id,
+        kind,
+        parent,
+        enable_when,
+        flags,
+        label,
+        icon,
+    } = subloreitem;
+    let _: u32 = id;
+    let _: u32 = kind;
+    let _: u32 = parent;
+    let _: u32 = enable_when;
+    let _: u32 = flags;
+    let _: SubloreStr = label;
+    let _: SubloreStr = icon;
+    let SubloreCell {
+        kind,
+        text,
+        number,
+        r#ref,
+    } = sublorecell;
+    let _: u32 = kind;
+    let _: SubloreStr = text;
+    let _: i64 = number;
+    let _: u64 = r#ref;
+    let SubloreInvocation {
+        revision,
+        cue,
+        row,
+        panel_id,
+        project_key,
+    } = subloreinvocation;
+    let _: u64 = revision;
+    let _: u64 = cue;
+    let _: u64 = row;
+    let _: u32 = panel_id;
+    let _: i64 = project_key;
+    let SubloreModule {
+        size,
+        minor,
+        create,
+        destroy,
+        describe,
+        project_opened,
+        project_closing,
+        schema_version,
+        schema_upgrade,
+        invoke,
+    } = subloremodule;
+    let _ = size;
+    let _ = minor;
+    let _ = create;
+    let _ = destroy;
+    let _ = describe;
+    let _ = project_opened;
+    let _ = project_closing;
+    let _ = schema_version;
+    let _ = schema_upgrade;
+    let _ = invoke;
+    let SubloreHost {
+        size,
+        minor,
+        ctx,
+        log,
+        should_cancel,
+        progress,
+        document,
+        cue_at,
+        for_each_line,
+        propose,
+        find,
+        db_run,
+        db_transaction,
+        panel_begin,
+        panel_row,
+        panel_end,
+        status,
+    } = sublorehost;
+    let _ = size;
+    let _ = minor;
+    let _ = ctx;
+    let _ = log;
+    let _ = should_cancel;
+    let _ = progress;
+    let _ = document;
+    let _ = cue_at;
+    let _ = for_each_line;
+    let _ = propose;
+    let _ = find;
+    let _ = db_run;
+    let _ = db_transaction;
+    let _ = panel_begin;
+    let _ = panel_row;
+    let _ = panel_end;
+    let _ = status;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::mem::{align_of, size_of};
+    use core::mem::{align_of, offset_of, size_of};
 
     /// A C ABI drifts in silence: a field added, reordered or widened compiles on both sides and is
     /// misread at run time. These numbers are the layout, and moving one is a major bump.
@@ -482,14 +675,161 @@ mod tests {
         assert_eq!(layout::<SubloreStr>(), (16, 8), "SubloreStr");
         assert_eq!(layout::<SubloreDocument>(), (48, 8), "SubloreDocument");
         assert_eq!(layout::<SubloreCue>(), (32, 8), "SubloreCue");
-        assert_eq!(layout::<SubloreLine>(), (56, 8), "SubloreLine");
+        assert_eq!(layout::<SubloreLine>(), (64, 8), "SubloreLine");
         assert_eq!(layout::<SubloreProposal>(), (40, 8), "SubloreProposal");
         assert_eq!(layout::<SubloreValue>(), (40, 8), "SubloreValue");
         assert_eq!(layout::<SubloreItem>(), (56, 8), "SubloreItem");
         assert_eq!(layout::<SubloreCell>(), (40, 8), "SubloreCell");
-        assert_eq!(layout::<SubloreInvocation>(), (32, 8), "SubloreInvocation");
+        assert_eq!(layout::<SubloreInvocation>(), (40, 8), "SubloreInvocation");
         assert_eq!(layout::<SubloreModule>(), (72, 8), "SubloreModule");
-        assert_eq!(layout::<SubloreHost>(), (120, 8), "SubloreHost");
+        assert_eq!(layout::<SubloreHost>(), (128, 8), "SubloreHost");
+    }
+
+    /// Where every field of every table actually sits.
+    ///
+    /// The size and alignment pin above is not enough on its own, and a mutation showed it:
+    /// widening `SubloreLine::flags` from `u32` to `u64` puts the extra four bytes into padding
+    /// that was already there, so the struct stays sixty-four bytes and that pin stays green while
+    /// the two sides have started disagreeing about where `index` begins. Swapping two fields of
+    /// the same width is invisible to it for the same reason. An offset is what a C layout is, so
+    /// this is what holds it.
+    ///
+    /// Every number here was read out of `rustc` through `offset_of!`, never counted by hand.
+    #[test]
+    fn every_field_holds_its_offset() {
+        assert_eq!(
+            [offset_of!(SubloreStr, ptr), offset_of!(SubloreStr, len),],
+            [0, 8],
+            "SubloreStr"
+        );
+        assert_eq!(
+            [
+                offset_of!(SubloreDocument, format),
+                offset_of!(SubloreDocument, cue_count),
+                offset_of!(SubloreDocument, revision),
+                offset_of!(SubloreDocument, dirty),
+                offset_of!(SubloreDocument, path),
+            ],
+            [0, 8, 16, 24, 32],
+            "SubloreDocument"
+        );
+        assert_eq!(
+            [
+                offset_of!(SubloreCue, start_ms),
+                offset_of!(SubloreCue, end_ms),
+                offset_of!(SubloreCue, text),
+                offset_of!(SubloreCue, is_comment),
+                offset_of!(SubloreCue, has_number),
+                offset_of!(SubloreCue, number),
+            ],
+            [0, 4, 8, 24, 25, 28],
+            "SubloreCue"
+        );
+        assert_eq!(
+            [
+                offset_of!(SubloreLine, episode_id),
+                offset_of!(SubloreLine, ordinal),
+                offset_of!(SubloreLine, role),
+                offset_of!(SubloreLine, flags),
+                offset_of!(SubloreLine, index),
+                offset_of!(SubloreLine, cue),
+            ],
+            [0, 8, 12, 16, 24, 32],
+            "SubloreLine"
+        );
+        assert_eq!(
+            [
+                offset_of!(SubloreProposal, kind),
+                offset_of!(SubloreProposal, revision),
+                offset_of!(SubloreProposal, cue),
+                offset_of!(SubloreProposal, text),
+            ],
+            [0, 8, 16, 24],
+            "SubloreProposal"
+        );
+        assert_eq!(
+            [
+                offset_of!(SubloreValue, kind),
+                offset_of!(SubloreValue, i),
+                offset_of!(SubloreValue, f),
+                offset_of!(SubloreValue, s),
+            ],
+            [0, 8, 16, 24],
+            "SubloreValue"
+        );
+        assert_eq!(
+            [
+                offset_of!(SubloreItem, id),
+                offset_of!(SubloreItem, kind),
+                offset_of!(SubloreItem, parent),
+                offset_of!(SubloreItem, enable_when),
+                offset_of!(SubloreItem, flags),
+                offset_of!(SubloreItem, label),
+                offset_of!(SubloreItem, icon),
+            ],
+            [0, 4, 8, 12, 16, 24, 40],
+            "SubloreItem"
+        );
+        assert_eq!(
+            [
+                offset_of!(SubloreCell, kind),
+                offset_of!(SubloreCell, text),
+                offset_of!(SubloreCell, number),
+                offset_of!(SubloreCell, r#ref),
+            ],
+            [0, 8, 24, 32],
+            "SubloreCell"
+        );
+        assert_eq!(
+            [
+                offset_of!(SubloreInvocation, revision),
+                offset_of!(SubloreInvocation, cue),
+                offset_of!(SubloreInvocation, row),
+                offset_of!(SubloreInvocation, panel_id),
+                offset_of!(SubloreInvocation, project_key),
+            ],
+            [0, 8, 16, 24, 32],
+            "SubloreInvocation"
+        );
+        assert_eq!(
+            [
+                offset_of!(SubloreModule, size),
+                offset_of!(SubloreModule, minor),
+                offset_of!(SubloreModule, create),
+                offset_of!(SubloreModule, destroy),
+                offset_of!(SubloreModule, describe),
+                offset_of!(SubloreModule, project_opened),
+                offset_of!(SubloreModule, project_closing),
+                offset_of!(SubloreModule, schema_version),
+                offset_of!(SubloreModule, schema_upgrade),
+                offset_of!(SubloreModule, invoke),
+            ],
+            [0, 4, 8, 16, 24, 32, 40, 48, 56, 64],
+            "SubloreModule"
+        );
+        assert_eq!(
+            [
+                offset_of!(SubloreHost, size),
+                offset_of!(SubloreHost, minor),
+                offset_of!(SubloreHost, ctx),
+                offset_of!(SubloreHost, log),
+                offset_of!(SubloreHost, should_cancel),
+                offset_of!(SubloreHost, progress),
+                offset_of!(SubloreHost, document),
+                offset_of!(SubloreHost, cue_at),
+                offset_of!(SubloreHost, for_each_line),
+                offset_of!(SubloreHost, propose),
+                offset_of!(SubloreHost, find),
+                offset_of!(SubloreHost, db_run),
+                offset_of!(SubloreHost, db_transaction),
+                offset_of!(SubloreHost, panel_begin),
+                offset_of!(SubloreHost, panel_row),
+                offset_of!(SubloreHost, panel_end),
+                offset_of!(SubloreHost, status),
+            ],
+            [0, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120],
+            "SubloreHost"
+        );
     }
 
     /// A nullable slot must not cost a word: `Option` around a function pointer is the null the
