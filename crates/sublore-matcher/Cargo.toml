@@ -1,0 +1,11 @@
+[package]
+name = "sublore-matcher"
+version = "0.1.0"
+description = "The one comparison the core's find and a module's QA both use"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Deliberately empty. A term match is a walk over two string slices, and a dependency here would
+# have to cross the module boundary's licence line with it. See docs/matcher-tasks.md.
+[dependencies]

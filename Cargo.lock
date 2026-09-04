@@ -3206,6 +3206,10 @@ name = "sublore-io"
 version = "0.1.0"
 
 [[package]]
+name = "sublore-matcher"
+version = "0.1.0"
+
+[[package]]
 name = "sublore-module-api"
 version = "0.1.0"
 
