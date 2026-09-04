@@ -150,6 +150,7 @@ pub fn run() -> tauri::Result<()> {
             subtitle::subtitle_open,
             subtitle::subtitle_close,
             subtitle::subtitle_set_text,
+            subtitle::subtitle_set_texts,
             subtitle::subtitle_set_times,
             subtitle::subtitle_insert,
             subtitle::subtitle_delete,

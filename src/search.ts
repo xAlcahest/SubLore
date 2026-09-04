@@ -60,3 +60,40 @@ export function nextMatch(
   }
   return null;
 }
+
+/**
+ * Every match rewritten, as one edit per cue that has any, plus how many were replaced.
+ *
+ * The replacement is applied through a function rather than a string, because `String.replace`
+ * reads `$&` and `$1` out of a string replacement: F3 replaces text literally, and capture groups
+ * are F4's to add on purpose rather than by accident.
+ */
+export function replaceEverywhere(
+  cues: readonly CueRow[],
+  query: Query,
+  replacement: string,
+): { edits: { cue: number; text: string }[]; count: number } {
+  const expression = pattern(query);
+  const edits: { cue: number; text: string }[] = [];
+  let count = 0;
+  if (expression === null) {
+    return { edits, count };
+  }
+  cues.forEach((cue, index) => {
+    let hits = 0;
+    const rewritten = cue.text.replace(expression, () => {
+      hits += 1;
+      return replacement;
+    });
+    if (hits > 0) {
+      edits.push({ cue: index, text: rewritten });
+      count += hits;
+    }
+  });
+  return { edits, count };
+}
+
+/** One match rewritten in place, for the replace that walks the file one hit at a time. */
+export function replaceOne(text: string, at: Match, replacement: string): string {
+  return text.slice(0, at.start) + replacement + text.slice(at.end);
+}

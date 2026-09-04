@@ -4,7 +4,7 @@ import { choosePath, type ChooseKind } from "./chooser";
 import AboutDialog from "./components/AboutDialog";
 import CueList from "./components/CueList";
 import CurrentLine from "./components/CurrentLine";
-import FindBar from "./components/FindBar";
+import FindBar, { type FindMode } from "./components/FindBar";
 import MenuBar from "./components/MenuBar";
 import ProjectRail from "./components/ProjectRail";
 import Sash from "./components/Sash";
@@ -29,7 +29,7 @@ import { en } from "./i18n/en";
 import { fill } from "./i18n/format";
 import { commandFor, ownsTheKeyboard } from "./keyboard";
 import { requestQuit } from "./quit";
-import { nextMatch, type Match, type Query } from "./search";
+import { nextMatch, replaceEverywhere, replaceOne, type Match, type Query } from "./search";
 import {
   runCommand,
   type Command,
@@ -258,10 +258,12 @@ export default function App() {
   const [transcribeOpen, setTranscribeOpen] = useState(false);
   // The find band, and what it is looking for. The query outlives a close so reopening the band
   // offers the last search back, which is the cheap half of the reference's remembered list (F2).
-  const [findOpen, setFindOpen] = useState(false);
+  const [findMode, setFindMode] = useState<FindMode | null>(null);
   const [query, setQuery] = useState<Query>({ needle: "", matchCase: false });
+  const [replacement, setReplacement] = useState("");
   const [found, setFound] = useState<Match | null>(null);
   const [searched, setSearched] = useState(false);
+  const [replaced, setReplaced] = useState<number | null>(null);
   const [quitError, setQuitError] = useState<string | null>(null);
 
   async function pick(
@@ -408,13 +410,52 @@ export default function App() {
    * The next match, from wherever the last one left off, with the cursor following it onto the cue
    * it lands in. A pattern in no cue moves nothing and says so on the band. See F2.
    */
-  function findNext() {
-    const match = nextMatch(subtitle.cues, query, found);
+  function findFrom(cues: readonly CueRow[], at: Match | null): Match | null {
+    const match = nextMatch(cues, query, at);
     setSearched(true);
     setFound(match);
+    setReplaced(null);
     if (match !== null) {
       selection.move(match.cue, "plain");
     }
+    return match;
+  }
+
+  function findNext() {
+    findFrom(subtitle.cues, found);
+  }
+
+  /**
+   * Replace the match the band is standing on, then move to the next one. With no match in hand the
+   * first press only finds, so a press never rewrites a cue the user has not been shown. That is
+   * the two-press rule of interface-spec 9.2, expressed against the match this band holds rather
+   * than against a text selection the grid does not have.
+   */
+  async function replaceCurrent() {
+    const at = found;
+    const cue = at === null ? null : (subtitle.cues[at.cue] ?? null);
+    if (at === null || cue === null) {
+      findNext();
+      return;
+    }
+    await subtitle.setTexts([{ cue: at.cue, text: replaceOne(cue.text, at, replacement) }]);
+    // Resume past what was just written, so a replacement containing the pattern is not re-found.
+    findFrom(subtitle.cues, { cue: at.cue, start: at.start, end: at.start + replacement.length });
+  }
+
+  /** Every match in the document, in one edit and so in one undo step. See F1. */
+  async function replaceAll() {
+    const { edits, count } = replaceEverywhere(subtitle.cues, query, replacement);
+    if (edits.length === 0) {
+      setSearched(true);
+      setFound(null);
+      setReplaced(null);
+      return;
+    }
+    await subtitle.setTexts(edits);
+    setFound(null);
+    setSearched(false);
+    setReplaced(count);
   }
 
   /** Where the video is, to the millisecond the product reasons in (decision 11). */
@@ -613,7 +654,15 @@ export default function App() {
       accelerator: en.menu.keys.find,
       // Nothing to search until a document is open, and the band is drawn greyed until then.
       enabled: subtitle.summary !== null,
-      run: () => setFindOpen(true),
+      run: () => setFindMode("find"),
+    },
+    {
+      id: "edit.replace",
+      label: en.menu.edit.replace,
+      accelerator: en.menu.keys.replace,
+      // The same band in its other mode: the two are never open at once (interface-spec 9.2).
+      enabled: subtitle.summary !== null,
+      run: () => setFindMode("replace"),
     },
     {
       id: "time.start-to-playhead",
@@ -797,7 +846,7 @@ export default function App() {
     {
       id: "edit",
       title: en.menu.edit.title,
-      items: ["edit.undo", "edit.redo", "edit.find", "asr.transcribe"],
+      items: ["edit.undo", "edit.redo", "edit.find", "edit.replace", "asr.transcribe"],
     },
     // Interface-spec 3 order: Subtitle sits right after Edit. Its fifth backend command,
     // subtitle_set_times, is not here: it is a field commit on the current line (T5), not an
@@ -857,9 +906,9 @@ export default function App() {
 
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
-      // A field that keeps its own undo keeps its own shortcuts too, which is why this is the only
-      // listener left: the grid used to answer this question again, for three keys, on its own.
-      if (ownsTheKeyboard(event.target)) {
+      // A field keeps the chords a field owns, and nothing else. This is the only listener that
+      // asks: the grid used to answer the same question again, for three keys, on its own.
+      if (ownsTheKeyboard(event.target, event.key.toLowerCase())) {
         return;
       }
       const id = commandFor(latest.current, event);
@@ -992,19 +1041,26 @@ export default function App() {
         </section>
         {/* Under the grid, which is the one region that gives up space when it opens, so the top
           block keeps the height its sash left it at and the video surface does not move. See T4. */}
-        {findOpen && (
+        {findMode !== null && (
           <FindBar
+            mode={findMode}
             query={query}
+            replacement={replacement}
             outcome={!searched ? "idle" : found === null ? "missing" : "found"}
+            replaced={replaced}
             onQueryChange={(next) => {
               setQuery(next);
               // A changed pattern is a new search: resuming from the old match would skip the
-              // first hit of the new one.
+              // first hit of the new one, and the last count is no longer about this pattern.
               setFound(null);
               setSearched(false);
+              setReplaced(null);
             }}
+            onReplacementChange={setReplacement}
             onFindNext={findNext}
-            onClose={() => setFindOpen(false)}
+            onReplace={() => void replaceCurrent()}
+            onReplaceAll={() => void replaceAll()}
+            onClose={() => setFindMode(null)}
           />
         )}
         {transcribeOpen && (

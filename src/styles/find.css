@@ -34,6 +34,14 @@
   font-size: 0.875rem;
 }
 
+.findbar__replacement {
+  min-width: 10rem;
+  flex: 1 1 10rem;
+  padding: 0.3rem 0.4rem;
+  font: inherit;
+  font-size: 0.875rem;
+}
+
 .findbar__case-label {
   display: flex;
   align-items: center;
@@ -49,4 +57,10 @@
 
 .findbar__close {
   margin-left: auto;
+}
+
+/* What a replace all did, in the band that did it: a count is a fact, not a warning. */
+.findbar__replaced {
+  font-size: 0.875rem;
+  color: var(--ink-muted);
 }

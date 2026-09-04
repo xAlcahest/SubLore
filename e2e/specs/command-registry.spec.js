@@ -48,6 +48,7 @@ const DECLARED = [
   "edit-undo",
   "edit-redo",
   "edit-find",
+  "edit-replace",
   "time-start-to-playhead",
   "time-end-to-playhead",
   "video-to-cue-start",
@@ -96,11 +97,12 @@ const FILE_ITEMS = [
   { id: "app-quit", disabled: false },
 ];
 
-/** Edit with nothing open: Undo, Redo and Find are drawn, greyed. */
+/** Edit with nothing open: Undo, Redo, Find and Replace are drawn, greyed. */
 const EDIT_ITEMS = [
   { id: "edit-undo", disabled: true },
   { id: "edit-redo", disabled: true },
   { id: "edit-find", disabled: true },
+  { id: "edit-replace", disabled: true },
   { id: "asr-transcribe", disabled: false },
 ];
 
@@ -478,8 +480,9 @@ describe("the command registry", () => {
     // ungrey too. Split stays gated behind a caret nothing has placed yet.
     expect(flips(empty, open)).toEqual([
       { route: "menu", id: "file-save-copy", disabled: false },
-      // Find needs a document to search and nothing else, so it ungreys with the file (F2).
+      // Find and Replace need a document and nothing else, so both ungrey with the file (F2, F3).
       { route: "menu", id: "edit-find", disabled: false },
+      { route: "menu", id: "edit-replace", disabled: false },
       { route: "menu", id: "subtitle-insert", disabled: false },
       { route: "menu", id: "subtitle-delete", disabled: false },
       { route: "menu", id: "subtitle-merge", disabled: false },

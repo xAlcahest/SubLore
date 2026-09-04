@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sublore_edit::diff::{CuePatch, CueView};
 use sublore_edit::history::Run;
 use sublore_edit::plan::{self, Edit};
@@ -201,6 +201,25 @@ pub async fn subtitle_set_text(
     text: String,
 ) -> Result<CuePatchDto, SubtitleError> {
     edited(&app, state.slot(), revision, Edit::SetText { cue, text }).await
+}
+
+/// One cue's new text. A list of these is one replace, and it lands as one undo step (F1).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CueTextDto {
+    pub cue: usize,
+    pub text: String,
+}
+
+#[tauri::command]
+pub async fn subtitle_set_texts(
+    app: AppHandle,
+    state: State<'_, SubtitleState>,
+    revision: u64,
+    edits: Vec<CueTextDto>,
+) -> Result<CuePatchDto, SubtitleError> {
+    let edits = edits.into_iter().map(|one| (one.cue, one.text)).collect();
+    edited(&app, state.slot(), revision, Edit::SetTexts { edits }).await
 }
 
 #[tauri::command]
@@ -614,9 +633,10 @@ pub fn apply_edit(
     // not: a length is enough to tell a real edit from a field committed unchanged, and a subtitle
     // line is the user's own writing.
     crate::log::info!(
-        "subtitle: edit committed, revision {}, {}, cue {} now {} chars",
+        "subtitle: edit committed, revision {}, {}, {} cues, cue {} now {} chars",
         session.revision(),
         if session.dirty() { "dirty" } else { "clean" },
+        patch.cues.len(),
         patch.from,
         patch.cues.first().map_or(0, |cue| cue.text.chars().count())
     );

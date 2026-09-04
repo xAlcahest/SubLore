@@ -11,10 +11,24 @@ import { type CommandId, type CommandRegistry } from "./types/chrome";
 const TEXT_INPUT_TYPES = ["text", "search", "url", "email", "tel", "password", "number"];
 
 /**
- * A field that owns its own keyboard: anything typed into that is not one of the document's own
- * editors. Every shortcut stays out of those, so Ctrl+Z there means what it means everywhere else.
+ * The chords a text field owns natively: its own undo and redo, its own selection, its own
+ * clipboard. Everything outside this set belongs to the shell even with the caret in a field, or
+ * Ctrl+F could not be pressed twice from the find band and Ctrl+S could not save while a search box
+ * had focus, which is what every editor does. See docs/keyboard-tasks.md.
  */
-export function ownsTheKeyboard(target: EventTarget | null): boolean {
+const FIELD_CHORDS: ReadonlySet<string> = new Set(["a", "c", "v", "x", "y", "z"]);
+
+/**
+ * Whether this press belongs to the field it landed in rather than to the shell.
+ *
+ * Two conditions, and both have to hold. The target is a text field that is not one of the
+ * document's own editors, because Ctrl+Z inside those is the document's undo and never the
+ * webview's, which would fork the two histories. And the chord is one a text field actually owns.
+ */
+export function ownsTheKeyboard(target: EventTarget | null, key: string): boolean {
+  if (!FIELD_CHORDS.has(key)) {
+    return false;
+  }
   if (!(target instanceof HTMLElement) || isDocumentEditor(target)) {
     return false;
   }

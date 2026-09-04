@@ -21,6 +21,7 @@ export const en = {
       undo: "Undo",
       redo: "Redo",
       find: "Find…",
+      replace: "Replace…",
       /** Here until an Audio title of its own arrives with the milestone that registers it. */
       transcribe: "Transcribe…",
     },
@@ -79,18 +80,28 @@ export const en = {
       startToPlayhead: "Ctrl+3",
       endToPlayhead: "Ctrl+4",
       find: "Ctrl+F",
+      replace: "Ctrl+H",
     },
     errors: {
       quitFailed: "Sublore could not quit. Close the window instead.",
     },
   },
-  /** The find band. Replace and its own strings arrive with F3. */
+  /** The find band, in both its modes: replace adds a second field and two buttons to the same row. */
   find: {
     title: "Find",
+    replaceTitle: "Find and replace",
     needleLabel: "Find",
+    replaceLabel: "Replace with",
     matchCase: "Match case",
     findNext: "Find next",
+    replace: "Replace",
+    replaceAll: "Replace all",
     noMatch: "No match",
+    /** `{count}` is a whole number. Drawn after a replace all, so the count is never a guess. */
+    replaced: {
+      one: "1 replaced",
+      other: "{count} replaced",
+    },
     close: "Close",
   },
   about: {

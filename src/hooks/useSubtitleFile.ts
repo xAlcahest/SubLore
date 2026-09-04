@@ -89,6 +89,8 @@ export type SubtitleFile = {
   discardAndOpen: () => Promise<void>;
   adoptTranscription: (runId: number) => Promise<void>;
   setText: (cue: number, text: string) => Promise<void>;
+  /** Many cues in one call, and so one undo step whatever the count. See find-replace-tasks F1. */
+  setTexts: (edits: { cue: number; text: string }[]) => Promise<void>;
   setTimes: (cue: number, startMs: number, endMs: number) => Promise<void>;
   /** `before === cues.length` appends; the four below carry the backend's own argument names. */
   insertCue: (before: number, startMs: number, endMs: number, text: string) => Promise<void>;
@@ -268,6 +270,11 @@ export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
     [command],
   );
 
+  const setTexts = useCallback(
+    (edits: { cue: number; text: string }[]) => command("subtitle_set_texts", { edits }),
+    [command],
+  );
+
   const setTimes = useCallback(
     (cue: number, startMs: number, endMs: number) =>
       command("subtitle_set_times", { cue, startMs, endMs }),
@@ -364,6 +371,7 @@ export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
     discardAndOpen,
     adoptTranscription,
     setText,
+    setTexts,
     setTimes,
     insertCue,
     deleteCue,

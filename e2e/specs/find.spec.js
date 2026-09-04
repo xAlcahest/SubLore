@@ -35,6 +35,25 @@ const ONLY_IN_SECOND_CAPITALISED = "Nobody";
 const IN_NO_CUE = "zzhardlylikely";
 
 /**
+ * In the second and third cues, once each, and in no other word of the file. Two matches over two
+ * cues is the smallest shape that shows a replace all landing as one undo step rather than two.
+ */
+const IN_TWO_CUES = "had";
+/**
+ * Two replacements, and neither may contain the other check's pattern: the first check writes into
+ * the third cue and the second then counts matches across the file, so a replacement carrying the
+ * next pattern would be counted as a third hit. That is how this pair was first written and it read
+ * as a defect in the count.
+ */
+/**
+ * Carries the two sequences `String.replace` reads out of a string replacement. The app replaces
+ * literally, through a function replacer, so these must land as typed; a string replacement would
+ * expand `$&` into the match. The expectation below uses a function replacer for the same reason.
+ */
+const REPLACEMENT_ONE = "[$&]";
+const REPLACEMENT_ALL = "H$&D";
+
+/**
  * The long fixture, and the arithmetic its shape allows: it repeats eight lines in order, so this
  * one sits on rows 7, 15, 23 and on, and the nth match is a row a check can name.
  */
@@ -111,6 +130,16 @@ function present(selector) {
   return browser.execute((css) => document.querySelector(css) !== null, selector);
 }
 
+/** One row's text as the grid draws it, by its drawn number. Null when that row is not rendered. */
+function rowText(position) {
+  return browser.execute((wanted) => {
+    const row = Array.from(document.querySelectorAll(".cuelist__row")).find(
+      (candidate) => candidate.querySelector(".cuelist__pos")?.textContent === wanted,
+    );
+    return row?.querySelector(".cuelist__text")?.textContent ?? null;
+  }, String(position));
+}
+
 /** The row the cursor is on, one-based the way the grid numbers them, or null when there is none. */
 function cursorRow() {
   return browser.execute(() => {
@@ -128,19 +157,28 @@ async function waitForCursor(row) {
   expect(reached).toBe(row);
 }
 
-/** Put a fresh pattern in the field: select all, type over it, so no check inherits a stale one. */
-async function search(toplevel, needle) {
-  await clickElement(toplevel, ".findbar__needle");
-  pressKey("ctrl+a");
-  typeText(needle);
+/**
+ * Replace whatever a text field holds. The ctrl+a lives here rather than in `e2e/lib/input.js`,
+ * which is shared with the M0 and M1 specs and stays frozen, as editor.spec.js does the same.
+ */
+async function typeInto(toplevel, selector, text) {
+  await clickElement(toplevel, selector);
   await waitFor(
-    async () =>
-      (await browser.execute(() => document.querySelector(".findbar__needle")?.value ?? null)) ===
-      needle
-        ? true
-        : null,
-    { timeout: 15000, message: `the field to hold ${needle}` },
+    () => browser.execute((css) => document.activeElement?.matches(css) === true, selector),
+    { timeout: 10000, message: `${selector} to take keyboard focus` },
   );
+  pressKey("ctrl+a");
+  typeText(text);
+  await waitFor(
+    () =>
+      browser.execute((css, want) => document.querySelector(css)?.value === want, selector, text),
+    { timeout: 15000, message: `${selector} to hold exactly ${text}` },
+  );
+}
+
+/** Put a fresh pattern in the field, so no check inherits the one before it. */
+function search(toplevel, needle) {
+  return typeInto(toplevel, ".findbar__needle", needle);
 }
 
 /**
@@ -299,5 +337,89 @@ describe("the find band", () => {
       pressKey("Return");
       await waitForCursor(EIGHTH_STRIDE * (nth - 1) + EIGHTH_FIRST);
     }
+  });
+
+  it("opens the same band in its other mode on ctrl+h, and ctrl+f puts it back", async () => {
+    // Back to the short file, opened here rather than inherited: the checks below count matches in
+    // it, and the walk above left a different document on screen. See BACKLOG.md N19.
+    await clickElement(toplevel, ".toolbar__file-open-subtitle");
+    const subtitle = await waitForChooser("Choose a subtitle");
+    await answerChooser(subtitle, copy, "subtitle");
+    focusWindow(toplevel.id);
+    await waitFor(
+      async () => (await textOf(".statusbar__document"))?.includes(OPEN_STATUS) === true,
+      { timeout: 20000, message: "the status bar to report the short subtitle again" },
+    );
+
+    pressKey("ctrl+h");
+    await waitFor(() => present(".findbar__replacement"), {
+      timeout: 15000,
+      message: "the band to grow its replacement field",
+    });
+    expect(await present(".findbar__replace-all")).toBe(true);
+
+    // One band, two modes, never both at once (interface-spec 9.2).
+    pressKey("ctrl+f");
+    await waitFor(async () => ((await present(".findbar__replacement")) === false ? true : null), {
+      timeout: 15000,
+      message: "the replacement field to go away again",
+    });
+    expect(await present(".findbar")).toBe(true);
+    pressKey("ctrl+h");
+    await waitFor(() => present(".findbar__replacement"), {
+      timeout: 15000,
+      message: "the band to come back in replace mode",
+    });
+  });
+
+  it("finds on the first press of Replace and rewrites on the second", async () => {
+    const before = await rowText(3);
+    await search(toplevel, ONLY_IN_THIRD);
+    await typeInto(toplevel, ".findbar__replacement", REPLACEMENT_ONE);
+
+    // Nothing has been found yet, so this press may only find: a press must never rewrite a cue
+    // the user has not been shown (interface-spec 9.2).
+    await clickElement(toplevel, ".findbar__replace");
+    await waitForCursor(3);
+    expect(await rowText(3)).toBe(before);
+
+    await clickElement(toplevel, ".findbar__replace");
+    await waitFor(async () => ((await rowText(3)) === before ? null : true), {
+      timeout: 20000,
+      message: "the second press to rewrite the third row",
+    });
+    expect(await rowText(3)).toBe(before.replace(ONLY_IN_THIRD, () => REPLACEMENT_ONE));
+  });
+
+  it("rewrites every match in one step, and one undo takes them all back", async () => {
+    const second = await rowText(2);
+    const third = await rowText(3);
+    await search(toplevel, IN_TWO_CUES);
+    await typeInto(toplevel, ".findbar__replacement", REPLACEMENT_ALL);
+
+    await clickElement(toplevel, ".findbar__replace-all");
+    await waitFor(() => present(".findbar__replaced"), {
+      timeout: 20000,
+      message: "the band to report what it replaced",
+    });
+    // Two matches over two cues, counted rather than guessed at.
+    expect(await textOf(".findbar__replaced")).toBe("2 replaced");
+    expect(await rowText(2)).toBe(second.replace(IN_TWO_CUES, () => REPLACEMENT_ALL));
+    expect(await rowText(3)).toBe(third.replace(IN_TWO_CUES, () => REPLACEMENT_ALL));
+
+    // One step for the whole replace, which is the reason the many-cue edit exists (F1).
+    await clickElement(toplevel, ".toolbar__edit-undo");
+    await waitFor(async () => ((await rowText(2)) === second ? true : null), {
+      timeout: 20000,
+      message: "one undo to put the second row back",
+    });
+    expect(await rowText(3)).toBe(third);
+
+    // And the single replace under it is its own step, so a second undo leaves the file as opened.
+    await clickElement(toplevel, ".toolbar__edit-undo");
+    await waitFor(async () => ((await present(".statusbar__dirty")) === false ? true : null), {
+      timeout: 20000,
+      message: "the document to come back to the bytes it was opened with",
+    });
   });
 });
