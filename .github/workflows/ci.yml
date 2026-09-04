@@ -245,6 +245,11 @@ jobs:
       - name: Fetch the transcription model
         run: sh scripts/fetch-model.sh
 
+      # The module spec needs a module beside the binary, and `wdio.conf.js` installs one from the
+      # fixture package's example targets. `pnpm e2e:build` does not build them.
+      - name: Build the module fixtures
+        run: cargo build -p sublore-module-fixture --examples
+
       - name: Build the app
         run: pnpm e2e:build
 
