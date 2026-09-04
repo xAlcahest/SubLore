@@ -189,6 +189,27 @@ async function runFromMenu(toplevel, token) {
   });
 }
 
+/**
+ * Whether the Subtitles menu draws `token` greyed, with the menu opened and closed around the read.
+ *
+ * A greying is only readable while the dropdown is up, and the cursor cannot be moved while it is,
+ * so the two halves of a greying check have to take turns.
+ */
+async function greyedInMenu(toplevel, token) {
+  await clickElement(toplevel, ".menubar__title--subtitle");
+  await waitFor(async () => ((await openMenu()) === "Subtitles" ? true : null), {
+    timeout: 15000,
+    message: "the Subtitles dropdown to be the open one",
+  });
+  const greyed = await disabledOf(`#menuitem-${token}`);
+  key("Escape");
+  await waitFor(async () => ((await openMenu()) === null ? true : null), {
+    timeout: 15000,
+    message: "the dropdown to close again",
+  });
+  return greyed;
+}
+
 /** Open a subtitle through the system chooser, which is the only route since T1. */
 async function openSubtitle(toplevel, file) {
   await clickElement(toplevel, ".toolbar__file-open-subtitle");
@@ -338,6 +359,24 @@ describe("the cue structure edits", () => {
     expect(after[2].end).toBe("00:00:08.340");
     expect(await present(".statusbar__error")).toBe(false);
     expect(readFileSync(copy).equals(openedBytes)).toBe(true);
+  });
+
+  it("greys Merge on the last row, where there is nothing after it to join", async () => {
+    // M2.7 E3 names this greying and nothing looked at it. A condition that dropped it shipped in
+    // 6364140, with a comment above it still describing the rule it had stopped keeping: Merge was
+    // offered on the last row, and the backend refused it. Both rows are read here, because a
+    // Merge greyed everywhere would pass a check that only looked at the last one.
+    const rows = await gridRows();
+    expect(rows.length).toBeGreaterThan(1);
+
+    await cursorTo(toplevel, rows.length);
+    expect(await greyedInMenu(toplevel, "subtitle-merge")).toBe(true);
+
+    await cursorTo(toplevel, rows.length - 1);
+    expect(await greyedInMenu(toplevel, "subtitle-merge")).toBe(false);
+
+    // Put it back where the merge left it, so the undo walk below starts from the state it expects.
+    await cursorTo(toplevel, rows.length);
   });
 
   it("takes the four back one undo each, and puts them back one redo each", async () => {

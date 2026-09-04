@@ -823,8 +823,7 @@ export default function App() {
       id: "subtitle.merge",
       label: en.menu.subtitles.merge,
       // The last row has nothing after it to join, which is the greying M2.7 E3 names.
-      // MUTATION B: the last row stops greying Merge.
-      enabled: selection.active !== null && selection.active < subtitle.cues.length,
+      enabled: selection.active !== null && selection.active < subtitle.cues.length - 1,
       run: () => void mergeCue(),
     },
     {
