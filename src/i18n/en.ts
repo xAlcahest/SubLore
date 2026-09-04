@@ -20,6 +20,7 @@ export const en = {
       title: "Edit",
       undo: "Undo",
       redo: "Redo",
+      find: "Find…",
       /** Here until an Audio title of its own arrives with the milestone that registers it. */
       transcribe: "Transcribe…",
     },
@@ -77,10 +78,20 @@ export const en = {
       videoToCueEnd: "Ctrl+2",
       startToPlayhead: "Ctrl+3",
       endToPlayhead: "Ctrl+4",
+      find: "Ctrl+F",
     },
     errors: {
       quitFailed: "Sublore could not quit. Close the window instead.",
     },
+  },
+  /** The find band. Replace and its own strings arrive with F3. */
+  find: {
+    title: "Find",
+    needleLabel: "Find",
+    matchCase: "Match case",
+    findNext: "Find next",
+    noMatch: "No match",
+    close: "Close",
   },
   about: {
     title: "About Sublore",

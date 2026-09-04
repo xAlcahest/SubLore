@@ -4,6 +4,7 @@ import { choosePath, type ChooseKind } from "./chooser";
 import AboutDialog from "./components/AboutDialog";
 import CueList from "./components/CueList";
 import CurrentLine from "./components/CurrentLine";
+import FindBar from "./components/FindBar";
 import MenuBar from "./components/MenuBar";
 import ProjectRail from "./components/ProjectRail";
 import Sash from "./components/Sash";
@@ -28,6 +29,7 @@ import { en } from "./i18n/en";
 import { fill } from "./i18n/format";
 import { commandFor, ownsTheKeyboard } from "./keyboard";
 import { requestQuit } from "./quit";
+import { nextMatch, type Match, type Query } from "./search";
 import {
   runCommand,
   type Command,
@@ -254,6 +256,12 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   // Absent until the menu asks for it, and gone again on Close: T4 takes the band off the screen.
   const [transcribeOpen, setTranscribeOpen] = useState(false);
+  // The find band, and what it is looking for. The query outlives a close so reopening the band
+  // offers the last search back, which is the cheap half of the reference's remembered list (F2).
+  const [findOpen, setFindOpen] = useState(false);
+  const [query, setQuery] = useState<Query>({ needle: "", matchCase: false });
+  const [found, setFound] = useState<Match | null>(null);
+  const [searched, setSearched] = useState(false);
   const [quitError, setQuitError] = useState<string | null>(null);
 
   async function pick(
@@ -394,6 +402,19 @@ export default function App() {
       return;
     }
     await subtitle.mergeCue(at);
+  }
+
+  /**
+   * The next match, from wherever the last one left off, with the cursor following it onto the cue
+   * it lands in. A pattern in no cue moves nothing and says so on the band. See F2.
+   */
+  function findNext() {
+    const match = nextMatch(subtitle.cues, query, found);
+    setSearched(true);
+    setFound(match);
+    if (match !== null) {
+      selection.move(match.cue, "plain");
+    }
   }
 
   /** Where the video is, to the millisecond the product reasons in (decision 11). */
@@ -587,6 +608,14 @@ export default function App() {
       run: () => void redoDocument(),
     },
     {
+      id: "edit.find",
+      label: en.menu.edit.find,
+      accelerator: en.menu.keys.find,
+      // Nothing to search until a document is open, and the band is drawn greyed until then.
+      enabled: subtitle.summary !== null,
+      run: () => setFindOpen(true),
+    },
+    {
       id: "time.start-to-playhead",
       label: en.menu.timing.startToPlayhead,
       accelerator: en.menu.keys.startToPlayhead,
@@ -768,7 +797,7 @@ export default function App() {
     {
       id: "edit",
       title: en.menu.edit.title,
-      items: ["edit.undo", "edit.redo", "asr.transcribe"],
+      items: ["edit.undo", "edit.redo", "edit.find", "asr.transcribe"],
     },
     // Interface-spec 3 order: Subtitle sits right after Edit. Its fifth backend command,
     // subtitle_set_times, is not here: it is a field commit on the current line (T5), not an
@@ -963,6 +992,21 @@ export default function App() {
         </section>
         {/* Under the grid, which is the one region that gives up space when it opens, so the top
           block keeps the height its sash left it at and the video surface does not move. See T4. */}
+        {findOpen && (
+          <FindBar
+            query={query}
+            outcome={!searched ? "idle" : found === null ? "missing" : "found"}
+            onQueryChange={(next) => {
+              setQuery(next);
+              // A changed pattern is a new search: resuming from the old match would skip the
+              // first hit of the new one.
+              setFound(null);
+              setSearched(false);
+            }}
+            onFindNext={findNext}
+            onClose={() => setFindOpen(false)}
+          />
+        )}
         {transcribeOpen && (
           <TranscribePanel
             mediaPath={state.path}

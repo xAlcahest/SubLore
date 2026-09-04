@@ -145,6 +145,14 @@ export default function CueList({
       editorRef.current?.focus();
     }
   }, [editing]);
+  // The cursor is in view whoever moved it. Find and the playhead commands move it from outside the
+  // grid, and a windowed list does not render a row it has scrolled past at all, so without this a
+  // match in a long file leaves the grid looking like nothing happened. See find-replace-tasks F2.
+  useLayoutEffect(() => {
+    if (active !== null) {
+      ensureVisible(active);
+    }
+  }, [active, ensureVisible]);
 
   useEffect(() => {
     onEditingChange(editing !== null || committing);

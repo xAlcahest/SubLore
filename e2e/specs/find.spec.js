@@ -1,0 +1,303 @@
+/* global describe, it, before, document, window */
+/**
+ * F2: the find band, and plain text search.
+ *
+ * The band sits in the panel flow rather than over it, which is a decision with a consequence this
+ * file asserts: a layer hides the native video surface (decision 1, T8), and searching while the
+ * video is up is the point of having it there. So the surface staying visible is not a detail here,
+ * it is the reason the band is a band.
+ *
+ * Nothing below reaches into the search itself. Every check drives the band the way a user does and
+ * reads the grid cursor, which is the only thing a find has to move. See docs/find-replace-tasks.md.
+ */
+import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+
+import { browser, expect } from "@wdio/globals";
+
+import { answerChooser, waitForChooser } from "../lib/chooser.js";
+import { clickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
+import { repoRoot, requireVideoFixture, windowHeight, windowWidth } from "../lib/paths.js";
+import { waitFor } from "../lib/proc.js";
+import { closeAnyOpenProject } from "../lib/rail.js";
+import { childWindows, mapState, findToplevel } from "../lib/x11.js";
+
+const OPEN_STATUS = "SRT · 3 cues · LF";
+/**
+ * Words from the fixture, each in exactly one cue, chosen so the checks read a cursor that moved
+ * rather than one that happened to be right. "fog" is only in the third and "Nobody" only in the
+ * second, which is also where the case check lives.
+ */
+const ONLY_IN_THIRD = "fog";
+const ONLY_IN_SECOND_CAPITALISED = "Nobody";
+/** In no cue at all: the pattern that has to come back with nothing found. */
+const IN_NO_CUE = "zzhardlylikely";
+
+/**
+ * The long fixture, and the arithmetic its shape allows: it repeats eight lines in order, so this
+ * one sits on rows 7, 15, 23 and on, and the nth match is a row a check can name.
+ */
+const LONG_STATUS = "SRT · 2000 cues · LF";
+const IN_EVERY_EIGHTH = "generator";
+const EIGHTH_FIRST = 7;
+const EIGHTH_STRIDE = 8;
+
+function dataHome() {
+  const home = process.env.SUBLORE_E2E_DATA_HOME;
+  if (typeof home !== "string" || home === "") {
+    throw new Error("SUBLORE_E2E_DATA_HOME is not set; e2e/wdio.conf.js sets it for every run.");
+  }
+  return home;
+}
+
+/** Writes go to the harness temp dir. The committed fixture is copied, never opened for editing. */
+function workingCopy() {
+  const source = path.join(repoRoot, "fixtures", "subtitles", "srt", "clean", "basic-lf.srt");
+  if (!existsSync(source)) {
+    throw new Error(
+      `E2E prerequisite missing: ${source} does not exist. It is committed; restore it with ` +
+        "`git checkout fixtures/subtitles`.",
+    );
+  }
+  const directory = path.join(dataHome(), "find");
+  rmSync(directory, { recursive: true, force: true });
+  mkdirSync(directory, { recursive: true });
+  const copy = path.join(directory, "basic-lf.srt");
+  copyFileSync(source, copy);
+  return copy;
+}
+
+/** The 2000 cue fixture, copied the same way: the grid windows it, which is the point of using it. */
+function longWorkingCopy() {
+  const source = path.join(repoRoot, "fixtures", "subtitles", "srt", "clean", "large-2000.srt");
+  if (!existsSync(source)) {
+    throw new Error(
+      `E2E prerequisite missing: ${source} does not exist. It is committed; restore it with ` +
+        "`git checkout fixtures/subtitles`.",
+    );
+  }
+  const copy = path.join(dataHome(), "find", "large-2000.srt");
+  copyFileSync(source, copy);
+  return copy;
+}
+
+function centreOf(selector) {
+  return browser.execute((css) => {
+    const element = document.querySelector(css);
+    if (element === null) {
+      return null;
+    }
+    const rect = element.getBoundingClientRect();
+    const dpr = window.devicePixelRatio;
+    return { x: (rect.x + rect.width / 2) * dpr, y: (rect.y + rect.height / 2) * dpr };
+  }, selector);
+}
+
+async function clickElement(toplevel, selector) {
+  const centre = await centreOf(selector);
+  if (centre === null) {
+    throw new Error(`${selector} is missing from the DOM`);
+  }
+  // No window manager under Xvfb, so the toplevel origin is also the viewport origin.
+  clickAt(toplevel.absX + centre.x, toplevel.absY + centre.y);
+}
+
+function textOf(selector) {
+  return browser.execute((css) => document.querySelector(css)?.textContent ?? null, selector);
+}
+
+function present(selector) {
+  return browser.execute((css) => document.querySelector(css) !== null, selector);
+}
+
+/** The row the cursor is on, one-based the way the grid numbers them, or null when there is none. */
+function cursorRow() {
+  return browser.execute(() => {
+    const row = document.querySelector(".cuelist__row--active");
+    const drawn = row?.querySelector(".cuelist__pos")?.textContent ?? null;
+    return drawn === null ? null : Number(drawn);
+  });
+}
+
+async function waitForCursor(row) {
+  const reached = await waitFor(async () => ((await cursorRow()) === row ? row : null), {
+    timeout: 15000,
+    message: `the cursor to reach row ${row}`,
+  });
+  expect(reached).toBe(row);
+}
+
+/** Put a fresh pattern in the field: select all, type over it, so no check inherits a stale one. */
+async function search(toplevel, needle) {
+  await clickElement(toplevel, ".findbar__needle");
+  pressKey("ctrl+a");
+  typeText(needle);
+  await waitFor(
+    async () =>
+      (await browser.execute(() => document.querySelector(".findbar__needle")?.value ?? null)) ===
+      needle
+        ? true
+        : null,
+    { timeout: 15000, message: `the field to hold ${needle}` },
+  );
+}
+
+/**
+ * Whether the native video surface is still on screen.
+ *
+ * Read off X, not off the DOM: the surface is an X11 child of the toplevel and the shell hides it
+ * by unmapping it over IPC, so no class in the page says whether it is there. This is the check
+ * that separates a band in the flow from a layer over it (decision 1, T8).
+ */
+function surfaceMapped(toplevel) {
+  const large = childWindows(toplevel.id).filter((child) => child.width > 50 && child.height > 50);
+  if (large.length !== 1) {
+    throw new Error(`expected one native surface, found ${large.length}`);
+  }
+  return mapState(large[0].id);
+}
+
+describe("the find band", () => {
+  let toplevel = null;
+  let copy = null;
+  let longCopy = null;
+
+  before(async () => {
+    copy = workingCopy();
+    longCopy = longWorkingCopy();
+    toplevel = await waitFor(findToplevel, {
+      timeout: 30000,
+      message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
+    });
+    focusWindow(toplevel.id);
+    await waitFor(
+      () => browser.execute(() => document.querySelector(".toolbar__file-open-subtitle") !== null),
+      { timeout: 30000, message: "the app UI to render" },
+    );
+    // One data home for the whole run, so the emptiest state is one this file makes. See N19.
+    await closeAnyOpenProject(toplevel);
+  });
+
+  it("has nothing to search with no document open, and the band stays shut", async () => {
+    expect(await present(".findbar")).toBe(false);
+    pressKey("ctrl+f");
+    await browser.pause(500);
+    // The command is drawn and greyed, and a greyed command does not run whichever route asks it.
+    expect(await present(".findbar")).toBe(false);
+  });
+
+  it("opens on ctrl+f once a document is open, and the video surface stays on screen", async () => {
+    await clickElement(toplevel, ".toolbar__file-open-subtitle");
+    const subtitle = await waitForChooser("Choose a subtitle");
+    await answerChooser(subtitle, copy, "subtitle");
+    focusWindow(toplevel.id);
+    await waitFor(
+      async () => (await textOf(".statusbar__document"))?.includes(OPEN_STATUS) === true,
+      { timeout: 20000, message: "the status bar to report the open subtitle" },
+    );
+
+    await clickElement(toplevel, ".toolbar__video-open");
+    const video = await waitForChooser("Choose a video");
+    await answerChooser(video, requireVideoFixture(), "video");
+    focusWindow(toplevel.id);
+    await waitFor(
+      () =>
+        browser.execute(
+          () =>
+            document.querySelector(".stage__empty") === null &&
+            document.querySelector(".controls__button")?.disabled === false,
+        ),
+      { timeout: 40000, message: "the video to be ready to play" },
+    );
+    expect(surfaceMapped(toplevel)).toBe("IsViewable");
+
+    pressKey("ctrl+f");
+    await waitFor(() => present(".findbar"), {
+      timeout: 15000,
+      message: "the find band to open",
+    });
+    // The band is in the flow, not a layer over it, and this is the difference between the two: a
+    // layer unmaps the surface whether or not it overlaps the picture.
+    await browser.pause(500);
+    expect(surfaceMapped(toplevel)).toBe("IsViewable");
+  });
+
+  it("puts the cursor on the cue the pattern is in", async () => {
+    await search(toplevel, ONLY_IN_THIRD);
+    pressKey("Return");
+    await waitForCursor(3);
+  });
+
+  it("wraps round the file rather than stopping at the last match", async () => {
+    // Typing a new pattern restarts the search, so a wrap can only be shown by pressing again on
+    // the same one. This word is in the third cue and nowhere else, so a second press that lands
+    // back on it with the band still not saying "no match" is the file having been walked round.
+    await search(toplevel, ONLY_IN_THIRD);
+    pressKey("Return");
+    await waitForCursor(3);
+
+    pressKey("Return");
+    await browser.pause(500);
+    expect(await cursorRow()).toBe(3);
+    expect(await present(".findbar__missing")).toBe(false);
+  });
+
+  it("ignores case until it is asked not to", async () => {
+    await search(toplevel, ONLY_IN_SECOND_CAPITALISED.toLowerCase());
+    pressKey("Return");
+    await waitForCursor(2);
+
+    // With Match case on, the lowercase pattern is in no cue, so the cursor must not move.
+    await clickElement(toplevel, ".findbar__case");
+    await search(toplevel, ONLY_IN_SECOND_CAPITALISED.toLowerCase());
+    await clickElement(toplevel, ".findbar__next");
+    await waitFor(() => present(".findbar__missing"), {
+      timeout: 15000,
+      message: "the band to report no match",
+    });
+    expect(await cursorRow()).toBe(2);
+    await clickElement(toplevel, ".findbar__case");
+  });
+
+  it("says so when the pattern is in no cue, and leaves the cursor where it was", async () => {
+    await search(toplevel, IN_NO_CUE);
+    pressKey("Return");
+    await waitFor(() => present(".findbar__missing"), {
+      timeout: 15000,
+      message: "the band to report no match",
+    });
+    expect(await cursorRow()).toBe(2);
+  });
+
+  it("closes on Escape and leaves the cursor where the search left it", async () => {
+    pressKey("Escape");
+    await waitFor(async () => ((await present(".findbar")) === false ? true : null), {
+      timeout: 15000,
+      message: "the find band to close",
+    });
+    expect(await cursorRow()).toBe(2);
+  });
+
+  it("keeps the cursor on screen while it walks down a long file", async () => {
+    // A windowed grid does not render a row it has scrolled past, so a cursor that reads back at
+    // all is a cursor the grid scrolled to. The fixture repeats eight lines, so the nth match of
+    // this one sits at a row arithmetic can name and the check is not just "something moved".
+    await clickElement(toplevel, ".toolbar__file-open-subtitle");
+    const subtitle = await waitForChooser("Choose a subtitle");
+    await answerChooser(subtitle, longCopy, "subtitle");
+    focusWindow(toplevel.id);
+    await waitFor(
+      async () => (await textOf(".statusbar__document"))?.includes(LONG_STATUS) === true,
+      { timeout: 20000, message: "the status bar to report the long subtitle" },
+    );
+
+    pressKey("ctrl+f");
+    await waitFor(() => present(".findbar"), { timeout: 15000, message: "the find band to open" });
+    await search(toplevel, IN_EVERY_EIGHTH);
+    for (let nth = 1; nth <= 8; nth += 1) {
+      pressKey("Return");
+      await waitForCursor(EIGHTH_STRIDE * (nth - 1) + EIGHTH_FIRST);
+    }
+  });
+});
