@@ -13,6 +13,7 @@ pub mod error;
 pub mod layout;
 pub mod migrate;
 pub mod model;
+pub mod module_guard;
 pub mod records;
 
 pub use db::Database;

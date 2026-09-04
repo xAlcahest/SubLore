@@ -51,11 +51,33 @@ CREATE TABLE episode_files (
 );
 ";
 
+/// Migration 2. The counter a loaded module keeps its own tables on.
+///
+/// Core-owned and created by a core migration rather than by a module, for two reasons. A free core
+/// has to read it to know a project carries module data at all, and a table whose existence depends
+/// on whether a paid component was ever installed is a table nothing can rely on.
+///
+/// `user_version` stays this crate's forever: a module that recorded its ladder in the SQLite
+/// header would make the next free core refuse the project outright. See docs/module-abi.md 6.1.
+const V2: &str = "
+CREATE TABLE module_schema (
+    module_id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+";
+
 /// Every migration, in ascending order. Frozen once shipped.
-pub(crate) const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: V1,
-}];
+pub(crate) const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: V1,
+    },
+    Migration {
+        version: 2,
+        sql: V2,
+    },
+];
 
 /// Bring `conn` up to [`CURRENT_VERSION`]. Returns the version it ended on.
 pub fn migrate(conn: &mut Connection) -> Result<u32, ProjectError> {

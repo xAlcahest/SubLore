@@ -10,4 +10,6 @@ publish = false
 # Rust cannot reach a C library without a binding; `bundled` compiles SQLite from source so no
 # platform needs a system library. See BACKLOG.md M4.1.
 [dependencies]
-rusqlite = { version = "0.40", default-features = false, features = ["bundled"] }
+# `hooks` is `hooks = []` in rusqlite's own manifest, so it pulls no new dependency and only
+# compiles more of a crate the workspace already builds. It is what `module_guard` needs.
+rusqlite = { version = "0.40", default-features = false, features = ["bundled", "hooks"] }

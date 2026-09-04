@@ -12,7 +12,11 @@ pub const DATABASE_NAME: &str = "project.sublore";
 pub const APPLICATION_ID: i32 = 0x5355_424c;
 
 /// The schema version this build writes and reads.
-pub const CURRENT_VERSION: u32 = 1;
+///
+/// 2 adds `module_schema`, the counter a loaded module keeps its own tables on. Added before the
+/// first public build on purpose: until then the only version 1 databases in the world are the
+/// owner's own test projects. See docs/module-abi.md 6.2.
+pub const CURRENT_VERSION: u32 = 2;
 
 /// Every name Sublore itself creates inside a project folder, including the journals SQLite keeps
 /// beside the database. The delete path may name these and nothing else. See BACKLOG.md M4.3.
