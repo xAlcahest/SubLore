@@ -247,7 +247,56 @@ export function typeText(text) {
   xdotool(["type", "--delay", "5", text]);
 }
 
-/** A named key, e.g. Return or Escape. */
+/** The function keys, which are the only ones that cannot be pressed by name. See [`pressKey`]. */
+const FUNCTION_KEY = /^F([1-9]|1[0-2])$/;
+
+/** Asked of the server once per key per run: the map does not change under a run. */
+const keycodes = new Map();
+
+/**
+ * The keycode a keysym sits on, asked of the X server through python-xlib.
+ *
+ * python-xlib rather than `xmodmap`, because the harness already declares it and uses it in
+ * `e2e/tools/close-window.py`, and `xmodmap` would be a package to add to CI for one lookup.
+ */
+function keycodeFor(name) {
+  const known = keycodes.get(name);
+  if (known !== undefined) {
+    return known;
+  }
+  const found = execFileSync(
+    "python3",
+    [
+      "-c",
+      "import sys\nfrom Xlib import display, XK\n" +
+        "print(display.Display().keysym_to_keycode(XK.string_to_keysym(sys.argv[1])))",
+      name,
+    ],
+    { encoding: "utf8", timeout: 30000 },
+  ).trim();
+  if (!/^[1-9][0-9]*$/.test(found)) {
+    throw new Error(`the X server has no keycode for ${name}, so the harness cannot press it`);
+  }
+  keycodes.set(name, found);
+  return found;
+}
+
+/**
+ * A named key, e.g. Return or Escape.
+ *
+ * **A function key goes by keycode and every other key by name, and that is measured rather than
+ * chosen.** On 2026-09-04, under Xvfb on this machine, `xdotool key F3` pressed Alt before the key
+ * and the webview was told `altKey` was true, so the shell refused it: `commandFor` drops every
+ * press carrying Alt. `--clearmodifiers` made no difference and F5 behaved the same. The keymap has
+ * `keycode 69 = F3 F3 F3 F3 F3 F3 XF86Switch_VT_3`, and xdotool resolving the keysym picks a level
+ * that carries Alt. Pressing the keycode delivers the key alone. A real keyboard sends the keycode,
+ * so this is the instrument being made to match the hardware, not the app being bent to the
+ * instrument.
+ */
 export function pressKey(key) {
-  xdotool(["key", key]);
+  if (!FUNCTION_KEY.test(key)) {
+    xdotool(["key", key]);
+    return;
+  }
+  xdotool(["key", "--clearmodifiers", keycodeFor(key)]);
 }
