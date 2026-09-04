@@ -73,6 +73,10 @@ export const en = {
       undo: "Ctrl+Z",
       redo: "Ctrl+Y",
       quit: "Ctrl+Q",
+      videoToCueStart: "Ctrl+1",
+      videoToCueEnd: "Ctrl+2",
+      startToPlayhead: "Ctrl+3",
+      endToPlayhead: "Ctrl+4",
     },
     errors: {
       quitFailed: "Sublore could not quit. Close the window instead.",

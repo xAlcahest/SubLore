@@ -26,6 +26,7 @@ import { useTranscription } from "./hooks/useTranscription";
 import { useVideoPlayer } from "./hooks/useVideoPlayer";
 import { en } from "./i18n/en";
 import { fill } from "./i18n/format";
+import { commandFor, ownsTheKeyboard } from "./keyboard";
 import { requestQuit } from "./quit";
 import {
   runCommand,
@@ -37,55 +38,6 @@ import {
 import { type EpisodeFileView } from "./types/project";
 import { type CueRow } from "./types/subtitle";
 import "./App.css";
-
-/**
- * Ctrl+Z, Ctrl+Y and Ctrl+S are the cue list's, not the shell's: each flushes an open cue editor
- * before it acts, and that editor is the grid's. `CueList.tsx` also decides there whether a key
- * inside a text field belongs to the document or to the webview. Named here so the exclusion is a
- * decision a reader can find rather than a silence. See docs/accelerators-tasks.md.
- */
-const HANDLED_BY_THE_GRID: ReadonlySet<CommandId> = new Set([
-  "edit.undo",
-  "edit.redo",
-  "file.save",
-]);
-
-/** A declared accelerator, in the one shape the strings use: `Ctrl+O`, `Ctrl+Shift+S`. */
-type Chord = { shift: boolean; key: string };
-
-function parseAccelerator(text: string | undefined): Chord | null {
-  if (text === undefined) {
-    return null;
-  }
-  const parts = text.split("+").map((part) => part.trim().toLowerCase());
-  const key = parts.pop();
-  // Ctrl is required and Alt is not a modifier any of these use: AltGr arrives as ctrl+alt and is
-  // typing. Anything else in the string is one this cannot honour, so it draws and never fires.
-  if (key === undefined || key.length !== 1 || !parts.includes("ctrl")) {
-    return null;
-  }
-  if (parts.some((part) => part !== "ctrl" && part !== "shift")) {
-    return null;
-  }
-  return { shift: parts.includes("shift"), key };
-}
-
-/**
- * The command a key press asks for, read off the registry rather than off a list of letters, so a
- * command that declares a shortcut has one and the label cannot name a key that does nothing.
- */
-function acceleratorFor(commands: CommandRegistry, key: string, shift: boolean): CommandId | null {
-  for (const command of Object.values(commands)) {
-    if (HANDLED_BY_THE_GRID.has(command.id)) {
-      continue;
-    }
-    const chord = parseAccelerator(command.accelerator);
-    if (chord !== null && chord.key === key && chord.shift === shift) {
-      return command.id;
-    }
-  }
-  return null;
-}
 
 /*
  * Every bound below was read off the rendered shell at 1024x700, never worked out on paper: W6 put
@@ -637,24 +589,28 @@ export default function App() {
     {
       id: "time.start-to-playhead",
       label: en.menu.timing.startToPlayhead,
+      accelerator: en.menu.keys.startToPlayhead,
       enabled: subtitle.summary !== null && selection.active !== null && ready,
       run: () => void boundaryToPlayhead("start"),
     },
     {
       id: "time.end-to-playhead",
       label: en.menu.timing.endToPlayhead,
+      accelerator: en.menu.keys.endToPlayhead,
       enabled: subtitle.summary !== null && selection.active !== null && ready,
       run: () => void boundaryToPlayhead("end"),
     },
     {
       id: "video.to-cue-start",
       label: en.menu.timing.toCueStart,
+      accelerator: en.menu.keys.videoToCueStart,
       enabled: subtitle.summary !== null && selection.active !== null && ready,
       run: () => void videoToBoundary("start"),
     },
     {
       id: "video.to-cue-end",
       label: en.menu.timing.toCueEnd,
+      accelerator: en.menu.keys.videoToCueEnd,
       enabled: subtitle.summary !== null && selection.active !== null && ready,
       run: () => void videoToBoundary("end"),
     },
@@ -872,10 +828,12 @@ export default function App() {
 
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || event.altKey || event.metaKey) {
+      // A field that keeps its own undo keeps its own shortcuts too, which is why this is the only
+      // listener left: the grid used to answer this question again, for three keys, on its own.
+      if (ownsTheKeyboard(event.target)) {
         return;
       }
-      const id = acceleratorFor(latest.current, event.key.toLowerCase(), event.shiftKey);
+      const id = commandFor(latest.current, event);
       if (id === null) {
         return;
       }
@@ -1001,9 +959,6 @@ export default function App() {
             flushRef={flushGrid}
             onEditingChange={setEditorOpen}
             onCommit={subtitle.setText}
-            onUndo={undoDocument}
-            onRedo={redoDocument}
-            onSave={saveDocument}
           />
         </section>
         {/* Under the grid, which is the one region that gives up space when it opens, so the top

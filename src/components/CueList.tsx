@@ -11,7 +11,7 @@ import {
 import { type CueSelection } from "../hooks/useCueSelection";
 import { en } from "../i18n/en";
 import { type CueRow } from "../types/subtitle";
-import { CPS_LIMIT, isDocumentEditor, readingRate, timecode } from "./cueView";
+import { CPS_LIMIT, readingRate, timecode } from "./cueView";
 
 /**
  * Fixed row height in CSS pixels. The whole windowing calculation is this number, which is why it
@@ -20,24 +20,6 @@ import { CPS_LIMIT, isDocumentEditor, readingRate, timecode } from "./cueView";
 const ROW_HEIGHT = 28;
 /** Rows kept rendered above and below the viewport, so a fast scroll does not show gaps. */
 const OVERSCAN = 8;
-/** Input types that hold typed text, and so keep their own undo. A range slider holds none. */
-const TEXT_INPUT_TYPES = ["text", "search", "url", "email", "tel", "password", "number"];
-
-/**
- * A field that owns its own keyboard: anything typed into that is not one of the document's own
- * editors. The document shortcuts below stay out of those, so Ctrl+Z there means what it means
- * everywhere else.
- */
-function ownsTheKeyboard(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement) || isDocumentEditor(target)) {
-    return false;
-  }
-  if (target instanceof HTMLInputElement) {
-    return TEXT_INPUT_TYPES.includes(target.type);
-  }
-  return target instanceof HTMLTextAreaElement || target.isContentEditable;
-}
-
 /** The cursor is named by `aria-activedescendant`, which needs an id on the row it points at. */
 function rowId(index: number): string {
   return `cuelist-row-${index}`;
@@ -57,9 +39,6 @@ type CueListProps = {
   /** Told whenever an editor opens or closes: text in a field is unsaved work too (design 5.3). */
   onEditingChange: (open: boolean) => void;
   onCommit: (cue: number, text: string) => Promise<void>;
-  onUndo: () => Promise<void>;
-  onRedo: () => Promise<void>;
-  onSave: () => Promise<void>;
 };
 
 /**
@@ -74,9 +53,6 @@ export default function CueList({
   flushRef,
   onEditingChange,
   onCommit,
-  onUndo,
-  onRedo,
-  onSave,
 }: CueListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -158,49 +134,11 @@ export default function CueList({
     }
   }, [cues, draft, onCommit]);
 
-  // The window-level shortcuts and the toolbar both flush a pending editor first, so "undo" and
-  // "save" each mean one thing wherever they were asked for.
-  const latest = useRef({ commit, onUndo, onRedo, onSave });
+  // The shell owns every shortcut, and each of its commands flushes both editors before it acts,
+  // so undo and save mean one thing wherever they were asked for. See docs/keyboard-tasks.md.
   useEffect(() => {
-    latest.current = { commit, onUndo, onRedo, onSave };
     flushRef.current = commit;
   });
-
-  useEffect(() => {
-    const handle = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || event.altKey || event.metaKey) {
-        return;
-      }
-      const pressed = event.key.toLowerCase();
-      if (pressed !== "z" && pressed !== "y" && pressed !== "s") {
-        return;
-      }
-      // Ctrl+Shift+S is Save a copy, which the chrome owns (decision 24 A3).
-      if (pressed === "s" && event.shiftKey) {
-        return;
-      }
-      if (ownsTheKeyboard(event.target)) {
-        return;
-      }
-      // Intercepted inside the cue editor: the webview's own text undo must never diverge from
-      // the document's.
-      event.preventDefault();
-      const shift = event.shiftKey;
-      const actions = latest.current;
-      void (async () => {
-        await actions.commit();
-        if (pressed === "s") {
-          await actions.onSave();
-        } else if (pressed === "y" || shift) {
-          await actions.onRedo();
-        } else {
-          await actions.onUndo();
-        }
-      })();
-    };
-    window.addEventListener("keydown", handle, true);
-    return () => window.removeEventListener("keydown", handle, true);
-  }, []);
 
   useLayoutEffect(() => {
     if (editing !== null) {

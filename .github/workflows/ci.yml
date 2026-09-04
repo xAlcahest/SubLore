@@ -184,6 +184,7 @@ jobs:
             webkit2gtk-driver \
             wget \
             x11-utils \
+            x11-xkb-utils \
             xdotool \
             xvfb
 
