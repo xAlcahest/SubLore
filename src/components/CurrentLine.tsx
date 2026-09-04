@@ -17,12 +17,24 @@ type CurrentLineProps = {
   flushRef: { current: () => Promise<void> };
   /** Told whenever the box holds text the document does not: that is unsaved work too. */
   onDraftChange: (pending: boolean) => void;
+  /**
+   * Where the caret is in the text box, as a UTF-8 byte offset, which is what a split counts in.
+   * Reported rather than read back later because the click that splits blurs the box first.
+   */
+  onCaret: (offset: number) => void;
   onCommit: (cue: number, text: string) => Promise<void>;
   onCommitTimes: (cue: number, startMs: number, endMs: number) => Promise<void>;
 };
 
 /** Which of the two time fields a gesture is in. Duration and CPS are derived and stay read-only. */
 type TimeField = "start" | "end";
+
+const encoder = new TextEncoder();
+
+/** A caret at `at` UTF-16 units into `text`, counted in the bytes the backend indexes text by. */
+function byteOffset(text: string, at: number): number {
+  return encoder.encode(text.slice(0, at)).length;
+}
 
 /**
  * The current line, in the tools column under where the waveform will be. It edits whichever row
@@ -37,6 +49,7 @@ export default function CurrentLine({
   multiline,
   flushRef,
   onDraftChange,
+  onCaret,
   onCommit,
   onCommitTimes,
 }: CurrentLineProps) {
@@ -101,6 +114,11 @@ export default function CurrentLine({
   useEffect(() => {
     onDraftChange(draft !== text || timesEdited);
   }, [draft, text, timesEdited, onDraftChange]);
+
+  /** A range reports where it starts, which is where the text would divide. */
+  function reportCaret(box: HTMLTextAreaElement) {
+    onCaret(byteOffset(box.value, box.selectionStart));
+  }
 
   function onType(value: string) {
     setDraft(value);
@@ -213,7 +231,11 @@ export default function CurrentLine({
         data-document-editor=""
         value={draft}
         spellCheck={false}
-        onChange={(event) => onType(event.target.value)}
+        onChange={(event) => {
+          onType(event.target.value);
+          reportCaret(event.target);
+        }}
+        onSelect={(event) => reportCaret(event.currentTarget)}
         onKeyDown={onEditorKeyDown}
         onBlur={() => void commit()}
       />

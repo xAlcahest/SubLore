@@ -3,7 +3,8 @@
  * inside a segment, and a generated set adds a trailing segment of its own (`audio.track.3`).
  * See interface-spec 2.7 and 2.8.
  */
-type CommandArea = "app" | "asr" | "audio" | "edit" | "file" | "help" | "video" | "view";
+type CommandArea =
+  "app" | "asr" | "audio" | "edit" | "file" | "help" | "project" | "subtitle" | "video" | "view";
 
 /** A command's registry key, and the only name any route ever holds it by. */
 export type CommandId = `${CommandArea}.${string}`;

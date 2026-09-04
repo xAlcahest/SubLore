@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { choosePath, type ChooseKind } from "./chooser";
 import AboutDialog from "./components/AboutDialog";
@@ -21,7 +21,7 @@ import { useLayout } from "./hooks/useLayout";
 import { usePreview } from "./hooks/usePreview";
 import { useProject } from "./hooks/useProject";
 import { useStartupFiles } from "./hooks/useStartupFiles";
-import { useSubtitleFile } from "./hooks/useSubtitleFile";
+import { useSubtitleFile, type RowsMoved } from "./hooks/useSubtitleFile";
 import { useTranscription } from "./hooks/useTranscription";
 import { useVideoPlayer } from "./hooks/useVideoPlayer";
 import { en } from "./i18n/en";
@@ -126,6 +126,12 @@ const MIN_GRID_HEIGHT = 109;
 /** The part of the bound above that moves with the interface size. */
 const MIN_GRID_HEAD = 25;
 
+/**
+ * How long a cue the user has just made lasts. A choice, not a derivation: an inserted cue has no
+ * timing of its own yet, and two seconds is about what a subtitle line runs for.
+ */
+const NEW_CUE_MS = 2000;
+
 export default function App() {
   // Every HTML layer registers here while it is open, and the video surface hides for as long as
   // the set is not empty (decision 1, T8).
@@ -159,7 +165,14 @@ export default function App() {
     layers.covered,
   );
   const audio = useAudioTracks(state.path, state.status === "ready");
-  const subtitle = useSubtitleFile();
+  // The two states the grid indexes by row live below, so the patch that moves rows reaches them
+  // through a box rather than directly: the document is read before the selection exists.
+  const rowsMovedRef = useRef<RowsMoved>(() => {});
+  const onRowsMoved = useCallback<RowsMoved>(
+    (at, removed, inserted) => rowsMovedRef.current(at, removed, inserted),
+    [],
+  );
+  const subtitle = useSubtitleFile(onRowsMoved);
   const preview = usePreview();
   const project = useProject();
   // A finished transcription becomes the open document, and the backend asks about unsaved work on
@@ -170,6 +183,9 @@ export default function App() {
   // The cursor and the selection belong to the shell, not to the grid: the tools column edits
   // whichever row carries the cursor (decision 5, T5).
   const selection = useCueSelection(subtitle.cues.length, subtitle.openId);
+  useEffect(() => {
+    rowsMovedRef.current = selection.rowsMoved;
+  }, [selection.rowsMoved]);
 
   // Every bound a sash is given comes from here rather than from a number: a fixed maximum would
   // clip a panel on a small window and waste room on a large one (W6). The current line is
@@ -239,6 +255,12 @@ export default function App() {
   const flushLine = useRef<() => Promise<void>>(() => Promise.resolve());
   const [editorOpen, setEditorOpen] = useState(false);
   const [lineEdited, setLineEdited] = useState(false);
+  /**
+   * Where the caret last was in the current line's editor, and the row it was in. It outlives the
+   * blur a menu click causes, which is why the split can still read it; a cursor on another row
+   * leaves it unmatched and the split greyed.
+   */
+  const [caret, setCaret] = useState<{ index: number; offset: number } | null>(null);
   // The chooser is modal and answers on its own thread, so a second one asked for while it is up
   // would sit behind the first. Every chooser the chrome raises is raised here, so one flag covers
   // them all.
@@ -330,6 +352,62 @@ export default function App() {
   async function redoDocument() {
     await flushEditors();
     await subtitle.redo();
+  }
+
+  /**
+   * A cue below the cursor, starting where that one ends and running `NEW_CUE_MS`. An empty
+   * document takes its first cue at zero. See BACKLOG.md M2.7 E2.
+   */
+  async function insertCue() {
+    await flushEditors();
+    if (subtitle.summary === null) {
+      return;
+    }
+    const at = selection.active;
+    const previous = at === null ? null : (subtitle.cues[at] ?? null);
+    const before = at === null || previous === null ? subtitle.cues.length : at + 1;
+    const startMs = previous === null ? 0 : previous.endMs;
+    await subtitle.insertCue(before, startMs, startMs + NEW_CUE_MS, "");
+  }
+
+  async function deleteCue() {
+    await flushEditors();
+    const at = selection.active;
+    if (at === null || at >= subtitle.cues.length) {
+      return;
+    }
+    await subtitle.deleteCue(at);
+  }
+
+  /**
+   * Split at the caret in the current line's editor, at the playhead when the playhead is inside
+   * the cue and at the cue's midpoint otherwise. Both halves are choices, not derivations: that
+   * box holds the only caret in cue text there is, and a cue the playhead is not in has no moment
+   * of its own to divide at. See BACKLOG.md M2.7 E3.
+   */
+  async function splitCue() {
+    await flushEditors();
+    const at = selection.active;
+    const cue = at === null ? null : (subtitle.cues[at] ?? null);
+    if (at === null || cue === null || caret === null || caret.index !== at) {
+      return;
+    }
+    const playheadMs = Math.round(position * 1000);
+    const inside = ready && playheadMs >= cue.startMs && playheadMs <= cue.endMs;
+    await subtitle.splitCue(
+      at,
+      caret.offset,
+      inside ? playheadMs : Math.floor((cue.startMs + cue.endMs) / 2),
+    );
+  }
+
+  async function mergeCue() {
+    await flushEditors();
+    const at = selection.active;
+    if (at === null || at + 1 >= subtitle.cues.length) {
+      return;
+    }
+    await subtitle.mergeCue(at);
   }
 
   /** Quit through the one route the close gate guards, with the open editor flushed into the
@@ -425,6 +503,34 @@ export default function App() {
       run: () => void redoDocument(),
     },
     {
+      id: "subtitle.insert",
+      label: en.menu.subtitles.insert,
+      // A document with no rows can still take its first one, so the cursor is not required here.
+      enabled: subtitle.summary !== null,
+      run: () => void insertCue(),
+    },
+    {
+      id: "subtitle.delete",
+      label: en.menu.subtitles.delete,
+      enabled: activeCue !== null,
+      run: () => void deleteCue(),
+    },
+    {
+      id: "subtitle.split",
+      label: en.menu.subtitles.split,
+      // Only where a caret has been put, and only while the cursor is still on that row.
+      enabled: activeCue !== null && caret !== null && caret.index === selection.active,
+      run: () => void splitCue(),
+    },
+    {
+      id: "subtitle.merge",
+      label: en.menu.subtitles.merge,
+      // The last row has nothing after it to join, which is the greying M2.7 E3 names.
+      // MUTATION B: the last row stops greying Merge.
+      enabled: selection.active !== null && selection.active < subtitle.cues.length,
+      run: () => void mergeCue(),
+    },
+    {
       id: "help.about",
       label: en.menu.help.about,
       enabled: true,
@@ -496,6 +602,14 @@ export default function App() {
       id: "edit",
       title: en.menu.edit.title,
       items: ["edit.undo", "edit.redo", "asr.transcribe"],
+    },
+    // Interface-spec 3 order: Subtitle sits right after Edit. Its fifth backend command,
+    // subtitle_set_times, is not here: it is a field commit on the current line (T5), not an
+    // action a menu item runs. See BACKLOG.md M2.7.
+    {
+      id: "subtitle",
+      title: en.menu.subtitles.title,
+      items: ["subtitle.insert", "subtitle.delete", "subtitle.split", "subtitle.merge"],
     },
     {
       id: "view",
@@ -625,6 +739,9 @@ export default function App() {
                 multiline={subtitle.summary?.format !== "ass"}
                 flushRef={flushLine}
                 onDraftChange={setLineEdited}
+                onCaret={(offset) =>
+                  setCaret(selection.active === null ? null : { index: selection.active, offset })
+                }
                 onCommit={subtitle.setText}
                 onCommitTimes={subtitle.setTimes}
               />

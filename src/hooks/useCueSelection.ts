@@ -14,6 +14,13 @@ export type CueSelection = {
   selectAll: () => void;
   /** Escape: the selection falls back onto the cursor. */
   collapse: () => void;
+  /**
+   * Rows changed under the two states: `removed` of them vanished at `at` and `inserted` took their
+   * place. Both states are indexed by row, so without this an insert above the cursor leaves it
+   * pointing at a different line and a delete leaves the row that moved up wearing the selection of
+   * the row that went. See BACKLOG.md M2.7.
+   */
+  rowsMoved: (at: number, removed: number, inserted: number) => void;
 };
 
 /** The rows between two indices, inclusive, whichever order they arrive in. */
@@ -85,5 +92,45 @@ export function useCueSelection(count: number, openId: number): CueSelection {
     setSelected(active === null ? new Set<number>() : new Set([active]));
   }, [active]);
 
-  return { active, selected, move, toggle, selectAll, collapse };
+  const rowsMoved = useCallback(
+    (at: number, removed: number, inserted: number) => {
+      const delta = inserted - removed;
+      if (delta === 0) {
+        return;
+      }
+      // `count` is what stood before this call: the patch that moved the rows and this run in one
+      // update, so the new length is that plus the delta rather than anything read from state.
+      const left = count + delta;
+      // A row inside the replaced range no longer exists. The cursor takes the first row standing
+      // in its place, clamped when the last row was the one that went; a selected row simply goes,
+      // because nothing it named is on screen any more.
+      const after = at + removed;
+      const moved = (index: number) => (index < at ? index : index + delta);
+      const survives = (index: number) => index < at || index >= after;
+      const settle = (index: number) => Math.min(survives(index) ? moved(index) : at, left - 1);
+
+      // Worked out before both updaters rather than inside them: the selection's fallback is the
+      // cursor's new row, and an updater cannot see where the other one landed.
+      const cursor = active === null || left === 0 ? null : settle(active);
+      setActive(cursor);
+      setSelected((current) => {
+        const next = new Set<number>();
+        for (const index of current) {
+          if (survives(index)) {
+            next.add(moved(index));
+          }
+        }
+        // The selection never empties while rows stand, which is this hook's own invariant: when
+        // every row it named is one that went, it comes down onto the cursor.
+        if (next.size === 0 && cursor !== null) {
+          next.add(cursor);
+        }
+        return next;
+      });
+      anchor.current = left === 0 ? 0 : settle(anchor.current);
+    },
+    [active, count],
+  );
+
+  return { active, selected, move, toggle, selectAll, collapse, rowsMoved };
 }

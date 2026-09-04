@@ -90,13 +90,23 @@ export type SubtitleFile = {
   adoptTranscription: (runId: number) => Promise<void>;
   setText: (cue: number, text: string) => Promise<void>;
   setTimes: (cue: number, startMs: number, endMs: number) => Promise<void>;
+  /** `before === cues.length` appends; the four below carry the backend's own argument names. */
+  insertCue: (before: number, startMs: number, endMs: number, text: string) => Promise<void>;
+  deleteCue: (cue: number) => Promise<void>;
+  /** `textOffset` counts UTF-8 bytes into the cue's text, which is what the backend splits on. */
+  splitCue: (cue: number, textOffset: number, atMs: number) => Promise<void>;
+  /** Joins `cue` with the one after it, so the last row has nothing to merge with. */
+  mergeCue: (cue: number) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   save: () => Promise<void>;
   saveAs: (destination: string) => Promise<void>;
 };
 
-export function useSubtitleFile(): SubtitleFile {
+/** Told after every patch that changed the row count, so the cursor and the selection follow. */
+export type RowsMoved = (at: number, removed: number, inserted: number) => void;
+
+export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
   const [summary, setSummary] = useState<SubtitleSummary | null>(null);
   const [cues, setCues] = useState<CueRow[]>([]);
   const [canUndo, setCanUndo] = useState(false);
@@ -126,19 +136,25 @@ export function useSubtitleFile(): SubtitleFile {
     return next;
   }, []);
 
-  const applyPatch = useCallback((patch: CuePatch) => {
-    revision.current = patch.revision;
-    setCues((current) => [
-      ...current.slice(0, patch.from),
-      ...patch.cues,
-      ...current.slice(patch.from + patch.removed),
-    ]);
-    setSummary((current) => (current === null ? null : { ...current, cueCount: patch.cueCount }));
-    setCanUndo(patch.canUndo);
-    setCanRedo(patch.canRedo);
-    setDirty(patch.dirty);
-    setTruncated(patch.truncated);
-  }, []);
+  const applyPatch = useCallback(
+    (patch: CuePatch) => {
+      revision.current = patch.revision;
+      // Before the rows change, so whoever indexes by row is told once per patch and cannot be
+      // forgotten by a caller: every command that changes the count comes through here.
+      onRowsMoved(patch.from, patch.removed, patch.cues.length);
+      setCues((current) => [
+        ...current.slice(0, patch.from),
+        ...patch.cues,
+        ...current.slice(patch.from + patch.removed),
+      ]);
+      setSummary((current) => (current === null ? null : { ...current, cueCount: patch.cueCount }));
+      setCanUndo(patch.canUndo);
+      setCanRedo(patch.canRedo);
+      setDirty(patch.dirty);
+      setTruncated(patch.truncated);
+    },
+    [onRowsMoved],
+  );
 
   /** Take a document the backend has just made the open one, whichever route opened it. */
   const applyOpened = useCallback((opened: SubtitleOpened) => {
@@ -258,6 +274,22 @@ export function useSubtitleFile(): SubtitleFile {
     [command],
   );
 
+  const insertCue = useCallback(
+    (before: number, startMs: number, endMs: number, text: string) =>
+      command("subtitle_insert", { before, startMs, endMs, text }),
+    [command],
+  );
+
+  const deleteCue = useCallback((cue: number) => command("subtitle_delete", { cue }), [command]);
+
+  const splitCue = useCallback(
+    (cue: number, textOffset: number, atMs: number) =>
+      command("subtitle_split", { cue, textOffset, atMs }),
+    [command],
+  );
+
+  const mergeCue = useCallback((cue: number) => command("subtitle_merge", { cue }), [command]);
+
   const undo = useCallback(() => command("subtitle_undo", {}), [command]);
 
   const redo = useCallback(() => command("subtitle_redo", {}), [command]);
@@ -333,6 +365,10 @@ export function useSubtitleFile(): SubtitleFile {
     adoptTranscription,
     setText,
     setTimes,
+    insertCue,
+    deleteCue,
+    splitCue,
+    mergeCue,
     undo,
     redo,
     save,

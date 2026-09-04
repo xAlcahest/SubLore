@@ -3,8 +3,8 @@ export const en = {
   appName: "Sublore",
   /**
    * The menu bar and the toolbar. Every title here is always drawn, greyed when nothing behind it
-   * can be used; Subtitles, Timing and Terms are absent because no command of theirs is registered
-   * yet, and they arrive with the milestone that writes them (decision 24 A4).
+   * can be used; Timing and Terms are absent because no command of theirs is registered yet, and
+   * they arrive with the milestone that writes them (decision 24 A4).
    */
   menu: {
     file: {
@@ -29,6 +29,14 @@ export const en = {
       subtitles: "Subtitles on video",
       /** One of the five interface size radio items (S1). `{percent}` is a whole number. */
       scale: "{percent}%",
+    },
+    /** The four cue structure edits, interface-spec section 3 order (M2.7 E2, T3 C2). */
+    subtitles: {
+      title: "Subtitles",
+      insert: "Insert cue",
+      delete: "Delete cue",
+      split: "Split cue",
+      merge: "Merge with next",
     },
     audio: {
       title: "Audio",

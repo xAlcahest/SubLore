@@ -152,11 +152,17 @@
   cursor: pointer;
 }
 
-.railmenu__item:hover,
+.railmenu__item:not([aria-disabled="true"]):hover,
 .railmenu__item:focus {
   background: var(--accent-bg);
   color: var(--ink);
   outline: none;
+}
+
+/* Greyed rather than absent, in the same ink as a greyed menu item (owner ruling 2026-09-03). */
+.railmenu__item[aria-disabled="true"] {
+  color: var(--ink-faint);
+  cursor: default;
 }
 
 .raildialog {

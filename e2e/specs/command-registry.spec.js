@@ -11,6 +11,11 @@
  * Undo and Redo carry that count. Both send their command the moment they are asked, with no
  * chooser and no state check of their own in front of them, so a gate that let one through shows up
  * here as a name in the list rather than as something that has to be inferred.
+ *
+ * The rail is the fourth route and the one with teeth. Its greyed items are list rows carrying
+ * aria-disabled, so a click on one arrives at the dispatch and only the availability test there
+ * stops it; the menu bar and the toolbar draw native disabled buttons, which swallow the click
+ * first, and the keyboard is the only other route that reaches the gate at all.
  */
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -23,6 +28,7 @@ import { answerChooser, cancelChooser, findChooser, waitForChooser } from "../li
 import { clickAt, focusWindow, pressKey } from "../lib/input.js";
 import { takeCommands, watchCommands } from "../lib/ipc.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
+import { closeAnyOpenProject } from "../lib/rail.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
 
@@ -41,6 +47,10 @@ const DECLARED = [
   "asr-transcribe",
   "edit-undo",
   "edit-redo",
+  "subtitle-insert",
+  "subtitle-delete",
+  "subtitle-split",
+  "subtitle-merge",
   "help-about",
   "video-toggle-subtitle-overlay",
   "view-waveform-panel",
@@ -55,6 +65,7 @@ const DECLARED = [
 const TITLES = [
   { id: "file", label: "File", disabled: false },
   { id: "edit", label: "Edit", disabled: false },
+  { id: "subtitle", label: "Subtitles", disabled: false },
   { id: "view", label: "View", disabled: false },
   { id: "audio", label: "Audio", disabled: true },
   { id: "help", label: "Help", disabled: false },
@@ -77,6 +88,14 @@ const EDIT_ITEMS = [
   { id: "asr-transcribe", disabled: false },
 ];
 
+/** Subtitles with nothing open: all four cue edits need a document, so all four are greyed. */
+const SUBTITLE_ITEMS = [
+  { id: "subtitle-insert", disabled: true },
+  { id: "subtitle-delete", disabled: true },
+  { id: "subtitle-split", disabled: true },
+  { id: "subtitle-merge", disabled: true },
+];
+
 /** Every button the toolbar will ever draw, drawn with nothing open (C2). */
 const TOOLBAR = [
   { id: "file-open-subtitle", disabled: false },
@@ -95,6 +114,15 @@ const THREE_ROUTES = "file-save-copy";
 const THREE_ROUTES_KEY = "ctrl+shift+s";
 /** What that command raises before it sends anything, so a leak has a second shape to show in. */
 const THREE_ROUTES_CHOOSER = "Save a copy of the subtitle";
+
+/**
+ * The rail's project menu with nothing open: three commands that need a project, greyed. Each asks
+ * its question before it changes anything, so a question standing open is what a leak looks like.
+ */
+const RAIL_GREYED = ["add-episode", "close-project", "delete-project"];
+/** The one command on that menu that can run, which is how this route proves its clicks land. */
+const RAIL_LIVE = "create-project";
+const RAIL_LIVE_CHOOSER = "Choose a project folder";
 
 /** Writes go to the harness temp dir: the committed fixture is copied, never opened for editing. */
 function workingCopy() {
@@ -145,6 +173,18 @@ function textOf(selector) {
 
 function disabledOf(selector) {
   return browser.execute((css) => document.querySelector(css)?.disabled ?? null, selector);
+}
+
+function present(selector) {
+  return browser.execute((css) => document.querySelector(css) !== null, selector);
+}
+
+/** A rail item is greyed with `aria-disabled`, not `disabled`, so its click reaches the gate. */
+function ariaDisabledOf(selector) {
+  return browser.execute(
+    (css) => document.querySelector(css)?.getAttribute("aria-disabled") ?? null,
+    selector,
+  );
 }
 
 /** The title of the open dropdown, or null when none is open. */
@@ -273,6 +313,9 @@ describe("the command registry", () => {
       () => browser.execute(() => document.querySelector(".toolbar__file-open-subtitle") !== null),
       { timeout: 30000, message: "the app UI to render" },
     );
+    // Every spec shares one data home and the app reopens the project it had, so the emptiest state
+    // this file reads is one it has to make. Two specs earlier leave one open.
+    await closeAnyOpenProject(toplevel);
     empty = await drawnEverywhere(toplevel);
   });
 
@@ -306,10 +349,11 @@ describe("the command registry", () => {
     expect(empty.titles).toEqual(TITLES);
     expect(greying(empty, "file")).toEqual(FILE_ITEMS);
     expect(greying(empty, "edit")).toEqual(EDIT_ITEMS);
+    expect(greying(empty, "subtitle")).toEqual(SUBTITLE_ITEMS);
     expect(empty.toolbar.map(({ id, disabled }) => ({ id, disabled }))).toEqual(TOOLBAR);
   });
 
-  it("refuses a greyed command from the menu, the toolbar and the keyboard", async () => {
+  it("refuses a greyed command from the menu, the toolbar, the rail and the keyboard", async () => {
     await watchCommands();
 
     // The menu route. Undo is the one that would show a leak with nothing else in the way: it sends
@@ -335,6 +379,36 @@ describe("the command registry", () => {
       expect(await disabledOf(`.toolbar__${id}`)).toBe(true);
       await clickElement(toplevel, `.toolbar__${id}`);
     }
+
+    // The rail route. The two above draw their greyed commands as native disabled buttons, which
+    // swallow the click before anything sees it, so they cannot show the gate working; a rail item
+    // is a list row carrying aria-disabled and its click really does arrive (BACKLOG.md N18).
+    await clickElement(toplevel, ".rail__empty");
+    await waitFor(() => present(".railmenu"), {
+      timeout: 15000,
+      message: "the rail's project menu to open",
+    });
+    for (const key of RAIL_GREYED) {
+      expect(await ariaDisabledOf(`.railmenu__item--${key}`)).toBe("true");
+      await clickElement(toplevel, `.railmenu__item--${key}`);
+      // Nothing ran: each of these asks its question first, so a question on screen is the leak.
+      expect(await present(".raildialog")).toBe(false);
+      // And nothing closed either, the same inertness the menu bar's greyed item has above.
+      expect(await present(".railmenu")).toBe(true);
+    }
+
+    // This route's barrier, on the same menu and the same kind of click: the one command that can
+    // run takes the menu down and raises its chooser, so the silences above are refusals rather
+    // than three clicks that landed on nothing.
+    expect(await ariaDisabledOf(`.railmenu__item--${RAIL_LIVE}`)).toBe("false");
+    await clickElement(toplevel, `.railmenu__item--${RAIL_LIVE}`);
+    await waitFor(async () => ((await present(".railmenu")) ? null : true), {
+      timeout: 15000,
+      message: "the rail menu to close behind the command that ran",
+    });
+    await cancelChooser(await waitForChooser(RAIL_LIVE_CHOOSER), "project folder");
+    // A cancelled chooser creates nothing, so the rail is back where it was for the last check.
+    expect(await present(".rail__empty")).toBe(true);
 
     // The keyboard route: the accelerator the File menu draws beside the greyed item.
     focusWindow(toplevel.id);
@@ -382,10 +456,15 @@ describe("the command registry", () => {
     );
 
     // Exactly the items that now work stop being grey. The document opened clean, so Save has
-    // nothing to write and Undo has nothing to take back: Save a copy is the whole difference, and
-    // it moved on both routes because both draw the one record.
+    // nothing to write and Undo has nothing to take back: Save a copy is the whole difference on
+    // File, and it moved on both routes because both draw the one record. The fixture's three cues
+    // seed the cursor onto row 0 (decision 5): insert, delete and merge all only need that, so they
+    // ungrey too. Split stays gated behind a caret nothing has placed yet.
     expect(flips(empty, open)).toEqual([
       { route: "menu", id: "file-save-copy", disabled: false },
+      { route: "menu", id: "subtitle-insert", disabled: false },
+      { route: "menu", id: "subtitle-delete", disabled: false },
+      { route: "menu", id: "subtitle-merge", disabled: false },
       { route: "toolbar", id: "file-save-copy", disabled: false },
     ]);
   });

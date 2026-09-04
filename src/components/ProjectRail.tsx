@@ -3,13 +3,48 @@ import { useState } from "react";
 import { episodeLine, fileLine, fileName, type Project } from "../hooks/useProject";
 import { en } from "../i18n/en";
 import { fill } from "../i18n/format";
+import { type Command, type CommandId, type CommandRegistry } from "../types/chrome";
 import { type EpisodeFileView, type EpisodeView, type FileRole } from "../types/project";
 import RailDialog from "./RailDialog";
-import RailMenu, { type RailMenuItem } from "./RailMenu";
+import RailMenu from "./RailMenu";
 
 const ROLES: readonly FileRole[] = ["media", "source", "target"];
 
-type Menu = { x: number; y: number; items: RailMenuItem[] };
+/** The node an open menu belongs to: what its commands act on, and what their greying is read from. */
+type Target =
+  | { kind: "project" }
+  | { kind: "episode"; episode: EpisodeView }
+  | { kind: "file"; episode: EpisodeView; file: EpisodeFileView };
+
+type MenuAt = { x: number; y: number; target: Target };
+
+/*
+ * What each of the rail's three menus draws, ids only, and no list changes with the state: what
+ * the state moves is the greying inside the records (CLAUDE.md, owner ruling 2026-09-03).
+ */
+const PROJECT_ITEMS: CommandId[] = [
+  "project.create-project",
+  // Second in both states, so opening a project is one route whether or not one is open.
+  "project.open-project",
+  "project.add-episode",
+  "project.close-project",
+  "project.delete-project",
+];
+
+const EPISODE_ITEMS: CommandId[] = [
+  ...ROLES.map((role): CommandId => `project.attach-${role}`),
+  "project.rename-episode",
+  "project.delete-episode",
+];
+
+const FILE_ITEMS: CommandId[] = ["project.open-file", "project.locate-file", "project.detach-file"];
+
+function itemsFor(target: Target): CommandId[] {
+  if (target.kind === "project") {
+    return PROJECT_ITEMS;
+  }
+  return target.kind === "episode" ? EPISODE_ITEMS : FILE_ITEMS;
+}
 
 type Ask = {
   title: string;
@@ -32,7 +67,7 @@ type ProjectRailProps = {
  * each of the five that v1 ships is confirmed once (D2).
  */
 export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
-  const [menu, setMenu] = useState<Menu | null>(null);
+  const [menu, setMenu] = useState<MenuAt | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
 
   const view = project.project;
@@ -50,29 +85,26 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
     }
   }
 
-  const openProject: RailMenuItem = {
-    key: "open-project",
-    label: en.project.menu.openProject,
-    run: () => void withChosenPath("project-folder", (path) => void project.open(path)),
-  };
-
-  function projectItems(): RailMenuItem[] {
-    if (view === null) {
-      return [
-        {
-          key: "create-project",
-          label: en.project.menu.createProject,
-          run: () => void withChosenPath("project-folder", (path) => void project.create(path)),
-        },
-        openProject,
-      ];
-    }
-    const folder = view.folder;
-    const title = view.title;
+  function projectCommands(): Command[] {
     return [
       {
-        key: "add-episode",
+        id: "project.create-project",
+        label: en.project.menu.createProject,
+        // A folder holds one project, so this is the command for a rail with none open; the three
+        // below are the ones that need one.
+        enabled: view === null,
+        run: () => void withChosenPath("project-folder", (path) => void project.create(path)),
+      },
+      {
+        id: "project.open-project",
+        label: en.project.menu.openProject,
+        enabled: true,
+        run: () => void withChosenPath("project-folder", (path) => void project.open(path)),
+      },
+      {
+        id: "project.add-episode",
         label: en.project.menu.addEpisode,
+        enabled: view !== null,
         run: () =>
           setAsk({
             title: en.project.ask.addEpisodeTitle,
@@ -81,40 +113,48 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
             onConfirm: (value) => void project.addEpisode(value),
           }),
       },
-      // Second in both states, so opening a project is one route whether or not one is open.
-      openProject,
       {
-        key: "close-project",
+        id: "project.close-project",
         label: en.project.menu.closeProject,
-        run: () =>
-          setAsk({
-            title: en.project.ask.closeProjectTitle,
-            message: fill(en.project.ask.closeProjectMessage, { title }),
-            confirmLabel: en.project.ask.closeProjectConfirm,
-            onConfirm: () => void project.close(),
-          }),
+        enabled: view !== null,
+        run: () => {
+          // Narrowed for the question, which names the project; `enabled` is what refuses it.
+          if (view !== null) {
+            setAsk({
+              title: en.project.ask.closeProjectTitle,
+              message: fill(en.project.ask.closeProjectMessage, { title: view.title }),
+              confirmLabel: en.project.ask.closeProjectConfirm,
+              onConfirm: () => void project.close(),
+            });
+          }
+        },
       },
       {
-        key: "delete-project",
+        id: "project.delete-project",
         label: en.project.menu.deleteProject,
+        enabled: view !== null,
         // The folder is named in the question, so nothing is ever deleted straight off a click.
-        run: () =>
-          setAsk({
-            title: en.project.ask.deleteProjectTitle,
-            message: fill(en.project.ask.deleteProjectMessage, { folder }),
-            confirmLabel: en.project.ask.deleteProjectConfirm,
-            onConfirm: () => void project.remove(),
-          }),
+        run: () => {
+          if (view !== null) {
+            setAsk({
+              title: en.project.ask.deleteProjectTitle,
+              message: fill(en.project.ask.deleteProjectMessage, { folder: view.folder }),
+              confirmLabel: en.project.ask.deleteProjectConfirm,
+              onConfirm: () => void project.remove(),
+            });
+          }
+        },
       },
     ];
   }
 
-  function episodeItems(episode: EpisodeView): RailMenuItem[] {
+  function episodeCommands(episode: EpisodeView): Command[] {
     const line = episodeLine(episode.ordinal, episode.title);
     return [
-      ...ROLES.map((role) => ({
-        key: `attach-${role}`,
+      ...ROLES.map((role): Command => ({
+        id: `project.attach-${role}`,
         label: fill(en.project.menu.attach, { role: en.project.roles[role].toLowerCase() }),
+        enabled: true,
         run: () =>
           void withChosenPath(
             "project-file",
@@ -122,8 +162,9 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
           ),
       })),
       {
-        key: "rename-episode",
+        id: "project.rename-episode",
         label: en.project.menu.renameEpisode,
+        enabled: true,
         run: () =>
           setAsk({
             title: en.project.ask.renameEpisodeTitle,
@@ -134,8 +175,9 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
           }),
       },
       {
-        key: "delete-episode",
+        id: "project.delete-episode",
         label: en.project.menu.deleteEpisode,
+        enabled: true,
         run: () =>
           setAsk({
             title: en.project.ask.deleteEpisodeTitle,
@@ -147,25 +189,27 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
     ];
   }
 
-  function fileItems(episode: EpisodeView, file: EpisodeFileView): RailMenuItem[] {
-    // A record whose file is gone offers Locate instead of Open. Sublore never goes looking for it.
-    const first: RailMenuItem = file.missing
-      ? {
-          key: "locate-file",
-          label: en.project.menu.locateFile,
-          run: () =>
-            void withChosenPath("project-file", (path) => void project.locateFile(file.id, path)),
-        }
-      : {
-          key: "open-file",
-          label: en.project.menu.openFile,
-          run: () => onOpenFile(file),
-        };
+  function fileCommands(episode: EpisodeView, file: EpisodeFileView): Command[] {
     return [
-      first,
       {
-        key: "detach-file",
+        id: "project.open-file",
+        label: en.project.menu.openFile,
+        // A record whose file is gone offers Locate instead, and the other is greyed rather than
+        // taken away. Sublore never goes looking for it either way (decision 24, D3).
+        enabled: !file.missing,
+        run: () => onOpenFile(file),
+      },
+      {
+        id: "project.locate-file",
+        label: en.project.menu.locateFile,
+        enabled: file.missing,
+        run: () =>
+          void withChosenPath("project-file", (path) => void project.locateFile(file.id, path)),
+      },
+      {
+        id: "project.detach-file",
         label: en.project.menu.detachFile,
+        enabled: true,
         run: () =>
           setAsk({
             title: en.project.ask.detachFileTitle,
@@ -181,6 +225,23 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
   }
 
   /**
+   * The rail's commands, declared from the state this render holds and never polled, so no route
+   * can draw a stale `enabled` (interface-spec 2.3). The node the menu belongs to is part of that
+   * state: it is what an episode or file command acts on.
+   */
+  function registryFor(target: Target): CommandRegistry {
+    let declared: Command[];
+    if (target.kind === "project") {
+      declared = projectCommands();
+    } else if (target.kind === "episode") {
+      declared = episodeCommands(target.episode);
+    } else {
+      declared = fileCommands(target.episode, target.file);
+    }
+    return Object.fromEntries(declared.map((command) => [command.id, command]));
+  }
+
+  /**
    * Opening an attached file is what a project is for (BACKLOG M4.5). A record whose file is gone
    * asks where it went instead, which is the same Locate its menu offers: nothing on disk is
    * searched, and the record is never dropped (decision 24, D3).
@@ -193,32 +254,32 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
     onOpenFile(file);
   }
 
-  function openMenuAt(event: React.MouseEvent, items: RailMenuItem[]) {
+  function openMenuAt(event: React.MouseEvent, target: Target) {
     event.preventDefault();
     event.stopPropagation();
-    setMenu({ x: event.clientX, y: event.clientY, items });
+    setMenu({ x: event.clientX, y: event.clientY, target });
   }
 
   /** Under the node it belongs to, which is where a click or a keystroke on the node wants it. */
-  function openMenuUnder(element: HTMLElement, items: RailMenuItem[]) {
+  function openMenuUnder(element: HTMLElement, target: Target) {
     const box = element.getBoundingClientRect();
-    setMenu({ x: box.left, y: box.bottom, items });
+    setMenu({ x: box.left, y: box.bottom, target });
   }
 
   /** Shift+F10 and the menu key, so every command on the menu is reachable without a pointer. */
-  function openMenuFromKeyboard(event: React.KeyboardEvent<HTMLElement>, items: RailMenuItem[]) {
+  function openMenuFromKeyboard(event: React.KeyboardEvent<HTMLElement>, target: Target) {
     if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) {
       return;
     }
     event.preventDefault();
-    openMenuUnder(event.currentTarget, items);
+    openMenuUnder(event.currentTarget, target);
   }
 
   return (
     <nav
       className="rail"
       aria-label={en.project.cap}
-      onContextMenu={(event) => openMenuAt(event, projectItems())}
+      onContextMenu={(event) => openMenuAt(event, { kind: "project" })}
     >
       <h2 className="rail__cap">{en.project.cap}</h2>
 
@@ -227,8 +288,8 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
           className="rail__empty"
           type="button"
           aria-haspopup="menu"
-          onClick={(event) => openMenuUnder(event.currentTarget, projectItems())}
-          onKeyDown={(event) => openMenuFromKeyboard(event, projectItems())}
+          onClick={(event) => openMenuUnder(event.currentTarget, { kind: "project" })}
+          onKeyDown={(event) => openMenuFromKeyboard(event, { kind: "project" })}
         >
           {en.project.noProject}
         </button>
@@ -242,9 +303,9 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
               type="button"
               title={view.folder}
               aria-haspopup="menu"
-              onClick={(event) => openMenuUnder(event.currentTarget, projectItems())}
-              onContextMenu={(event) => openMenuAt(event, projectItems())}
-              onKeyDown={(event) => openMenuFromKeyboard(event, projectItems())}
+              onClick={(event) => openMenuUnder(event.currentTarget, { kind: "project" })}
+              onContextMenu={(event) => openMenuAt(event, { kind: "project" })}
+              onKeyDown={(event) => openMenuFromKeyboard(event, { kind: "project" })}
             >
               {view.title}
             </button>
@@ -263,8 +324,10 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
                       type="button"
                       aria-current={episode.id === selectedId}
                       onClick={() => project.select(episode.id)}
-                      onContextMenu={(event) => openMenuAt(event, episodeItems(episode))}
-                      onKeyDown={(event) => openMenuFromKeyboard(event, episodeItems(episode))}
+                      onContextMenu={(event) => openMenuAt(event, { kind: "episode", episode })}
+                      onKeyDown={(event) =>
+                        openMenuFromKeyboard(event, { kind: "episode", episode })
+                      }
                     >
                       {episodeLine(episode.ordinal, episode.title)}
                     </button>
@@ -281,9 +344,11 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
                               type="button"
                               title={fileLine(file)}
                               onClick={() => activate(file)}
-                              onContextMenu={(event) => openMenuAt(event, fileItems(episode, file))}
+                              onContextMenu={(event) =>
+                                openMenuAt(event, { kind: "file", episode, file })
+                              }
                               onKeyDown={(event) =>
-                                openMenuFromKeyboard(event, fileItems(episode, file))
+                                openMenuFromKeyboard(event, { kind: "file", episode, file })
                               }
                             >
                               <span className="rail__file-name">{fileName(file.path)}</span>
@@ -308,7 +373,8 @@ export default function ProjectRail({ project, onOpenFile }: ProjectRailProps) {
           x={menu.x}
           y={menu.y}
           label={en.project.menuLabel}
-          items={menu.items}
+          items={itemsFor(menu.target)}
+          commands={registryFor(menu.target)}
           onClose={() => setMenu(null)}
         />
       )}
