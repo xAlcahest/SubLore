@@ -893,9 +893,8 @@ export default function App() {
    * A contributed item, as a command like any other.
    *
    * The core answers "is a document open", never "is this the module's thing", so `enableWhen` is
-   * the whole of what it knows (module-abi.md 5.2). Running one is not wired yet: `invoke` reaches
-   * the module with N8e, and until then the item draws and refuses, which is the direction a
-   * missing half has to fail in.
+   * the whole of what it knows (module-abi.md 5.2). Running one carries the item's own id back to
+   * the module that contributed it, with the cursor's row and nothing else.
    */
   function contributed(item: Contribution): Command {
     const enabled = (() => {
@@ -914,11 +913,8 @@ export default function App() {
       id: moduleCommandId(item),
       label: item.label,
       enabled,
-      run: () => {
-        // Deliberately nothing yet, and said out loud rather than silently: the call that reaches
-        // a module is N8e's.
-        console.warn("module item activated before the host can carry it", item.id);
-      },
+      // The module's own id and the state the gesture carried, and nothing about what it does.
+      run: () => void subtitle.invokeModule(item.module, item.id, selection.active),
     };
   }
 

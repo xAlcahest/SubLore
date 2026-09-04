@@ -12,11 +12,15 @@
  * them runs with no module beside the executable and none of them has ever drawn a module line.
  * Asserting it once more here would be asserting it about the same state they all establish.
  */
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import path from "node:path";
+
 import { browser, expect } from "@wdio/globals";
 
 import { appLog, dataHome } from "../lib/applog.js";
+import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow, pressKey } from "../lib/input.js";
-import { windowHeight, windowWidth } from "../lib/paths.js";
+import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
 
@@ -31,10 +35,33 @@ const MODULE_TITLE = "Fixture (en)";
  * Those bytes do not contain the term and what a reader sees does, so a two says the comparison
  * came from `sublore-matcher` through the host table and not from anything in the module.
  */
-const MODULE_ITEM = "Say something (2 found)";
+const MODULE_ITEM = "Rewrite the first line (2 found)";
+/** The item that proposes against a revision the session has moved past (module-abi.md 9.6). */
+const STALE_ITEM = "Rewrite from a stale revision";
+/** What the fixture puts in the first cue, in its own words so nothing else could have written it. */
+const WROTE = "The module wrote this line.";
+/** The first cue of the fixture below, before any module touches it. */
+const FIRST = "The harbour was empty when we got there.";
 /** The fixture reports one above the host's major, and the host's is 1. */
 const THEIRS = 2;
 const OURS = 1;
+
+/** Writes go to the harness temp dir: the committed fixture is copied, never opened for editing. */
+function workingCopy() {
+  const source = path.join(repoRoot, "fixtures", "subtitles", "srt", "clean", "basic-lf.srt");
+  if (!existsSync(source)) {
+    throw new Error(
+      `E2E prerequisite missing: ${source} does not exist. It is committed; restore it with ` +
+        "`git checkout fixtures/subtitles`.",
+    );
+  }
+  const directory = path.join(dataHome(), "modules");
+  rmSync(directory, { recursive: true, force: true });
+  mkdirSync(directory, { recursive: true });
+  const copy = path.join(directory, "basic-lf.srt");
+  copyFileSync(source, copy);
+  return copy;
+}
 
 function centreOf(selector) {
   return browser.execute((css) => {
@@ -62,6 +89,39 @@ function present(selector) {
 
 function textOf(selector) {
   return browser.execute((css) => document.querySelector(css)?.textContent ?? null, selector);
+}
+
+/** The text of every row the grid draws. */
+function gridTexts() {
+  return browser.execute(() =>
+    Array.from(document.querySelectorAll(".cuelist__row")).map(
+      (row) => row.querySelector(".cuelist__text")?.textContent ?? "",
+    ),
+  );
+}
+
+/** Open the module's own dropdown and click one of its items by the label it drew. */
+async function runModuleItem(toplevel, label) {
+  await clickElement(toplevel, ".menubar__title--module-0-1");
+  await waitFor(() => present(".menubar__menu"), {
+    timeout: 15000,
+    message: "the module's own dropdown to open",
+  });
+  const found = await browser.execute(
+    (want) =>
+      Array.from(document.querySelectorAll(".menubar__item")).find((item) =>
+        (item.textContent ?? "").includes(want),
+      )?.id ?? null,
+    label,
+  );
+  if (found === null) {
+    throw new Error(`the module drew no item reading ${label}`);
+  }
+  await clickElement(toplevel, `#${found}`);
+  await waitFor(async () => ((await present(".menubar__menu")) === false ? true : null), {
+    timeout: 15000,
+    message: "the dropdown to close behind the item it ran",
+  });
 }
 
 describe("modules beside the executable", () => {
@@ -99,10 +159,11 @@ describe("modules beside the executable", () => {
       Array.from(document.querySelectorAll(".menubar__item")).map((item) => item.textContent ?? ""),
     );
     expect(items.some((item) => item.includes(MODULE_ITEM))).toBe(true);
-    // Exactly one. The fixture pushes a third item with a state this build does not know, and
+    // Exactly two. The fixture pushes a third item with a state this build does not know, and
     // section 5.2 says that costs the module its item rather than giving the user a control that
     // is enabled when it should not be.
-    expect(items).toHaveLength(1);
+    expect(items).toHaveLength(2);
+    expect(items.some((item) => item.includes(STALE_ITEM))).toBe(true);
 
     pressKey("Escape");
     await waitFor(async () => ((await present(".menubar__menu")) === false ? true : null), {
@@ -130,6 +191,58 @@ describe("modules beside the executable", () => {
     expect(line).toContain(FIXTURE_FILE);
     expect(line).toContain(String(THEIRS));
     expect(line).toContain(String(OURS));
+  });
+
+  it("changes a cue when its own item is activated, and one undo takes it back", async () => {
+    // Criterion 5 of module-abi.md section 9. The module names a cue and the text; the host runs
+    // the same three guards every interactive edit runs and makes the edit itself.
+    const copy = workingCopy();
+    const openedBytes = readFileSync(copy);
+
+    await clickElement(toplevel, ".toolbar__file-open-subtitle");
+    const chooser = await waitForChooser("Choose a subtitle");
+    await answerChooser(chooser, copy, "subtitle");
+    focusWindow(toplevel.id);
+    await waitFor(async () => ((await gridTexts()).length === 3 ? true : null), {
+      timeout: 20000,
+      message: "the document to reach the grid",
+    });
+    expect((await gridTexts())[0]).toBe(FIRST);
+    expect(await present(".statusbar__dirty")).toBe(false);
+
+    await runModuleItem(toplevel, MODULE_ITEM);
+    await waitFor(async () => ((await gridTexts())[0] === WROTE ? true : null), {
+      timeout: 20000,
+      message: "the first cue to carry what the module wrote",
+    });
+    expect(await present(".statusbar__dirty")).toBe(true);
+    // The module cannot write the file and there is no save on the boundary (4.5).
+    expect(readFileSync(copy).equals(openedBytes)).toBe(true);
+
+    // One step, not one per cue the module touched: it went through the history like any edit.
+    await clickElement(toplevel, ".toolbar__edit-undo");
+    await waitFor(async () => ((await gridTexts())[0] === FIRST ? true : null), {
+      timeout: 20000,
+      message: "the undo to put the line back",
+    });
+    expect(await present(".statusbar__dirty")).toBe(false);
+    expect(readFileSync(copy).equals(openedBytes)).toBe(true);
+  });
+
+  it("refuses a proposal made against a revision the session has moved past", async () => {
+    // Criterion 6. The document is the one the check above left, and its revision has moved twice.
+    const before = await gridTexts();
+
+    await runModuleItem(toplevel, STALE_ITEM);
+    // The refusal is the host's and the core has no sentence for it, so the log is where it is
+    // said: item 4 is the fixture's own id for this one and 6 is SUBLORE_ERR_STALE_REVISION.
+    await waitFor(
+      () =>
+        /modules: sublore_module_fixture\.so refused item 4, reporting 6/.test(appLog(dataHome())),
+      { timeout: 20000, message: "the app to say it refused the stale proposal" },
+    );
+    expect(await gridTexts()).toEqual(before);
+    expect(await present(".statusbar__dirty")).toBe(false);
   });
 
   it("says the same thing in About, where it stays", async () => {

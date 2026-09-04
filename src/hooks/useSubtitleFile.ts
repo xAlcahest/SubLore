@@ -99,6 +99,14 @@ export type SubtitleFile = {
   splitCue: (cue: number, textOffset: number, atMs: number) => Promise<void>;
   /** Joins `cue` with the one after it, so the last row has nothing to merge with. */
   mergeCue: (cue: number) => Promise<void>;
+  /**
+   * A contributed item was activated, in the module that contributed it.
+   *
+   * Here rather than beside the other module calls because a module may edit: the revision it is
+   * given and the patches it sends back are this hook's, and one owner for both is what keeps them
+   * from disagreeing. See docs/module-abi.md section 4.5.
+   */
+  invokeModule: (module: number, item: number, cue: number | null) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   save: () => Promise<void>;
@@ -107,6 +115,14 @@ export type SubtitleFile = {
 
 /** Told after every patch that changed the row count, so the cursor and the selection follow. */
 export type RowsMoved = (at: number, removed: number, inserted: number) => void;
+
+/**
+ * What one activation of a contributed item did. Mirrors `modules::InvokeOutcome`.
+ *
+ * The two halves are independent: a module that edited and then refused did both, and the code is
+ * the module's own rather than one the core translates.
+ */
+type ModuleOutcome = { code: number; patches: CuePatch[] };
 
 export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
   const [summary, setSummary] = useState<SubtitleSummary | null>(null);
@@ -265,6 +281,47 @@ export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
     [applyPatch, serialize],
   );
 
+  /**
+   * Carry an activation into a module, and take back whatever it changed.
+   *
+   * Not `command`: that one applies exactly one patch and treats anything else as a failure, and a
+   * module may change nothing, one cue, or several before it answers.
+   */
+  const invokeModule = useCallback(
+    (module: number, item: number, cue: number | null) =>
+      serialize(async () => {
+        setError(null);
+        try {
+          const outcome = await invoke<ModuleOutcome>("module_invoke", {
+            module,
+            item,
+            revision: revision.current,
+            cue,
+            // Both are a panel's, and panels are not built. Section 4.1 says `row` is only
+            // meaningful when `panelId` is not zero, so zero here says there is no row.
+            row: 0,
+            panelId: 0,
+            // Nothing to carry yet: a module keys its own storage on this, storage is not built,
+            // and `ProjectView` has no id to give. See docs/module-host-tasks.md H6.
+            projectKey: 0,
+          });
+          // Applied before the code is looked at. A module that changed rows and then refused
+          // changed them, and the grid has to draw the document the session holds.
+          for (const patch of outcome.patches) {
+            applyPatch(patch);
+          }
+          if (outcome.code !== 0) {
+            // The core does not know what the module was doing, so it has no sentence for this.
+            // The Rust side names the module, the item and the code in the log.
+            console.warn("a module refused its own activation", item, outcome.code);
+          }
+        } catch (failure) {
+          setError(toSubtitleError(failure));
+        }
+      }),
+    [applyPatch, serialize],
+  );
+
   const setText = useCallback(
     (cue: number, text: string) => command("subtitle_set_text", { cue, text }),
     [command],
@@ -381,5 +438,6 @@ export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
     redo,
     save,
     saveAs,
+    invokeModule,
   };
 }

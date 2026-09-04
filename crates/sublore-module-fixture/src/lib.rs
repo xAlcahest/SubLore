@@ -18,10 +18,11 @@ use core::ffi::c_void;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 use sublore_module_api::{
-    SubloreHost, SubloreInvocation, SubloreItem, SubloreItemFn, SubloreModule, SubloreStr,
-    SUBLORE_ABI_VERSION, SUBLORE_ENABLE_ALWAYS, SUBLORE_ERR_BAD_STRING, SUBLORE_ERR_UNSUPPORTED,
-    SUBLORE_FIND_SKIP_TAGS, SUBLORE_ITEM_MENU_ITEM, SUBLORE_ITEM_MENU_TITLE, SUBLORE_LOG_INFO,
-    SUBLORE_MODULE_SIZE, SUBLORE_OK,
+    SubloreHost, SubloreInvocation, SubloreItem, SubloreItemFn, SubloreModule, SubloreProposal,
+    SubloreStr, SUBLORE_ABI_VERSION, SUBLORE_ENABLE_ALWAYS, SUBLORE_ERR_BAD_STRING,
+    SUBLORE_ERR_UNSUPPORTED, SUBLORE_FIND_SKIP_TAGS, SUBLORE_ITEM_MENU_ITEM,
+    SUBLORE_ITEM_MENU_TITLE, SUBLORE_LOG_INFO, SUBLORE_MODULE_SIZE, SUBLORE_OK,
+    SUBLORE_PROPOSAL_SET_CUE_TEXT,
 };
 
 /// The table the host lent, kept from `load` because `create` is not handed one and `describe`
@@ -35,11 +36,17 @@ static HOST: AtomicPtr<SubloreHost> = AtomicPtr::new(core::ptr::null_mut());
 const HAYSTACK: &str = "the {\\i1}fog and the fog";
 const NEEDLE: &str = "the fog";
 
-/// The title, and the one item under it. Ids are the module's own and mean nothing to the core.
+/// The title, and the items under it. Ids are the module's own and mean nothing to the core.
 const TITLE_ID: u32 = 1;
 const ITEM_ID: u32 = 2;
 /// An item the host has to refuse, so that its allowlist is defended by something.
 const REFUSED_ID: u32 = 3;
+/// Proposes against a revision one behind the session's, which the host must refuse (section 9.6).
+const STALE_ID: u32 = 4;
+
+/// What the fixture writes into the first cue. Its own words, so a check can tell it apart from
+/// anything the core or the user could have put there.
+const WROTE: &str = "The module wrote this line.";
 
 /// What the fixture's own state is. Nothing yet beyond proving `create` and `destroy` pair up.
 struct Fixture {
@@ -129,7 +136,7 @@ unsafe extern "C" fn describe(ctx: *mut c_void, sink: *mut c_void, push: Sublore
     // count goes in the label for the same reason the locale does: it is the evidence from outside
     // that the call crossed and came back.
     let found = unsafe { ask_the_host() };
-    let action = format!("Say something ({found} found)");
+    let action = format!("Rewrite the first line ({found} found)");
 
     let items = [
         SubloreItem {
@@ -148,6 +155,17 @@ unsafe extern "C" fn describe(ctx: *mut c_void, sink: *mut c_void, push: Sublore
             enable_when: SUBLORE_ENABLE_ALWAYS,
             flags: 0,
             label: SubloreStr::borrowed(&action),
+            icon: SubloreStr::borrowed(""),
+        },
+        SubloreItem {
+            id: STALE_ID,
+            kind: SUBLORE_ITEM_MENU_ITEM,
+            parent: TITLE_ID,
+            // A document, because a proposal with none is refused for the wrong reason and would
+            // prove nothing about the revision check.
+            enable_when: sublore_module_api::SUBLORE_ENABLE_DOCUMENT_OPEN,
+            flags: 0,
+            label: SubloreStr::borrowed("Rewrite from a stale revision"),
             icon: SubloreStr::borrowed(""),
         },
         // Last, and deliberately wrong: `enable_when` is left at zero, which is the value section
@@ -235,10 +253,36 @@ unsafe extern "C" fn invoke(
     if ctx.is_null() || where_.is_null() {
         return SUBLORE_ERR_BAD_STRING;
     }
-    // Nothing to do until the host can answer: the calls that would act on the document arrive
-    // with N8e. Refusing an id it never contributed is the part that is meaningful now.
-    if item_id != ITEM_ID {
+    let at = unsafe { &*where_ };
+    match item_id {
+        // The revision the gesture carried, which is the session's own.
+        ITEM_ID => unsafe { rewrite_first_cue(at.revision) },
+        // One behind it, which is what a module that read the document and then let the user edit
+        // would be holding. The host has to refuse it and change nothing.
+        STALE_ID => unsafe { rewrite_first_cue(at.revision.wrapping_sub(1)) },
+        // An id this module never contributed.
+        _ => SUBLORE_ERR_UNSUPPORTED,
+    }
+}
+
+/// Ask the host to put [`WROTE`] in the first cue, at the revision given.
+///
+/// # Safety
+/// Called only from inside a host call, with the table `load` was given.
+unsafe fn rewrite_first_cue(revision: u64) -> i32 {
+    let table = HOST.load(Ordering::Acquire);
+    if table.is_null() {
         return SUBLORE_ERR_UNSUPPORTED;
     }
-    SUBLORE_OK
+    let table = unsafe { &*table };
+    let Some(propose) = table.propose else {
+        return SUBLORE_ERR_UNSUPPORTED;
+    };
+    let asked = SubloreProposal {
+        kind: SUBLORE_PROPOSAL_SET_CUE_TEXT,
+        revision,
+        cue: 0,
+        text: SubloreStr::borrowed(WROTE),
+    };
+    unsafe { propose(table.ctx, &asked) }
 }
