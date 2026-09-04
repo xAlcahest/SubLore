@@ -5,4 +5,4 @@ ScriptType: v4.00+
 [Events]
 Format: Start, End, Layer, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 0:01:02.50,0:01:05.00,0,Default,,0,0,0,,The field order is legal, just unusual.
-Dialogue: 0:01:05.10,0:01:07.75,0,Default,,0,0,0,,Aegisub writes it back canonically anyway.
+Dialogue: 0:01:05.10,0:01:07.75,0,Default,,0,0,0,,A canonical writer puts it back in order.
