@@ -242,6 +242,16 @@ pub async fn video_seek(state: State<'_, VideoState>, position: f64) -> Result<(
     state.player().seek(position)
 }
 
+/// Play a stretch and stop at its end, which is what timing a line is made of.
+#[tauri::command]
+pub async fn video_play_range(
+    state: State<'_, VideoState>,
+    from: f64,
+    to: f64,
+) -> Result<(), VideoError> {
+    state.player().play_range(from, to)
+}
+
 #[tauri::command]
 pub async fn video_set_region(app: AppHandle, region: VideoRegion) -> Result<(), VideoError> {
     if !(region.x.is_finite() && region.y.is_finite()) {

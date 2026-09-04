@@ -41,6 +41,10 @@ const TIMING_ITEMS = [
   "video-to-cue-start",
   "video-to-cue-end",
   "edit-select-at-playhead",
+  "time-play-line",
+  "time-play-before",
+  "time-play-after",
+  "time-play-to-end",
 ];
 
 function dataHome() {
@@ -300,6 +304,50 @@ describe("the times follow the playhead", () => {
       { timeout: 20000, message: `the player to reach ${THIRD_END}` },
     );
     expect(atEnd).toBe(THIRD_END);
+  });
+
+  it("plays the cursor's cue and stops itself at its end", async () => {
+    await cursorTo(toplevel, 3);
+    await seekTo(0);
+
+    await runFromMenu(toplevel, "time-play-line");
+    // It starts: the player leaves the beginning under its own steam, which a seek alone would not
+    // do because a seek leaves it paused.
+    await waitFor(async () => ((await playhead()) > 9 ? true : null), {
+      timeout: 20000,
+      message: "playback to reach the third cue",
+    });
+    // And it stops itself, without anything here asking it to.
+    const stopped = await waitFor(
+      async () => {
+        const label = await textOf(".controls__button");
+        return label === "Play" ? await playhead() : null;
+      },
+      { timeout: 20000, message: "the player to pause itself at the cue's end" },
+    );
+    // The window is the UI's resolution, not the stop's. The stop is checked on the event thread,
+    // which sees every frame, but this reads the transport slider, which the app updates ten times
+    // a second: a reading can lag the player by up to that. Measured here at 11.70 for a cue ending
+    // at 11.760. Asserting a frame's precision through a tenth-of-a-second window would be
+    // asserting something this harness cannot see.
+    expect(stopped).toBeGreaterThan(11.6);
+    expect(stopped).toBeLessThan(11.9);
+  });
+
+  it("plays the half second before the cue, and stops where the cue starts", async () => {
+    await seekTo(0);
+    await runFromMenu(toplevel, "time-play-before");
+    const stopped = await waitFor(
+      async () => {
+        const label = await textOf(".controls__button");
+        return label === "Play" && (await playhead()) > 8 ? await playhead() : null;
+      },
+      { timeout: 20000, message: "the player to pause itself where the third cue starts" },
+    );
+    // 9.100 is the cue's start and 8.600 is where this began. Same window and same reason as above:
+    // the slider lags the player by up to a tenth. Measured here at 9.07.
+    expect(stopped).toBeGreaterThan(8.95);
+    expect(stopped).toBeLessThan(9.25);
   });
 
   it("puts the cursor on the cue that starts next when the video sits in a gap", async () => {

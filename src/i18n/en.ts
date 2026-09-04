@@ -30,6 +30,11 @@ export const en = {
       toCueStart: "Jump to cue start",
       toCueEnd: "Jump to cue end",
       selectAtPlayhead: "Select cue at playhead",
+      /** The 500 ms is in the label on purpose: the key says what it will do before you press it. */
+      playLine: "Play line",
+      playBefore: "Play 500 ms before line",
+      playAfter: "Play 500 ms after line",
+      playToEnd: "Play from line start to the end",
     },
     view: {
       title: "View",

@@ -164,6 +164,7 @@ pub fn run() -> tauri::Result<()> {
             video::video_play,
             video::video_pause,
             video::video_seek,
+            video::video_play_range,
             video::video_set_region,
             video::video_set_layers,
             startup_files_command,

@@ -161,9 +161,8 @@ export default function App() {
     topWidth: 0,
     gridHeight: 0,
   });
-  const { state, position, errorCode, open, togglePlayback, seek, setRegion } = useVideoPlayer(
-    layers.covered,
-  );
+  const { state, position, errorCode, open, togglePlayback, seek, playRange, setRegion } =
+    useVideoPlayer(layers.covered);
   const audio = useAudioTracks(state.path, state.status === "ready");
   // The two states the grid indexes by row live below, so the patch that moves rows reaches them
   // through a box rather than directly: the document is read before the selection exists.
@@ -435,6 +434,33 @@ export default function App() {
     );
   }
 
+  /** How much of the neighbourhood the two context commands play. The reference's own number. */
+  const CONTEXT_MS = 500;
+
+  /**
+   * Play a stretch of the cursor's cue. mpv has no primitive for this, so the player holds a stop
+   * target and the event thread pauses at it. See docs/play-range-tasks.md.
+   */
+  async function playCue(what: "line" | "before" | "after" | "to-end") {
+    const at = selection.active;
+    const cue = at === null ? null : (subtitle.cues[at] ?? null);
+    if (cue === null) {
+      return;
+    }
+    const start = cue.startMs / 1000;
+    const end = cue.endMs / 1000;
+    const context = CONTEXT_MS / 1000;
+    // The player clamps into the file, so a cue near either edge asks for what it wants and gets
+    // what exists rather than being special-cased twice.
+    const range = {
+      line: [start, end],
+      before: [start - context, start],
+      after: [end, end + context],
+      "to-end": [start, state.duration ?? end],
+    }[what];
+    await playRange(range[0], range[1]);
+  }
+
   /** The video goes to one of the cursor's cue's boundaries. */
   async function videoToBoundary(which: "start" | "end") {
     const at = selection.active;
@@ -575,6 +601,30 @@ export default function App() {
       run: () => void videoToBoundary("end"),
     },
     {
+      id: "time.play-line",
+      label: en.menu.timing.playLine,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void playCue("line"),
+    },
+    {
+      id: "time.play-before",
+      label: en.menu.timing.playBefore,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void playCue("before"),
+    },
+    {
+      id: "time.play-after",
+      label: en.menu.timing.playAfter,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void playCue("after"),
+    },
+    {
+      id: "time.play-to-end",
+      label: en.menu.timing.playToEnd,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void playCue("to-end"),
+    },
+    {
       // No cursor needed: finding the cue at the playhead is what gives it one.
       id: "edit.select-at-playhead",
       label: en.menu.timing.selectAtPlayhead,
@@ -699,6 +749,10 @@ export default function App() {
         "video.to-cue-start",
         "video.to-cue-end",
         "edit.select-at-playhead",
+        "time.play-line",
+        "time.play-before",
+        "time.play-after",
+        "time.play-to-end",
       ],
     },
     {

@@ -39,6 +39,8 @@ export type VideoPlayer = {
   open: (path: string) => Promise<void>;
   togglePlayback: () => Promise<void>;
   seek: (position: number) => Promise<void>;
+  /** Play a stretch and stop at its end, both in seconds. See docs/play-range-tasks.md. */
+  playRange: (from: number, to: number) => Promise<void>;
   setRegion: (region: VideoRegion) => void;
 };
 
@@ -118,6 +120,17 @@ export function useVideoPlayer(covered: boolean): VideoPlayer {
     }
   }, []);
 
+  const playRange = useCallback(async (from: number, to: number) => {
+    setErrorCode(null);
+    // The position is not set here the way `seek` sets it: playback is about to move it anyway,
+    // and drawing the start for one frame before the first event would fight the player.
+    try {
+      await invoke("video_play_range", { from, to });
+    } catch (error) {
+      setErrorCode(toErrorCode(error));
+    }
+  }, []);
+
   const setRegion = useCallback((region: VideoRegion) => {
     held.current = region;
     // Held while a layer is open, and sent again when the last one closes (T8).
@@ -147,5 +160,5 @@ export function useVideoPlayer(covered: boolean): VideoPlayer {
       });
   }, [covered]);
 
-  return { state, position, errorCode, open, togglePlayback, seek, setRegion };
+  return { state, position, errorCode, open, togglePlayback, seek, playRange, setRegion };
 }

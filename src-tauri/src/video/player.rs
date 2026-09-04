@@ -165,6 +165,10 @@ struct Shared {
     /// The last pause this app asked mpv for. A `pause` that arrives while this is false is one
     /// nobody here wanted, and BACKLOG N13 is exactly that going unrecorded.
     asked_paused: AtomicBool,
+    /// Where a range playback stops, in seconds, or nothing. mpv has no "play to here and pause":
+    /// its A-B loop repeats or is ignored, and its own issue 9716 answers the same question by
+    /// watching `time-pos`. The event thread does that, and it sees every frame.
+    stop_at: Mutex<Option<f64>>,
 }
 
 impl Shared {
@@ -312,6 +316,7 @@ impl Player {
             pending_open: Mutex::new(None),
             // Nothing is loaded yet, so nothing has been asked to play.
             asked_paused: AtomicBool::new(true),
+            stop_at: Mutex::new(None),
         });
         let stop = Arc::new(AtomicBool::new(false));
 
@@ -424,11 +429,45 @@ impl Player {
     }
 
     pub fn play(&self) -> Result<(), VideoError> {
+        self.clear_stop();
         self.set_pause(false)
     }
 
     pub fn pause(&self) -> Result<(), VideoError> {
+        self.clear_stop();
         self.set_pause(true)
+    }
+
+    /// Play from one second to another, then pause. Both are absolute, and both are clamped into
+    /// the file the way a seek is.
+    ///
+    /// It talks to mpv itself rather than through `seek` and `play`, which clear the target: those
+    /// three exist so that anything the user does during a range cancels its stop instead of
+    /// leaving one armed. Setting the target before playback starts is the other half of that: a
+    /// frame cannot slip past a target that is not there yet.
+    pub fn play_range(&self, from: f64, to: f64) -> Result<(), VideoError> {
+        let mpv = self.handle()?;
+        let duration = self.loaded_duration()?;
+        if !from.is_finite() || !to.is_finite() {
+            return Err(VideoError::command_failed("a range bound is not a number"));
+        }
+        let start = from.clamp(0.0, duration);
+        let end = to.clamp(start, duration);
+        if let Ok(mut target) = self.shared.stop_at.lock() {
+            *target = Some(end);
+        }
+        mpv.command("seek", &[&format!("{start}"), "absolute"])
+            .map_err(|error| from_mpv(error, "seek"))?;
+        self.shared.asked_paused.store(false, Ordering::Relaxed);
+        mpv.set_property("pause", false)
+            .map_err(|error| from_mpv(error, "pause"))
+    }
+
+    /// Forget where a range was going to stop. Anything the user asks for cancels it.
+    fn clear_stop(&self) {
+        if let Ok(mut target) = self.shared.stop_at.lock() {
+            *target = None;
+        }
     }
 
     /// Absolute seconds from the start, clamped into the file's range.
@@ -439,6 +478,7 @@ impl Player {
             return Err(VideoError::command_failed("seek position is not a number"));
         }
         let target = position.clamp(0.0, duration);
+        self.clear_stop();
         mpv.command("seek", &[&format!("{target}"), "absolute"])
             .map_err(|error| from_mpv(error, "seek"))
     }
@@ -797,6 +837,21 @@ fn event_loop(mpv: &Mpv, shared: &Shared, stop: &AtomicBool) {
                 change: PropertyData::Double(position),
                 ..
             })) => {
+                // A range's stop is checked here and not on the throttled path below: mpv reports
+                // time-pos at frame rate, so this overshoots by a frame, and the UI's ten updates a
+                // second would overshoot by a tenth. See docs/play-range-tasks.md.
+                let stopping = shared
+                    .stop_at
+                    .lock()
+                    .ok()
+                    .and_then(|mut target| target.take_if(|end| position >= *end))
+                    .is_some();
+                if stopping {
+                    shared.asked_paused.store(true, Ordering::Relaxed);
+                    if let Err(error) = mpv.set_property("pause", true) {
+                        log::warn!("playback: a range could not be stopped: {error}");
+                    }
+                }
                 // mpv reports time-pos at frame rate; the UI gets at most 10 updates per second.
                 if last_position.elapsed() >= POSITION_EVENT_INTERVAL {
                     last_position = Instant::now();
