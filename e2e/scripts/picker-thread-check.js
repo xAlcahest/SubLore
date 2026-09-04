@@ -105,12 +105,20 @@ const RAIL_ROOT_TABS = 1;
 const RAIL_EPISODE_TABS = 2;
 
 /**
- * Where each command sits in the menu its node opens (decision 24, A3). Open project is second in
- * both of the project node's two states, so opening a project is one route either way.
+ * Where each command sits in the menu its node opens (decision 24, A3).
+ *
+ * Fixed positions, and the ruling of 2026-09-03 is what makes them fixed: a command that cannot run
+ * is greyed and never absent, so the project node always draws the same five in the same order and
+ * the episode node the same five. The rail's own arrow walk steps over nothing, so an index is a
+ * position in the DOM rather than a count of what happens to be available.
+ *
+ * `ADD_EPISODE` was 0 until 2026-09-04, from a rail that offered a different menu, and this check
+ * had never run against the rebuilt one: it pressed Open project and waited for a write that a
+ * chooser was never going to make.
  */
 const CREATE_PROJECT = 0;
-const ADD_EPISODE = 0;
 const OPEN_PROJECT = 1;
+const ADD_EPISODE = 2;
 const ATTACH_MEDIA = 0;
 
 /** What opens a node's menu: a click on the project node, the menu key on an episode. */
