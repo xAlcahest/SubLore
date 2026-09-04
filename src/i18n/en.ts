@@ -21,6 +21,7 @@ export const en = {
       undo: "Undo",
       redo: "Redo",
       find: "Find…",
+      findNext: "Find next",
       replace: "Replace…",
       /** Here until an Audio title of its own arrives with the milestone that registers it. */
       transcribe: "Transcribe…",
@@ -80,6 +81,8 @@ export const en = {
       startToPlayhead: "Ctrl+3",
       endToPlayhead: "Ctrl+4",
       find: "Ctrl+F",
+      /** The one accelerator with no modifier at all, which is why the field rule has two halves. */
+      findNext: "F3",
       replace: "Ctrl+H",
     },
     errors: {

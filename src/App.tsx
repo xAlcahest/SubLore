@@ -718,6 +718,15 @@ export default function App() {
       run: () => setFindMode("find"),
     },
     {
+      id: "edit.find-next",
+      label: en.menu.edit.findNext,
+      accelerator: en.menu.keys.findNext,
+      // Greyed with no pattern to step through: a find with nothing to find would put "No match"
+      // under a field nobody has typed in yet, which is the accusation F2 refuses to make.
+      enabled: subtitle.summary !== null && query.needle !== "",
+      run: () => findNext(),
+    },
+    {
       id: "edit.replace",
       label: en.menu.edit.replace,
       accelerator: en.menu.keys.replace,
@@ -943,7 +952,14 @@ export default function App() {
     {
       id: "edit",
       title: en.menu.edit.title,
-      items: ["edit.undo", "edit.redo", "edit.find", "edit.replace", "asr.transcribe"],
+      items: [
+        "edit.undo",
+        "edit.redo",
+        "edit.find",
+        "edit.find-next",
+        "edit.replace",
+        "asr.transcribe",
+      ],
     },
     // Interface-spec 3 order: Subtitle sits right after Edit. Its fifth backend command,
     // subtitle_set_times, is not here: it is a field commit on the current line (T5), not an
@@ -1017,9 +1033,11 @@ export default function App() {
 
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
-      // A field keeps the chords a field owns, and nothing else. This is the only listener that
-      // asks: the grid used to answer the same question again, for three keys, on its own.
-      if (ownsTheKeyboard(event.target, event.key.toLowerCase())) {
+      // A field keeps the chords a field owns, and every bare key but a function key. This is the
+      // only listener that asks: the grid used to answer the same question again, for three keys.
+      // Shift alone is not a modifier here, because Shift+A is still typing (F5).
+      const chorded = event.ctrlKey || event.altKey || event.metaKey;
+      if (ownsTheKeyboard(event.target, event.key.toLowerCase(), chorded)) {
         return;
       }
       const id = commandFor(latest.current, event);

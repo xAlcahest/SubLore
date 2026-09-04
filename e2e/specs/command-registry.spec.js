@@ -48,6 +48,7 @@ const DECLARED = [
   "edit-undo",
   "edit-redo",
   "edit-find",
+  "edit-find-next",
   "edit-replace",
   "time-start-to-playhead",
   "time-end-to-playhead",
@@ -97,11 +98,12 @@ const FILE_ITEMS = [
   { id: "app-quit", disabled: false },
 ];
 
-/** Edit with nothing open: Undo, Redo, Find and Replace are drawn, greyed. */
+/** Edit with nothing open: Undo, Redo, Find, Find next and Replace are drawn, greyed. */
 const EDIT_ITEMS = [
   { id: "edit-undo", disabled: true },
   { id: "edit-redo", disabled: true },
   { id: "edit-find", disabled: true },
+  { id: "edit-find-next", disabled: true },
   { id: "edit-replace", disabled: true },
   { id: "asr-transcribe", disabled: false },
 ];
@@ -481,6 +483,8 @@ describe("the command registry", () => {
     expect(flips(empty, open)).toEqual([
       { route: "menu", id: "file-save-copy", disabled: false },
       // Find and Replace need a document and nothing else, so both ungrey with the file (F2, F3).
+      // Find next is absent from this list on purpose: it also needs a pattern, and nothing here
+      // has typed one, so it stays greyed through the open (F5).
       { route: "menu", id: "edit-find", disabled: false },
       { route: "menu", id: "edit-replace", disabled: false },
       { route: "menu", id: "subtitle-insert", disabled: false },

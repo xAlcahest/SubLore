@@ -213,6 +213,35 @@ async function cursorTo(toplevel, position) {
   await waitForCursor(position);
 }
 
+/**
+ * Open the grid's own editor on a row, by clicking its text cell, and wait until it holds the
+ * keyboard. The wait is the point: a key pressed before the caret arrives lands somewhere else and
+ * would make the check below pass for the wrong reason (F5).
+ */
+async function editRow(toplevel, position) {
+  const centre = await browser.execute((wanted) => {
+    const row = Array.from(document.querySelectorAll(".cuelist__row")).find(
+      (candidate) => candidate.querySelector(".cuelist__pos")?.textContent === wanted,
+    );
+    const cell = row?.querySelector(".cuelist__text");
+    if (!cell) {
+      return null;
+    }
+    const rect = cell.getBoundingClientRect();
+    const dpr = window.devicePixelRatio;
+    return { x: (rect.x + rect.width / 2) * dpr, y: (rect.y + rect.height / 2) * dpr };
+  }, String(position));
+  if (centre === null) {
+    throw new Error(`row ${position} is not drawn with a text cell to click`);
+  }
+  clickAt(toplevel.absX + centre.x, toplevel.absY + centre.y);
+  await waitFor(
+    () =>
+      browser.execute(() => document.activeElement?.classList.contains("cuelist__editor") === true),
+    { timeout: 15000, message: `the grid's editor on row ${position} to take the keyboard` },
+  );
+}
+
 /** The row the cursor is on, one-based the way the grid numbers them, or null when there is none. */
 function cursorRow() {
   return browser.execute(() => {
@@ -644,5 +673,57 @@ describe("the find band", () => {
       timeout: 20000,
       message: "one undo to leave the file as it was opened",
     });
+  });
+
+  it("draws F3 beside Find next, and steps the search on that key", async () => {
+    await clickElement(toplevel, ".menubar__title--edit");
+    await waitFor(() => present(".menubar__menu"), {
+      timeout: 15000,
+      message: "the Edit menu to open",
+    });
+    // The key that is drawn is the key that fires. A new match kind in the parser is exactly the
+    // thing that can draw a shortcut nothing answers on (F5, K1).
+    expect(await textOf(".menubar__item--edit-find-next .menubar__accelerator")).toBe("F3");
+    pressKey("Escape");
+    await waitFor(async () => ((await present(".menubar__menu")) === false ? true : null), {
+      timeout: 15000,
+      message: "the Edit menu to close",
+    });
+
+    // A word in the third cue only, with the cursor parked on the first, so the key has somewhere
+    // to move it and a key that does nothing cannot read as a pass.
+    await search(toplevel, ONLY_IN_THIRD);
+    await cursorTo(toplevel, 1);
+
+    pressKey("F3");
+    await waitForCursor(3);
+  });
+
+  it("steps the search from inside the grid's own cue editor", async () => {
+    await search(toplevel, ONLY_IN_THIRD);
+    await editRow(toplevel, 1);
+    // The caret is in the document's own editor and the cursor is on the row it is open on, so a
+    // press that reaches the shell is a press that moves the cursor off it.
+    expect(await cursorRow()).toBe(1);
+
+    pressKey("F3");
+    await waitForCursor(3);
+
+    // Escape leaves the editor without committing the row it was opened on.
+    pressKey("Escape");
+    await waitFor(async () => ((await present(".cuelist__editor")) === false ? true : null), {
+      timeout: 15000,
+      message: "the grid's editor to close",
+    });
+  });
+
+  it("steps the search from inside the band's own query field", async () => {
+    // Where a person actually presses it: the term has just been typed and the caret is still in
+    // the field. A function key is the one bare key a text field has no use for (F5).
+    await search(toplevel, ONLY_IN_FIRST);
+    expect(await cursorRow()).toBe(3);
+
+    pressKey("F3");
+    await waitForCursor(1);
   });
 });
