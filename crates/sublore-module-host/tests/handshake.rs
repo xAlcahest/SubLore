@@ -206,18 +206,26 @@ fn the_good_fixture_loads_and_describes_what_it_contributes() {
     };
     assert_eq!(answer, SUBLORE_OK);
 
-    // A title, one item under it, and one the host is meant to refuse. This sink is not the host
-    // and accepts everything, which is what lets it see the third one at all.
-    assert_eq!(items.len(), 3, "a title and two items: {items:?}");
+    // A title, two items under it, and one the host is meant to refuse. This sink is not the host
+    // and accepts everything, which is what lets it see the last one at all.
+    assert_eq!(items.len(), 4, "a title and three items: {items:?}");
     assert_eq!(items[0].kind, SUBLORE_ITEM_MENU_TITLE);
     assert_eq!(items[0].parent, 0, "the title is top level");
-    assert_eq!(items[1].kind, SUBLORE_ITEM_MENU_ITEM);
-    assert_eq!(items[1].parent, items[0].id, "the item hangs off the title");
+    for under in &items[1..] {
+        assert_eq!(under.kind, SUBLORE_ITEM_MENU_ITEM);
+        assert_eq!(under.parent, items[0].id, "every item hangs off the title");
+    }
     assert_eq!(items[1].enable_when, SUBLORE_ENABLE_ALWAYS);
-    // The third is the fixture's own trap, and the zero is what makes it one: §5.2 has no value
+    // The one that proposes against a stale revision needs a document to propose against, so a
+    // refusal there is about the revision and not about there being nothing open.
+    assert_eq!(
+        items[2].enable_when,
+        sublore_module_api::SUBLORE_ENABLE_DOCUMENT_OPEN
+    );
+    // The last is the fixture's own trap, and the zero is what makes it one: §5.2 has no value
     // for it, so a host that draws that item has stopped checking.
     assert_eq!(
-        items[2].enable_when, 0,
+        items[3].enable_when, 0,
         "the refusable item must carry a state with no meaning"
     );
     // The locale went in through `create` and came back out inside a label, which is the only
