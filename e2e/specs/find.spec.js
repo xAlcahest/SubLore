@@ -30,6 +30,10 @@ const OPEN_STATUS = "SRT · 3 cues · LF";
  * second, which is also where the case check lives.
  */
 const ONLY_IN_THIRD = "fog";
+/** Only in the first cue, so it is the word a selection elsewhere must not find. */
+const ONLY_IN_FIRST = "harbour";
+/** In all three cues: twice, twice and three times, counted off the fixture rather than guessed. */
+const IN_EVERY_CUE = "the";
 const ONLY_IN_SECOND_CAPITALISED = "Nobody";
 /** In no cue at all: the pattern that has to come back with nothing found. */
 const IN_NO_CUE = "zzhardlylikely";
@@ -150,6 +154,63 @@ function rowText(position) {
     );
     return row?.querySelector(".cuelist__text")?.textContent ?? null;
   }, String(position));
+}
+
+/**
+ * Put a checkbox in the state this check needs, rather than toggling whatever it inherited.
+ *
+ * A toggle reads the box's current state as an assumption, so one failed check upstream flips the
+ * meaning of every click after it: a mutation once turned two checks red, and the second was only
+ * the first one having failed before it could put the box back. Setting is what makes each check
+ * independent of the one before it.
+ */
+async function setBox(toplevel, selector, wanted) {
+  const now = await browser.execute(
+    (css) => document.querySelector(css)?.checked ?? null,
+    selector,
+  );
+  if (now === null) {
+    throw new Error(`${selector} is missing from the DOM`);
+  }
+  if (now === wanted) {
+    return;
+  }
+  await clickElement(toplevel, selector);
+  await waitFor(
+    () =>
+      browser.execute(
+        (css, want) => (document.querySelector(css)?.checked === want ? true : null),
+        selector,
+        wanted,
+      ),
+    { timeout: 10000, message: `${selector} to become ${wanted}` },
+  );
+}
+
+/** How many rows the grid draws as selected, which a plain cursor move collapses to one. */
+function selectedRows() {
+  return browser.execute(() => document.querySelectorAll(".cuelist__row--selected").length);
+}
+
+/** Put the cursor on a row by clicking its number cell, which never opens an editor. */
+async function cursorTo(toplevel, position) {
+  const centre = await browser.execute((wanted) => {
+    const row = Array.from(document.querySelectorAll(".cuelist__row")).find(
+      (candidate) => candidate.querySelector(".cuelist__pos")?.textContent === wanted,
+    );
+    const cell = row?.querySelector(".cuelist__pos");
+    if (!cell) {
+      return null;
+    }
+    const rect = cell.getBoundingClientRect();
+    const dpr = window.devicePixelRatio;
+    return { x: (rect.x + rect.width / 2) * dpr, y: (rect.y + rect.height / 2) * dpr };
+  }, String(position));
+  if (centre === null) {
+    throw new Error(`row ${position} is missing from the DOM`);
+  }
+  clickAt(toplevel.absX + centre.x, toplevel.absY + centre.y);
+  await waitForCursor(position);
 }
 
 /** The row the cursor is on, one-based the way the grid numbers them, or null when there is none. */
@@ -299,7 +360,7 @@ describe("the find band", () => {
     await waitForCursor(2);
 
     // With Match case on, the lowercase pattern is in no cue, so the cursor must not move.
-    await clickElement(toplevel, ".findbar__case");
+    await setBox(toplevel, ".findbar__case", true);
     await search(toplevel, ONLY_IN_SECOND_CAPITALISED.toLowerCase());
     await clickElement(toplevel, ".findbar__next");
     await waitFor(() => present(".findbar__missing"), {
@@ -307,7 +368,7 @@ describe("the find band", () => {
       message: "the band to report no match",
     });
     expect(await cursorRow()).toBe(2);
-    await clickElement(toplevel, ".findbar__case");
+    await setBox(toplevel, ".findbar__case", false);
   });
 
   it("says so when the pattern is in no cue, and leaves the cursor where it was", async () => {
@@ -444,7 +505,7 @@ describe("the find band", () => {
       message: "the band to report no match for the literal pattern",
     });
 
-    await clickElement(toplevel, ".findbar__regex");
+    await setBox(toplevel, ".findbar__regex", true);
     await clickElement(toplevel, ".findbar__next");
     await waitForCursor(3);
     expect(await present(".findbar__missing")).toBe(false);
@@ -509,5 +570,79 @@ describe("the find band", () => {
     await clickElement(toplevel, ".findbar__next");
     await waitForCursor(3);
     expect(await present(".findbar__refused")).toBe(false);
+  });
+
+  it("stays inside the selection, and one selected cue restricts too", async () => {
+    // Regex was left on by the checks above, and these read plain words: say so rather than
+    // inherit it. Then the cursor alone is the selection, which is the case the reference gets
+    // wrong by searching the whole file anyway.
+    await setBox(toplevel, ".findbar__regex", false);
+    await cursorTo(toplevel, 3);
+    expect(await selectedRows()).toBe(1);
+
+    await setBox(toplevel, ".findbar__scope", true);
+    await search(toplevel, ONLY_IN_FIRST);
+    await clickElement(toplevel, ".findbar__next");
+    await waitFor(() => present(".findbar__missing"), {
+      timeout: 20000,
+      message: "the band to find nothing outside the one selected cue",
+    });
+    expect(await cursorRow()).toBe(3);
+
+    // The same word, the same press, the whole file: it is there and always was.
+    await setBox(toplevel, ".findbar__scope", false);
+    await clickElement(toplevel, ".findbar__next");
+    await waitForCursor(1);
+  });
+
+  it("keeps the selection while it walks the matches inside it", async () => {
+    await cursorTo(toplevel, 2);
+    pressKey("shift+Down");
+    await waitFor(async () => ((await selectedRows()) === 2 ? true : null), {
+      timeout: 15000,
+      message: "shift and the arrow to take the selection over two rows",
+    });
+
+    await setBox(toplevel, ".findbar__scope", true);
+    await search(toplevel, IN_TWO_CUES);
+    await clickElement(toplevel, ".findbar__next");
+    await waitForCursor(2);
+    await clickElement(toplevel, ".findbar__next");
+    await waitForCursor(3);
+    // Round the selection rather than on into the rest of the file.
+    await clickElement(toplevel, ".findbar__next");
+    await waitForCursor(2);
+
+    // A plain cursor move would have collapsed this to one on the very first match.
+    expect(await selectedRows()).toBe(2);
+    await setBox(toplevel, ".findbar__scope", false);
+  });
+
+  it("replaces only inside the selection, and counts only what it rewrote", async () => {
+    await cursorTo(toplevel, 2);
+    expect(await selectedRows()).toBe(1);
+    const second = await rowText(2);
+    const third = await rowText(3);
+
+    await setBox(toplevel, ".findbar__scope", true);
+    await search(toplevel, IN_EVERY_CUE);
+    await typeInto(toplevel, ".findbar__replacement", "THE");
+    await clickElement(toplevel, ".findbar__replace-all");
+    await waitFor(() => present(".findbar__replaced"), {
+      timeout: 20000,
+      message: "the band to report what it replaced",
+    });
+
+    // Two in the selected cue. Seven in the file, which is the number a leak would report.
+    expect(await textOf(".findbar__replaced")).toBe("2 replaced");
+    expect(await rowText(3)).toBe(third);
+    expect(await rowText(2)).not.toBe(second);
+
+    await setBox(toplevel, ".findbar__scope", false);
+    await clickElement(toplevel, ".toolbar__edit-undo");
+    await waitFor(async () => ((await present(".statusbar__dirty")) === false ? true : null), {
+      timeout: 20000,
+      message: "one undo to leave the file as it was opened",
+    });
   });
 });

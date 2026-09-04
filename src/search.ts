@@ -46,27 +46,52 @@ function pattern(query: Query): RegExp | null {
   return new RegExp(source, query.matchCase ? "gu" : "giu");
 }
 
+/** One cue the search may look in: its text, and where it sits in the document. */
+type Scoped = { cue: number; text: string };
+
 /**
- * The next match after `after`, wrapping the whole file exactly once. Null when the pattern is in
- * no cue at all, which is a result the caller reports rather than an error.
+ * The cues a search may look in, in file order and each one once.
+ *
+ * `only` is the selection when the band is asked to stay inside it, and null for the whole file.
+ * The indices it returns are the document's own, never positions in this list: a match carries the
+ * cue it is in, and the cursor and the edit both read that number.
+ */
+function scopeOf(cues: readonly CueRow[], only: readonly number[] | null): Scoped[] {
+  if (only === null) {
+    return cues.map((cue, index) => ({ cue: index, text: cue.text }));
+  }
+  const wanted = new Set(only);
+  return cues.flatMap((cue, index) => (wanted.has(index) ? [{ cue: index, text: cue.text }] : []));
+}
+
+/**
+ * The next match after `after`, wrapping the scope exactly once. Null when the pattern is in no cue
+ * of it at all, which is a result the caller reports rather than an error.
  */
 export function nextMatch(
   cues: readonly CueRow[],
+  only: readonly number[] | null,
   query: Query,
   after: Match | null,
 ): Match | null {
   const expression = pattern(query);
-  if (expression === null || cues.length === 0) {
+  const scope = scopeOf(cues, only);
+  if (expression === null || scope.length === 0) {
     return null;
   }
-  // A match in a cue the document no longer has is a stale cursor, not a place to resume from.
-  const resume = after !== null && after.cue < cues.length ? after : null;
-  const first = resume?.cue ?? 0;
-  // One step past the cue count, so the cue the search started in is looked at again: a match
+  // A match in a cue the scope no longer holds is a stale cursor, not a place to resume from: the
+  // selection may have moved under it, or the document may have.
+  const at = after === null ? -1 : scope.findIndex((one) => one.cue === after.cue);
+  const resume = at < 0 ? null : after;
+  const first = at < 0 ? 0 : at;
+  // One step past the scope's size, so the cue the search started in is looked at again: a match
   // sitting before the cursor in that same cue is the one a wrap must find.
-  for (let step = 0; step <= cues.length; step += 1) {
-    const index = (first + step) % cues.length;
-    const text = cues[index]?.text ?? "";
+  for (let step = 0; step <= scope.length; step += 1) {
+    const here = scope[(first + step) % scope.length];
+    if (here === undefined) {
+      return null;
+    }
+    const { cue: index, text } = here;
     expression.lastIndex = step === 0 && resume !== null ? resume.end : 0;
     const found = expression.exec(text);
     if (found !== null) {
@@ -95,6 +120,7 @@ export function nextMatch(
  */
 export function replaceEverywhere(
   cues: readonly CueRow[],
+  only: readonly number[] | null,
   query: Query,
   replacement: string,
 ): { edits: { cue: number; text: string }[]; count: number } {
@@ -104,22 +130,22 @@ export function replaceEverywhere(
   if (expression === null) {
     return { edits, count };
   }
-  cues.forEach((cue, index) => {
+  for (const { cue: index, text } of scopeOf(cues, only)) {
     // A zero-length match is skipped rather than replaced at every position, which is what the
     // single search does with one too.
-    const hits = [...cue.text.matchAll(expression)].filter((hit) => hit[0].length > 0);
+    const hits = [...text.matchAll(expression)].filter((hit) => hit[0].length > 0);
     if (hits.length === 0) {
-      return;
+      continue;
     }
     let rewritten = "";
     let cursor = 0;
     for (const hit of hits) {
-      rewritten += cue.text.slice(cursor, hit.index) + written(query, replacement, captured(hit));
+      rewritten += text.slice(cursor, hit.index) + written(query, replacement, captured(hit));
       cursor = hit.index + hit[0].length;
     }
-    edits.push({ cue: index, text: rewritten + cue.text.slice(cursor) });
+    edits.push({ cue: index, text: rewritten + text.slice(cursor) });
     count += hits.length;
-  });
+  }
   return { edits, count };
 }
 

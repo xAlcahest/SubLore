@@ -24,9 +24,20 @@ export type SearchOutcome =
 /** `Omit` over a union keeps only the shared keys; this drops the id from each member instead. */
 type WithoutId<T> = T extends { id: number } ? Omit<T, "id"> : never;
 
+/** `only` is the cues to stay inside, and null for the whole document. See F4b. */
 export type Search = {
-  find: (cues: CueRow[], query: Query, after: Match | null) => Promise<SearchOutcome>;
-  replaceAll: (cues: CueRow[], query: Query, replacement: string) => Promise<SearchOutcome>;
+  find: (
+    cues: CueRow[],
+    only: number[] | null,
+    query: Query,
+    after: Match | null,
+  ) => Promise<SearchOutcome>;
+  replaceAll: (
+    cues: CueRow[],
+    only: number[] | null,
+    query: Query,
+    replacement: string,
+  ) => Promise<SearchOutcome>;
 };
 
 /**
@@ -99,14 +110,14 @@ export function useSearch(): Search {
   }, []);
 
   const find = useCallback(
-    (cues: CueRow[], query: Query, after: Match | null) =>
-      ask({ kind: "find", cues, query, after }),
+    (cues: CueRow[], only: number[] | null, query: Query, after: Match | null) =>
+      ask({ kind: "find", cues, only, query, after }),
     [ask],
   );
 
   const replaceAll = useCallback(
-    (cues: CueRow[], query: Query, replacement: string) =>
-      ask({ kind: "replace-all", cues, query, replacement }),
+    (cues: CueRow[], only: number[] | null, query: Query, replacement: string) =>
+      ask({ kind: "replace-all", cues, only, query, replacement }),
     [ask],
   );
 

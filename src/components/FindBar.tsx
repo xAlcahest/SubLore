@@ -17,7 +17,10 @@ type FindBarProps = {
   refusal: "bad-pattern" | "slow" | null;
   /** How many a replace all rewrote, drawn until the next search. Null before any has run. */
   replaced: number | null;
+  /** Whether the band stays inside the grid's selection rather than searching the whole file. */
+  inSelection: boolean;
   onQueryChange: (query: Query) => void;
+  onInSelectionChange: (inSelection: boolean) => void;
   onReplacementChange: (replacement: string) => void;
   onFindNext: () => void;
   onReplace: () => void;
@@ -39,7 +42,9 @@ export default function FindBar({
   outcome,
   refusal,
   replaced,
+  inSelection,
   onQueryChange,
+  onInSelectionChange,
   onReplacementChange,
   onFindNext,
   onReplace,
@@ -120,6 +125,15 @@ export default function FindBar({
           onChange={(event) => onQueryChange({ ...query, regex: event.target.checked })}
         />
         {en.find.regex}
+      </label>
+      <label className="findbar__scope-label">
+        <input
+          className="findbar__scope"
+          type="checkbox"
+          checked={inSelection}
+          onChange={(event) => onInSelectionChange(event.target.checked)}
+        />
+        {en.find.inSelection}
       </label>
       <label className="findbar__case-label">
         <input

@@ -270,6 +270,8 @@ export default function App() {
   /** What the last search refused, drawn in the band: a pattern that will not compile, or one the
    * engine never finished. Cleared by the next search. */
   const [refusal, setRefusal] = useState<"bad-pattern" | "slow" | null>(null);
+  /** Whether the band stays inside the grid's selection. Off is the whole document (F4b). */
+  const [inSelection, setInSelection] = useState(false);
   const [quitError, setQuitError] = useState<string | null>(null);
 
   async function pick(
@@ -416,6 +418,14 @@ export default function App() {
    * The next match, from wherever the last one left off, with the cursor following it onto the cue
    * it lands in. A pattern in no cue moves nothing and says so on the band. See F2.
    */
+  /**
+   * The cues a search may look in: the selection when the band is held to it, and null for the
+   * whole document. In file order, because the search walks it and wraps round it.
+   */
+  function scope(): number[] | null {
+    return inSelection ? [...selection.selected].sort((first, second) => first - second) : null;
+  }
+
   /** What every search reports back, wherever it was asked from. A refusal moves nothing. */
   function report(outcome: SearchOutcome): void {
     setReplaced(null);
@@ -429,12 +439,14 @@ export default function App() {
     setSearched(true);
     setFound(outcome.match);
     if (outcome.match !== null) {
-      selection.move(outcome.match.cue, "plain");
+      // Inside the selection the cursor moves without collapsing it, or the next search would be
+      // held to whatever this one landed on. It is the mode Ctrl and the arrows already use.
+      selection.move(outcome.match.cue, inSelection ? "cursorOnly" : "plain");
     }
   }
 
   async function findFrom(at: Match | null): Promise<void> {
-    report(await search.find(subtitle.cues, query, at));
+    report(await search.find(subtitle.cues, scope(), query, at));
   }
 
   function findNext() {
@@ -464,7 +476,7 @@ export default function App() {
 
   /** Every match in the document, in one edit and so in one undo step. See F1. */
   async function replaceAll() {
-    const outcome = await search.replaceAll(subtitle.cues, query, replacement);
+    const outcome = await search.replaceAll(subtitle.cues, scope(), query, replacement);
     if (outcome.kind !== "replaced") {
       report(outcome);
       return;
@@ -1074,6 +1086,15 @@ export default function App() {
             outcome={!searched ? "idle" : found === null ? "missing" : "found"}
             refusal={refusal}
             replaced={replaced}
+            inSelection={inSelection}
+            onInSelectionChange={(next) => {
+              setInSelection(next);
+              // The scope changed, so the match in hand is no longer where a search resumes from.
+              setFound(null);
+              setSearched(false);
+              setReplaced(null);
+              setRefusal(null);
+            }}
             onQueryChange={(next) => {
               setQuery(next);
               // A changed pattern is a new search: resuming from the old match would skip the

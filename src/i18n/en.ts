@@ -94,6 +94,8 @@ export const en = {
     replaceLabel: "Replace with",
     matchCase: "Match case",
     regex: "Regular expression",
+    /** The selection, whatever its size: one selected cue restricts too (F4b). */
+    inSelection: "Selected cues only",
     findNext: "Find next",
     replace: "Replace",
     replaceAll: "Replace all",

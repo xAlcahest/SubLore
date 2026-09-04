@@ -9,9 +9,24 @@
 import { nextMatch, replaceEverywhere, type Match, type Query } from "./search";
 import { type CueRow } from "./types/subtitle";
 
+/** `only` is the cues the band is asked to stay inside, and null for the whole document (F4b). */
 export type SearchRequest =
-  | { id: number; kind: "find"; cues: CueRow[]; query: Query; after: Match | null }
-  | { id: number; kind: "replace-all"; cues: CueRow[]; query: Query; replacement: string };
+  | {
+      id: number;
+      kind: "find";
+      cues: CueRow[];
+      only: number[] | null;
+      query: Query;
+      after: Match | null;
+    }
+  | {
+      id: number;
+      kind: "replace-all";
+      cues: CueRow[];
+      only: number[] | null;
+      query: Query;
+      replacement: string;
+    };
 
 export type SearchReply =
   | { id: number; kind: "found"; match: Match | null }
@@ -26,12 +41,17 @@ self.onmessage = (event: MessageEvent<SearchRequest>) => {
       const reply: SearchReply = {
         id: request.id,
         kind: "found",
-        match: nextMatch(request.cues, request.query, request.after),
+        match: nextMatch(request.cues, request.only, request.query, request.after),
       };
       self.postMessage(reply);
       return;
     }
-    const { edits, count } = replaceEverywhere(request.cues, request.query, request.replacement);
+    const { edits, count } = replaceEverywhere(
+      request.cues,
+      request.only,
+      request.query,
+      request.replacement,
+    );
     const reply: SearchReply = { id: request.id, kind: "replaced", edits, count };
     self.postMessage(reply);
   } catch (failure) {
