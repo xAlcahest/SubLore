@@ -44,6 +44,8 @@ sublore-edit = { path = "../crates/sublore-edit" }
 sublore-formats = { path = "../crates/sublore-formats" }
 sublore-io = { path = "../crates/sublore-io" }
 sublore-project = { path = "../crates/sublore-project" }
+sublore-module-api = { path = "../crates/sublore-module-api" }
+sublore-module-host = { path = "../crates/sublore-module-host" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"

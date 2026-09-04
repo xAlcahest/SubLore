@@ -20,6 +20,7 @@ import { LayerContext, useLayerRegistry } from "./hooks/useLayers";
 import { useAudioTracks } from "./hooks/useAudioTracks";
 import { useLayout } from "./hooks/useLayout";
 import { usePreview } from "./hooks/usePreview";
+import { useModules, refusalLine } from "./hooks/useModules";
 import { useSearch, type SearchOutcome } from "./hooks/useSearch";
 import { useProject } from "./hooks/useProject";
 import { useStartupFiles } from "./hooks/useStartupFiles";
@@ -128,6 +129,8 @@ export default function App() {
   const layers = useLayerRegistry();
   // The user's own expression never runs on this thread: it runs where it can be killed (F4a).
   const search = useSearch();
+  // Read once at startup; the scan itself ran before this window existed (module-abi.md 3.5).
+  const modules = useModules();
   const peaks = useAudioPeaks();
   const { layout, changeLayout, storeLayout } = useLayout();
   // The root declaration in shell.css reads this custom property; nothing else may set it (S1).
@@ -1133,6 +1136,7 @@ export default function App() {
           chromeError={quitError}
           waveformFailed={peaks.error !== null}
           previewFailed={preview.failed}
+          moduleRefusals={modules.refused.map((refused) => refusalLine(refused, en.modules))}
         />
         {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
       </div>

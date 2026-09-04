@@ -3161,6 +3161,8 @@ dependencies = [
  "sublore-edit",
  "sublore-formats",
  "sublore-io",
+ "sublore-module-api",
+ "sublore-module-host",
  "sublore-project",
  "tauri",
  "tauri-build",

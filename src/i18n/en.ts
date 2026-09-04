@@ -110,6 +110,26 @@ export const en = {
     },
     close: "Close",
   },
+  /**
+   * What a module file that would not load is reported as. The core never learns what a module is
+   * for, so every one of these is about the file and the numbers and nothing else.
+   */
+  modules: {
+    line: "Sublore found {file} but could not use it: {reason}",
+    notAModule: "it is not a Sublore module.",
+    versionDiffers:
+      "it was built for interface version {theirs} and this build speaks version {ours}.",
+    revisionTooNew: "it needs interface revision {theirs} and this build offers {ours}.",
+    tableSize: "its interface table is {theirs} bytes and this build's is {ours}.",
+    refused: "it would not start, and reported code {code}.",
+    unopenable: "the file could not be opened.",
+    /** In About, above the list. Absent entirely when nothing loaded and nothing was refused. */
+    heading: "Modules",
+    /** In About, for a module that loaded. */
+    loaded: "{file}, loaded",
+    /** In About, when the launch asked for none. */
+    skipped: "Modules were not looked for: the app was started with --no-modules.",
+  },
   about: {
     title: "About Sublore",
     tagline: "Translation memory for subtitles.",

@@ -27,6 +27,8 @@ type StatusBarProps = {
   waveformFailed: boolean;
   /** Set while the open document could not be put on the video frame (decision 7). */
   previewFailed: boolean;
+  /** One line per module file that was found and could not be used (module-abi.md 3.5). */
+  moduleRefusals: string[];
 };
 
 /**
@@ -47,6 +49,7 @@ export default function StatusBar({
   chromeError,
   waveformFailed,
   previewFailed,
+  moduleRefusals,
 }: StatusBarProps) {
   const detail = subtitleError === null ? null : subtitleErrorDetail(subtitleError);
 
@@ -84,6 +87,13 @@ export default function StatusBar({
             {en.waveform.failed}
           </p>
         )}
+        {/* A module file that is present and does not load is a fault, and a fault is said out
+          loud. An absent module says nothing at all, which is why this list is usually empty. */}
+        {moduleRefusals.map((line) => (
+          <p className="statusbar__module-error" role="alert" key={line}>
+            {line}
+          </p>
+        ))}
         {previewFailed && (
           <p className="statusbar__preview-error" role="alert">
             {en.preview.failed}

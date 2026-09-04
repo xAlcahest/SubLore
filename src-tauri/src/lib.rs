@@ -7,6 +7,7 @@ pub mod chooser;
 pub mod crash;
 pub mod dialog;
 pub mod layout;
+mod modules;
 pub mod preview;
 pub mod project;
 pub mod strings;
@@ -42,6 +43,9 @@ pub struct StartupFiles {
 struct StartupArgs {
     files: StartupFiles,
     ignored: Vec<String>,
+    /// `--no-modules` was on the command line. Support asks for it when a module is suspected, and
+    /// it is the difference between a diagnosis and a reinstall (module-abi.md 3.4).
+    no_modules: bool,
 }
 
 /// Sublore accepts paths as arguments: `sublore file.mkv file.srt`, in any order. Sorted by
@@ -55,6 +59,7 @@ struct StartupArgs {
 fn startup_files(args: impl Iterator<Item = OsString>) -> StartupArgs {
     let mut files = StartupFiles::default();
     let mut ignored = Vec::new();
+    let mut no_modules = false;
     for arg in args.skip(1) {
         // The IPC payload cannot carry a name that is not UTF-8 either, so it costs that argument
         // and is named in the log, never the launch.
@@ -66,6 +71,12 @@ fn startup_files(args: impl Iterator<Item = OsString>) -> StartupArgs {
         // pass their own arguments through, and treating a stray value as a path made the app try
         // to open one at startup: every E2E spec that opens a file then failed.
         if !std::path::Path::new(arg).is_file() {
+            // The one switch this app answers to. Compared exactly: a near miss is a typo, and a
+            // typo that quietly turned modules off would be a support call about a missing feature.
+            if arg == "--no-modules" {
+                no_modules = true;
+                continue;
+            }
             // A switch is not a file and never was; anything else was meant to be one, so it is
             // named rather than dropped in silence.
             if !arg.starts_with('-') {
@@ -90,7 +101,11 @@ fn startup_files(args: impl Iterator<Item = OsString>) -> StartupArgs {
             None => *slot = Some(arg.to_owned()),
         }
     }
-    StartupArgs { files, ignored }
+    StartupArgs {
+        files,
+        ignored,
+        no_modules,
+    }
 }
 
 #[tauri::command]
@@ -112,7 +127,11 @@ fn quit(app: AppHandle) {
 pub fn run() -> tauri::Result<()> {
     crash::install();
 
-    let StartupArgs { files, ignored } = startup_files(std::env::args_os());
+    let StartupArgs {
+        files,
+        ignored,
+        no_modules,
+    } = startup_files(std::env::args_os());
     let taken = files.clone();
 
     let app = tauri::Builder::default()
@@ -120,6 +139,12 @@ pub fn run() -> tauri::Result<()> {
         .plugin(log_plugin())
         .plugin(tauri_plugin_dialog::init())
         .manage(project::ProjectState::default())
+        // Before the window exists, so the report is ready the first time it is asked for.
+        .manage(if no_modules {
+            modules::ModuleState::skipped()
+        } else {
+            modules::load()
+        })
         .manage(files)
         .invoke_handler(tauri::generate_handler![
             asr::asr_models,
@@ -168,6 +193,7 @@ pub fn run() -> tauri::Result<()> {
             video::video_play_range,
             video::video_set_region,
             video::video_set_layers,
+            modules::module_report,
             startup_files_command,
             quit
         ])
