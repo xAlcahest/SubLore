@@ -20,6 +20,7 @@ import { LayerContext, useLayerRegistry } from "./hooks/useLayers";
 import { useAudioTracks } from "./hooks/useAudioTracks";
 import { useLayout } from "./hooks/useLayout";
 import { usePreview } from "./hooks/usePreview";
+import { useSearch, type SearchOutcome } from "./hooks/useSearch";
 import { useProject } from "./hooks/useProject";
 import { useStartupFiles } from "./hooks/useStartupFiles";
 import { useSubtitleFile, type RowsMoved } from "./hooks/useSubtitleFile";
@@ -29,7 +30,7 @@ import { en } from "./i18n/en";
 import { fill } from "./i18n/format";
 import { commandFor, ownsTheKeyboard } from "./keyboard";
 import { requestQuit } from "./quit";
-import { nextMatch, replaceEverywhere, replaceOne, type Match, type Query } from "./search";
+import { replaceOne, type Match, type Query } from "./search";
 import {
   runCommand,
   type Command,
@@ -125,6 +126,8 @@ export default function App() {
   // Every HTML layer registers here while it is open, and the video surface hides for as long as
   // the set is not empty (decision 1, T8).
   const layers = useLayerRegistry();
+  // The user's own expression never runs on this thread: it runs where it can be killed (F4a).
+  const search = useSearch();
   const peaks = useAudioPeaks();
   const { layout, changeLayout, storeLayout } = useLayout();
   // The root declaration in shell.css reads this custom property; nothing else may set it (S1).
@@ -259,11 +262,14 @@ export default function App() {
   // The find band, and what it is looking for. The query outlives a close so reopening the band
   // offers the last search back, which is the cheap half of the reference's remembered list (F2).
   const [findMode, setFindMode] = useState<FindMode | null>(null);
-  const [query, setQuery] = useState<Query>({ needle: "", matchCase: false });
+  const [query, setQuery] = useState<Query>({ needle: "", matchCase: false, regex: false });
   const [replacement, setReplacement] = useState("");
   const [found, setFound] = useState<Match | null>(null);
   const [searched, setSearched] = useState(false);
   const [replaced, setReplaced] = useState<number | null>(null);
+  /** What the last search refused, drawn in the band: a pattern that will not compile, or one the
+   * engine never finished. Cleared by the next search. */
+  const [refusal, setRefusal] = useState<"bad-pattern" | "slow" | null>(null);
   const [quitError, setQuitError] = useState<string | null>(null);
 
   async function pick(
@@ -410,19 +416,29 @@ export default function App() {
    * The next match, from wherever the last one left off, with the cursor following it onto the cue
    * it lands in. A pattern in no cue moves nothing and says so on the band. See F2.
    */
-  function findFrom(cues: readonly CueRow[], at: Match | null): Match | null {
-    const match = nextMatch(cues, query, at);
-    setSearched(true);
-    setFound(match);
+  /** What every search reports back, wherever it was asked from. A refusal moves nothing. */
+  function report(outcome: SearchOutcome): void {
     setReplaced(null);
-    if (match !== null) {
-      selection.move(match.cue, "plain");
+    if (outcome.kind !== "found") {
+      setRefusal(outcome.kind === "slow" ? "slow" : "bad-pattern");
+      setSearched(false);
+      setFound(null);
+      return;
     }
-    return match;
+    setRefusal(null);
+    setSearched(true);
+    setFound(outcome.match);
+    if (outcome.match !== null) {
+      selection.move(outcome.match.cue, "plain");
+    }
+  }
+
+  async function findFrom(at: Match | null): Promise<void> {
+    report(await search.find(subtitle.cues, query, at));
   }
 
   function findNext() {
-    findFrom(subtitle.cues, found);
+    void findFrom(found);
   }
 
   /**
@@ -435,27 +451,36 @@ export default function App() {
     const at = found;
     const cue = at === null ? null : (subtitle.cues[at.cue] ?? null);
     if (at === null || cue === null) {
-      findNext();
+      await findFrom(found);
       return;
     }
-    await subtitle.setTexts([{ cue: at.cue, text: replaceOne(cue.text, at, replacement) }]);
+    const text = replaceOne(cue.text, at, query, replacement);
+    await subtitle.setTexts([{ cue: at.cue, text }]);
     // Resume past what was just written, so a replacement containing the pattern is not re-found.
-    findFrom(subtitle.cues, { cue: at.cue, start: at.start, end: at.start + replacement.length });
+    // The length is the written one, which with regex on is not the replacement's own.
+    const wrote = text.length - cue.text.length + (at.end - at.start);
+    await findFrom({ cue: at.cue, start: at.start, end: at.start + wrote, found: at.found });
   }
 
   /** Every match in the document, in one edit and so in one undo step. See F1. */
   async function replaceAll() {
-    const { edits, count } = replaceEverywhere(subtitle.cues, query, replacement);
-    if (edits.length === 0) {
+    const outcome = await search.replaceAll(subtitle.cues, query, replacement);
+    if (outcome.kind !== "replaced") {
+      report(outcome);
+      return;
+    }
+    if (outcome.edits.length === 0) {
+      setRefusal(null);
       setSearched(true);
       setFound(null);
       setReplaced(null);
       return;
     }
-    await subtitle.setTexts(edits);
+    await subtitle.setTexts(outcome.edits);
+    setRefusal(null);
     setFound(null);
     setSearched(false);
-    setReplaced(count);
+    setReplaced(outcome.count);
   }
 
   /** Where the video is, to the millisecond the product reasons in (decision 11). */
@@ -1047,6 +1072,7 @@ export default function App() {
             query={query}
             replacement={replacement}
             outcome={!searched ? "idle" : found === null ? "missing" : "found"}
+            refusal={refusal}
             replaced={replaced}
             onQueryChange={(next) => {
               setQuery(next);
@@ -1055,6 +1081,7 @@ export default function App() {
               setFound(null);
               setSearched(false);
               setReplaced(null);
+              setRefusal(null);
             }}
             onReplacementChange={setReplacement}
             onFindNext={findNext}

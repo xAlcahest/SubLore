@@ -93,10 +93,14 @@ export const en = {
     needleLabel: "Find",
     replaceLabel: "Replace with",
     matchCase: "Match case",
+    regex: "Regular expression",
     findNext: "Find next",
     replace: "Replace",
     replaceAll: "Replace all",
     noMatch: "No match",
+    badPattern: "That expression is not one this can read. Nothing was changed.",
+    /** A pattern that backtracks for ever. The document is untouched and the window kept answering. */
+    tooSlow: "That expression takes too long to run. Nothing was changed.",
     /** `{count}` is a whole number. Drawn after a replace all, so the count is never a guess. */
     replaced: {
       one: "1 replaced",

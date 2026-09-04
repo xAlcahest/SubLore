@@ -53,6 +53,18 @@ const IN_TWO_CUES = "had";
 const REPLACEMENT_ONE = "[$&]";
 const REPLACEMENT_ALL = "H$&D";
 
+/** Matches the third cue's word as an expression and nothing at all as literal text. */
+const AS_EXPRESSION = "f.g";
+/**
+ * An expression the engine will not compile, and one it will never finish.
+ *
+ * The second was measured rather than assumed: `^(.+)+x$` against the first cue's own text was
+ * still running when a five second timeout killed it, which is what makes it the right shape for
+ * the check that the window survives one.
+ */
+const WILL_NOT_COMPILE = "[";
+const WILL_NEVER_FINISH = "^(.+)+x$";
+
 /**
  * The long fixture, and the arithmetic its shape allows: it repeats eight lines in order, so this
  * one sits on rows 7, 15, 23 and on, and the nth match is a row a check can name.
@@ -421,5 +433,81 @@ describe("the find band", () => {
       timeout: 20000,
       message: "the document to come back to the bytes it was opened with",
     });
+  });
+
+  it("reads the pattern as an expression only when it is asked to", async () => {
+    // Literal, so the dot is a dot and this is in no cue.
+    await search(toplevel, AS_EXPRESSION);
+    await clickElement(toplevel, ".findbar__next");
+    await waitFor(() => present(".findbar__missing"), {
+      timeout: 20000,
+      message: "the band to report no match for the literal pattern",
+    });
+
+    await clickElement(toplevel, ".findbar__regex");
+    await clickElement(toplevel, ".findbar__next");
+    await waitForCursor(3);
+    expect(await present(".findbar__missing")).toBe(false);
+  });
+
+  it("writes what a group captured", async () => {
+    const before = await rowText(3);
+    await search(toplevel, "(f)(og)");
+    await typeInto(toplevel, ".findbar__replacement", "[$2$1]");
+
+    // Twice: the first press finds, the second rewrites (interface-spec 9.2).
+    await clickElement(toplevel, ".findbar__replace");
+    await waitForCursor(3);
+    await clickElement(toplevel, ".findbar__replace");
+    await waitFor(async () => ((await rowText(3)) === before ? null : true), {
+      timeout: 20000,
+      message: "the second press to rewrite the third row",
+    });
+    expect(await rowText(3)).toBe(before.replace("fog", () => "[ogf]"));
+
+    await clickElement(toplevel, ".toolbar__edit-undo");
+    await waitFor(async () => ((await present(".statusbar__dirty")) === false ? true : null), {
+      timeout: 20000,
+      message: "one undo to leave the file as it was opened",
+    });
+  });
+
+  it("says so for an expression it cannot read, and changes nothing", async () => {
+    await search(toplevel, WILL_NOT_COMPILE);
+    await clickElement(toplevel, ".findbar__next");
+    await waitFor(() => present(".findbar__refused"), {
+      timeout: 20000,
+      message: "the band to refuse the pattern",
+    });
+    expect(await present(".statusbar__dirty")).toBe(false);
+  });
+
+  it("refuses an expression that never finishes, keeps answering, and searches again after", async () => {
+    await search(toplevel, WILL_NEVER_FINISH);
+    await clickElement(toplevel, ".findbar__next");
+    await waitFor(() => present(".findbar__refused"), {
+      timeout: 20000,
+      message: "the band to give up on the pattern",
+    });
+    expect(await present(".statusbar__dirty")).toBe(false);
+
+    // The whole point of running it elsewhere: this window is still taking orders. A menu that
+    // opens is something a frozen page could not do.
+    await clickElement(toplevel, ".menubar__title--timing");
+    await waitFor(() => present(".menubar__menu"), {
+      timeout: 15000,
+      message: "the Timing menu to open after the search was given up on",
+    });
+    pressKey("Escape");
+    await waitFor(async () => ((await present(".menubar__menu")) === false ? true : null), {
+      timeout: 15000,
+      message: "the menu to close",
+    });
+
+    // And the search that was killed left a working one behind it.
+    await search(toplevel, ONLY_IN_THIRD);
+    await clickElement(toplevel, ".findbar__next");
+    await waitForCursor(3);
+    expect(await present(".findbar__refused")).toBe(false);
   });
 });

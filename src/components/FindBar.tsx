@@ -13,6 +13,8 @@ type FindBarProps = {
   replacement: string;
   /** What the last search said: it found something, it found nothing, or nothing has run yet. */
   outcome: "idle" | "found" | "missing";
+  /** Why the last search refused: a pattern that will not compile, or one that never finished. */
+  refusal: "bad-pattern" | "slow" | null;
   /** How many a replace all rewrote, drawn until the next search. Null before any has run. */
   replaced: number | null;
   onQueryChange: (query: Query) => void;
@@ -35,6 +37,7 @@ export default function FindBar({
   query,
   replacement,
   outcome,
+  refusal,
   replaced,
   onQueryChange,
   onReplacementChange,
@@ -109,6 +112,15 @@ export default function FindBar({
           />
         </>
       )}
+      <label className="findbar__regex-label">
+        <input
+          className="findbar__regex"
+          type="checkbox"
+          checked={query.regex}
+          onChange={(event) => onQueryChange({ ...query, regex: event.target.checked })}
+        />
+        {en.find.regex}
+      </label>
       <label className="findbar__case-label">
         <input
           className="findbar__case"
@@ -139,6 +151,12 @@ export default function FindBar({
       {/* Drawn only once a search has actually run: an empty band must not accuse the user of a
         pattern they have not searched for yet. */}
       {outcome === "missing" && <span className="findbar__missing">{en.find.noMatch}</span>}
+      {/* A refused pattern moved nothing and wrote nothing, which is what these two say. */}
+      {refusal !== null && (
+        <span className="findbar__refused">
+          {refusal === "slow" ? en.find.tooSlow : en.find.badPattern}
+        </span>
+      )}
       {replaced !== null && (
         <span className="findbar__replaced">
           {fill(replaced === 1 ? en.find.replaced.one : en.find.replaced.other, {

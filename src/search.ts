@@ -1,16 +1,27 @@
 /**
  * Finding a string in the open document's cue text. No IPC: the shell already holds every cue, so
  * a search reads what is on screen rather than asking the backend for it again.
- * See docs/find-replace-tasks.md F2.
+ *
+ * Everything here is pure and synchronous, and it runs inside the worker rather than on the
+ * window's own thread: a pattern the user types is the one input this app runs as code, and a bad
+ * one backtracks forever. See docs/find-replace-tasks.md F4a and `searchWorker.ts`.
  */
 import { type CueRow } from "./types/subtitle";
 
-/** Where a match sits: the cue it is in, and the offsets into that cue's text. */
-export type Match = { cue: number; start: number; end: number };
+/**
+ * Where a match sits: the cue it is in, the offsets into that cue's text, and what it captured.
+ *
+ * `found` is the whole match followed by its groups, with a group that took part in nothing written
+ * as an empty string. It is carried rather than recomputed so that replacing one match can expand
+ * `$1` without running the user's expression again on the window's own thread.
+ */
+export type Match = { cue: number; start: number; end: number; found: string[] };
 
 export type Query = {
   needle: string;
   matchCase: boolean;
+  /** Off: the needle is taken literally. On: it is the user's own expression, hazards and all. */
+  regex: boolean;
 };
 
 /** The fourteen characters a regular expression reads as syntax, so a typed one is taken literally. */
@@ -23,12 +34,16 @@ const SYNTAX = /[.*+?^${}()|[\]\\]/g;
  * correctness decision rather than a convenience: `"İ".toLowerCase()` is two characters, so a folded
  * haystack carries offsets the real one does not and a highlight computed in it lands in the wrong
  * place. An empty needle matches nothing rather than matching at every position.
+ *
+ * Throws for an expression the engine will not compile, which the caller reports rather than
+ * swallows: an unclosed bracket is a typo, not an empty result.
  */
 function pattern(query: Query): RegExp | null {
   if (query.needle === "") {
     return null;
   }
-  return new RegExp(query.needle.replace(SYNTAX, "\\$&"), query.matchCase ? "gu" : "giu");
+  const source = query.regex ? query.needle : query.needle.replace(SYNTAX, "\\$&");
+  return new RegExp(source, query.matchCase ? "gu" : "giu");
 }
 
 /**
@@ -55,7 +70,17 @@ export function nextMatch(
     expression.lastIndex = step === 0 && resume !== null ? resume.end : 0;
     const found = expression.exec(text);
     if (found !== null) {
-      return { cue: index, start: found.index, end: found.index + found[0].length };
+      // An expression that matches nothing consumes nothing: the caller resumes from `end`, so an
+      // empty match would hand back the same one for ever. Reachable only with regex on.
+      if (found[0].length === 0) {
+        return null;
+      }
+      return {
+        cue: index,
+        start: found.index,
+        end: found.index + found[0].length,
+        found: captured(found),
+      };
     }
   }
   return null;
@@ -64,9 +89,9 @@ export function nextMatch(
 /**
  * Every match rewritten, as one edit per cue that has any, plus how many were replaced.
  *
- * The replacement is applied through a function rather than a string, because `String.replace`
- * reads `$&` and `$1` out of a string replacement: F3 replaces text literally, and capture groups
- * are F4's to add on purpose rather than by accident.
+ * Built by walking the matches rather than through `String.replace`, because the two replacement
+ * forms cannot be mixed: with regex off the replacement has to land exactly as typed, and with it
+ * on `$1` has to name what the expression captured. `String.replace` offers one or the other.
  */
 export function replaceEverywhere(
   cues: readonly CueRow[],
@@ -80,20 +105,59 @@ export function replaceEverywhere(
     return { edits, count };
   }
   cues.forEach((cue, index) => {
-    let hits = 0;
-    const rewritten = cue.text.replace(expression, () => {
-      hits += 1;
-      return replacement;
-    });
-    if (hits > 0) {
-      edits.push({ cue: index, text: rewritten });
-      count += hits;
+    // A zero-length match is skipped rather than replaced at every position, which is what the
+    // single search does with one too.
+    const hits = [...cue.text.matchAll(expression)].filter((hit) => hit[0].length > 0);
+    if (hits.length === 0) {
+      return;
     }
+    let rewritten = "";
+    let cursor = 0;
+    for (const hit of hits) {
+      rewritten += cue.text.slice(cursor, hit.index) + written(query, replacement, captured(hit));
+      cursor = hit.index + hit[0].length;
+    }
+    edits.push({ cue: index, text: rewritten + cue.text.slice(cursor) });
+    count += hits.length;
   });
   return { edits, count };
 }
 
-/** One match rewritten in place, for the replace that walks the file one hit at a time. */
-export function replaceOne(text: string, at: Match, replacement: string): string {
-  return text.slice(0, at.start) + replacement + text.slice(at.end);
+/** The whole match and its groups, with a group that took part in nothing written as empty. */
+function captured(hit: RegExpExecArray | RegExpMatchArray): string[] {
+  return Array.from(hit, (group) => group ?? "");
+}
+
+/** What one match is replaced by: as typed with regex off, expanded with it on. */
+export function written(query: Query, replacement: string, found: readonly string[]): string {
+  return query.regex ? expand(replacement, found) : replacement;
+}
+
+/**
+ * `$$`, `$&` and `$1` to `$9` in a replacement, against one match's own replacer arguments.
+ *
+ * Only the sequences a translator reaches for are honoured; anything else is left as typed rather
+ * than silently eaten, which is the safer direction for text somebody is about to write into a file.
+ */
+function expand(replacement: string, found: readonly string[]): string {
+  return replacement.replace(/\$(\$|&|[1-9])/g, (_written: string, what: string) => {
+    if (what === "$") {
+      return "$";
+    }
+    if (what === "&") {
+      return found[0] ?? "";
+    }
+    // A group the expression does not have, or one that matched nothing, contributes nothing.
+    return found[Number(what)] ?? "";
+  });
+}
+
+/**
+ * One match rewritten in place, for the replace that walks the file one hit at a time.
+ *
+ * Safe on the window's own thread: it splices a string and expands what the match already carried,
+ * so no expression of the user's runs here.
+ */
+export function replaceOne(text: string, at: Match, query: Query, replacement: string): string {
+  return text.slice(0, at.start) + written(query, replacement, at.found) + text.slice(at.end);
 }

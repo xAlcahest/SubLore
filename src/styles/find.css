@@ -64,3 +64,17 @@
   font-size: 0.875rem;
   color: var(--ink-muted);
 }
+
+.findbar__regex-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+/* A pattern the search would not run. It cost the user nothing, so it is not drawn as an error. */
+.findbar__refused {
+  font-size: 0.875rem;
+  color: var(--ink-warn);
+}
