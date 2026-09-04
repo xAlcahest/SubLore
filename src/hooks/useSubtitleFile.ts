@@ -295,15 +295,17 @@ export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
           const outcome = await invoke<ModuleOutcome>("module_invoke", {
             module,
             item,
-            revision: revision.current,
-            cue,
-            // Both are a panel's, and panels are not built. Section 4.1 says `row` is only
-            // meaningful when `panelId` is not zero, so zero here says there is no row.
-            row: 0,
-            panelId: 0,
-            // Nothing to carry yet: a module keys its own storage on this, storage is not built,
-            // and `ProjectView` has no id to give. See docs/module-host-tasks.md H6.
-            projectKey: 0,
+            at: {
+              revision: revision.current,
+              cue,
+              // Both are a panel's, and panels are not built. Section 4.1 says `row` is only
+              // meaningful when `panelId` is not zero, so zero here says there is no row.
+              row: 0,
+              panelId: 0,
+              // Nothing to carry yet: a module keys its own storage on this, storage is not built,
+              // and `ProjectView` has no id to give. See docs/module-host-tasks.md H6.
+              projectKey: 0,
+            },
           });
           // Applied before the code is looked at. A module that changed rows and then refused
           // changed them, and the grid has to draw the document the session holds.

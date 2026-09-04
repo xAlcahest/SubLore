@@ -15,7 +15,7 @@ use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sublore_module_api::{
     SubloreHost, SubloreInvocation, SubloreItem, SubloreStr, SUBLORE_ENABLE_ALWAYS,
     SUBLORE_ENABLE_DOCUMENT_OPEN, SUBLORE_ENABLE_PROJECT_OPEN, SUBLORE_ENABLE_SELECTION_NON_EMPTY,
@@ -560,6 +560,21 @@ pub fn module_contributions(state: tauri::State<'_, ModuleState>) -> Vec<Contrib
     state.inner().contributions()
 }
 
+/// Where a gesture happened, as the window reports it.
+///
+/// One argument rather than five, which is also the shape it crosses the boundary in: this is
+/// `SubloreInvocation` with the parts the window owns, and nothing about which item it is.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvokeAt {
+    pub revision: u64,
+    /// The cursor's row, or none when there is no selection.
+    pub cue: Option<u64>,
+    pub row: u64,
+    pub panel_id: u32,
+    pub project_key: i64,
+}
+
 /// A contributed item was activated. Everything about which item is the module's own (§5.3).
 ///
 /// On the blocking pool rather than the async runtime's poll thread, because a module's own work
@@ -569,20 +584,16 @@ pub async fn module_invoke(
     app: tauri::AppHandle,
     module: usize,
     item: u32,
-    revision: u64,
-    cue: Option<u64>,
-    row: u64,
-    panel_id: u32,
-    project_key: i64,
+    at: InvokeAt,
 ) -> InvokeOutcome {
     let at = SubloreInvocation {
-        revision,
+        revision: at.revision,
         // A selection the module can act on, or the sentinel that says there is none.
-        cue: cue.unwrap_or(SUBLORE_NO_CUE),
+        cue: at.cue.unwrap_or(SUBLORE_NO_CUE),
         // Zero unless a panel row carried it, which is the rule §4.1 gives for reading it at all.
-        row: if panel_id == 0 { 0 } else { row },
-        panel_id,
-        project_key,
+        row: if at.panel_id == 0 { 0 } else { at.row },
+        panel_id: at.panel_id,
+        project_key: at.project_key,
     };
     tauri::async_runtime::spawn_blocking(move || {
         use tauri::Manager;
