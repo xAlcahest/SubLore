@@ -221,6 +221,25 @@ grep -nE "✖|failing|Spec Files" /tmp/run.log
 `tests/mutation.rs` leaves `tests/session.rs` unrun, so the report undercounts what the mutation
 actually broke. Use `--no-fail-fast` whenever the point of the run is to see the full blast radius.
 
+## Two ways the instrument lied, both found by running it
+
+**`xdotool` cannot press a function key by name on this X server.** `xdotool key F3` presses Alt
+before the key, with or without `--clearmodifiers`, and the webview is told `altKey` is true, so the
+shell drops it: `commandFor` refuses every press carrying Alt. F5 behaves the same way. The keymap
+has `keycode 69 = F3 F3 F3 F3 F3 F3 XF86Switch_VT_3`, and xdotool resolving the keysym picks a level
+that carries Alt. `pressKey` therefore presses a function key by keycode, looked up through
+python-xlib, and every other key by name exactly as before. A real keyboard sends the keycode, so
+this is the instrument being made to match the hardware rather than the app being bent to the
+instrument. Measured 2026-09-04, on this machine under Xvfb.
+
+**A wait measured in milliseconds is a wait that passes alone and fails in the battery.**
+`waveform-follow.spec.js` paused a fixed 200 ms after a seek before reading the drawn playhead. It
+passed every time the spec ran alone and failed twice in a full run, both times reading a playhead
+three seconds from where the seek had put it. It waits on the transport now, which is drawn from the
+position the seek set, so the slider reading the target is the render the canvas was painted in.
+This is the same class as `docs/environment-anchored-assertions.md`: a number calibrated on an idle
+machine is a number that is wrong on a busy one.
+
 ## Reading a CI run that looks stopped
 
 Each check streams its output while it runs. `.github/scripts/e2e-check.sh` runs the check into
