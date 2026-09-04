@@ -31,4 +31,10 @@
 
   --accent: #4fb3d9;
   --accent-bg: #2d4a5c;
+
+  /* The cursor's cue's two boundaries on the waveform, in distinct colours so the pair reads as a
+     bracket (interface-spec 5.4). Neither is the accent: a marker under the playhead must not be
+     the playhead. See M2.5. */
+  --marker-start: #6fd08c;
+  --marker-end: #e8935f;
 }

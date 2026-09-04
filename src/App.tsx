@@ -585,6 +585,15 @@ export default function App() {
     );
   }
 
+  /**
+   * A boundary let go on the waveform. The pair travels in the one command that takes both, so a
+   * whole drag is a single history entry. See docs/waveform-timing-tasks.md.
+   */
+  async function dragTimes(cue: number, startMs: number, endMs: number) {
+    await flushEditors();
+    await subtitle.setTimes(cue, startMs, endMs);
+  }
+
   /** The video goes to one of the cursor's cue's boundaries. */
   async function videoToBoundary(which: "start" | "end") {
     const at = selection.active;
@@ -1084,6 +1093,9 @@ export default function App() {
                     durationMs={Math.round((state.duration ?? 0) * 1000)}
                     height={layout?.waveformHeight}
                     paused={state.paused}
+                    cueIndex={selection.active}
+                    cue={activeCue}
+                    onDragTimes={(cue, startMs, endMs) => void dragTimes(cue, startMs, endMs)}
                   />
                   {layout !== null && (
                     <Sash
