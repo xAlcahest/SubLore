@@ -1,6 +1,6 @@
 //! The module the loader is proved against, before any real one exists.
 //!
-//! It is not a pro module and holds nothing pro. It contributes one menu title with one item under
+//! It is not a paid module and holds nothing of one. It contributes one menu title with one item under
 //! it, which is the smallest contribution that exercises the parent link, and it calls back into
 //! the host from inside `describe` for the two slots the host has filled. Every slot neither side
 //! has filled stays null, which the interface allows on purpose: a slot the other side left empty

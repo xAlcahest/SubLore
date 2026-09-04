@@ -1,7 +1,7 @@
 [package]
 name = "sublore-matcher"
 version = "0.1.0"
-description = "The one comparison the core's find and a module's QA both use"
+description = "The one comparison the core's find and a module's quality pass both use"
 edition = "2021"
 license = "GPL-3.0-or-later"
 publish = false

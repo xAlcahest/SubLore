@@ -19,6 +19,20 @@ permissions:
   contents: read
 
 jobs:
+  # N8f: the open-core boundary (CLAUDE.md §4), checked in under a second and gating on its own
+  # rather than as a step of `check`, since it needs neither Rust nor the frontend toolchain and
+  # would otherwise wait behind both.
+  vocabulary:
+    name: vocabulary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check for forbidden vocabulary
+        run: scripts/check-vocabulary.sh
+
   check:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

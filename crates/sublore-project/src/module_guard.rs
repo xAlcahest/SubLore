@@ -38,7 +38,7 @@ fn is_schema_table(table: &str) -> bool {
 /// The functions a module's statements may call.
 ///
 /// An allowlist, and that is the point: a denylist over a set that grows inside SQLite has a gap on
-/// the day SQLite adds one. These are the ones a termbase or a memory needs to match text.
+/// the day SQLite adds one. These are the ones a module's own tables need to match text.
 const FUNCTIONS: [&str; 12] = [
     "abs", "coalesce", "count", "length", "lower", "ltrim", "max", "min", "rtrim", "substr",
     "trim", "upper",

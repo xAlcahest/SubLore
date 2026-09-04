@@ -316,7 +316,7 @@ fn deleting_a_project_removes_sublore_s_own_files_and_nothing_of_the_user_s() {
     let media = scratch.file("user/ep01.mkv", "the user's only copy of the video");
     let subtitle = scratch.file("user/ep01.srt", "1\n00:00:01,000 --> 00:00:02,000\nHello\n");
     // Two files the user keeps in the project folder itself, which Sublore did not create.
-    let notes = scratch.file("Series/notes.txt", "my glossary notes");
+    let notes = scratch.file("Series/notes.txt", "my grocery list");
     let stray = scratch.file("Series/project.sublore.bak", "a backup the user made");
 
     let before = [
