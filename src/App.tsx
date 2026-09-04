@@ -410,6 +410,54 @@ export default function App() {
     await subtitle.mergeCue(at);
   }
 
+  /** Where the video is, to the millisecond the product reasons in (decision 11). */
+  function playheadMs(): number {
+    return Math.round(position * 1000);
+  }
+
+  /**
+   * The cursor's cue takes the playhead as one of its boundaries. A start past its own end is
+   * refused by the backend and the refusal reaches the status bar: a silent clamp would leave a cue
+   * whose length nobody chose. See docs/playhead-tasks.md.
+   */
+  async function boundaryToPlayhead(which: "start" | "end") {
+    await flushEditors();
+    const at = selection.active;
+    const cue = at === null ? null : (subtitle.cues[at] ?? null);
+    if (at === null || cue === null) {
+      return;
+    }
+    const now = playheadMs();
+    await subtitle.setTimes(
+      at,
+      which === "start" ? now : cue.startMs,
+      which === "end" ? now : cue.endMs,
+    );
+  }
+
+  /** The video goes to one of the cursor's cue's boundaries. */
+  async function videoToBoundary(which: "start" | "end") {
+    const at = selection.active;
+    const cue = at === null ? null : (subtitle.cues[at] ?? null);
+    if (cue === null) {
+      return;
+    }
+    await seek((which === "start" ? cue.startMs : cue.endMs) / 1000);
+  }
+
+  /**
+   * The cursor goes to the cue the video is inside. In a gap it goes to the one that starts next,
+   * because timing runs forwards, and past the last cue it does nothing.
+   */
+  function selectAtPlayhead() {
+    const now = playheadMs();
+    const covering = subtitle.cues.findIndex((cue) => now >= cue.startMs && now < cue.endMs);
+    const target = covering >= 0 ? covering : subtitle.cues.findIndex((cue) => cue.startMs >= now);
+    if (target >= 0) {
+      selection.move(target, "plain");
+    }
+  }
+
   /** Quit through the one route the close gate guards, with the open editor flushed into the
    * document first so the gate is asked about it. See BACKLOG.md N6. */
   async function quit() {
@@ -501,6 +549,37 @@ export default function App() {
       accelerator: en.menu.keys.redo,
       enabled: subtitle.canRedo,
       run: () => void redoDocument(),
+    },
+    {
+      id: "time.start-to-playhead",
+      label: en.menu.timing.startToPlayhead,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void boundaryToPlayhead("start"),
+    },
+    {
+      id: "time.end-to-playhead",
+      label: en.menu.timing.endToPlayhead,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void boundaryToPlayhead("end"),
+    },
+    {
+      id: "video.to-cue-start",
+      label: en.menu.timing.toCueStart,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void videoToBoundary("start"),
+    },
+    {
+      id: "video.to-cue-end",
+      label: en.menu.timing.toCueEnd,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void videoToBoundary("end"),
+    },
+    {
+      // No cursor needed: finding the cue at the playhead is what gives it one.
+      id: "edit.select-at-playhead",
+      label: en.menu.timing.selectAtPlayhead,
+      enabled: subtitle.summary !== null && subtitle.cues.length > 0 && ready,
+      run: () => selectAtPlayhead(),
     },
     {
       id: "subtitle.insert",
@@ -610,6 +689,17 @@ export default function App() {
       id: "subtitle",
       title: en.menu.subtitles.title,
       items: ["subtitle.insert", "subtitle.delete", "subtitle.split", "subtitle.merge"],
+    },
+    {
+      id: "timing",
+      title: en.menu.timing.title,
+      items: [
+        "time.start-to-playhead",
+        "time.end-to-playhead",
+        "video.to-cue-start",
+        "video.to-cue-end",
+        "edit.select-at-playhead",
+      ],
     },
     {
       id: "view",

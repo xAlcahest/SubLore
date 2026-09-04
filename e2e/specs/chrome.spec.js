@@ -32,6 +32,7 @@ const TITLES = [
   { id: "file", label: "File", disabled: false },
   { id: "edit", label: "Edit", disabled: false },
   { id: "subtitle", label: "Subtitles", disabled: false },
+  { id: "timing", label: "Timing", disabled: false },
   { id: "view", label: "View", disabled: false },
   { id: "audio", label: "Audio", disabled: true },
   { id: "help", label: "Help", disabled: false },
@@ -288,6 +289,8 @@ describe("the menu bar and the toolbar", () => {
     pressKey("Right");
     await waitForOpenMenu("Subtitles");
     pressKey("Right");
+    await waitForOpenMenu("Timing");
+    pressKey("Right");
     await waitForOpenMenu("View");
     pressKey("Right");
     await waitForOpenMenu("Help");
@@ -315,7 +318,9 @@ describe("the menu bar and the toolbar", () => {
   it("activates the item under the cursor on Enter", async () => {
     pressKey("alt");
     await waitForOpenMenu("File");
-    // File, Edit, Subtitles, View, Help: the walk the test above asserts, taken here to reach About.
+    // File, Edit, Subtitles, Timing, View, Help: the walk the test above asserts, taken here to
+    // reach About. Audio is skipped because with nothing open it has no track to list.
+    pressKey("Right");
     pressKey("Right");
     pressKey("Right");
     pressKey("Right");

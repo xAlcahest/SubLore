@@ -23,6 +23,14 @@ export const en = {
       /** Here until an Audio title of its own arrives with the milestone that registers it. */
       transcribe: "Transcribe…",
     },
+    timing: {
+      title: "Timing",
+      startToPlayhead: "Set start to playhead",
+      endToPlayhead: "Set end to playhead",
+      toCueStart: "Jump to cue start",
+      toCueEnd: "Jump to cue end",
+      selectAtPlayhead: "Select cue at playhead",
+    },
     view: {
       title: "View",
       waveform: "Waveform",

@@ -4,7 +4,19 @@
  * See interface-spec 2.7 and 2.8.
  */
 type CommandArea =
-  "app" | "asr" | "audio" | "edit" | "file" | "help" | "project" | "subtitle" | "video" | "view";
+  | "app"
+  | "asr"
+  | "audio"
+  | "edit"
+  | "file"
+  | "help"
+  | "project"
+  | "subtitle"
+  // Timing against the playhead and the waveform. Its own area rather than part of `subtitle`,
+  // because interface-spec 3 gives it a menu title of its own and the two grow separately.
+  | "time"
+  | "video"
+  | "view";
 
 /** A command's registry key, and the only name any route ever holds it by. */
 export type CommandId = `${CommandArea}.${string}`;
