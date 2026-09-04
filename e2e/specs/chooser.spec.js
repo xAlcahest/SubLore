@@ -21,6 +21,7 @@ import { answerChooser, cancelChooser, waitForChooser } from "../lib/chooser.js"
 import { clickAt, focusWindow, rightClickAt, typeText } from "../lib/input.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
+import { closeAnyOpenProject } from "../lib/rail.js";
 import { findToplevel } from "../lib/x11.js";
 
 /**
@@ -216,23 +217,6 @@ async function confirmDialog(toplevel) {
   await waitFor(async () => (await present(".raildialog")) === false, {
     timeout: 15000,
     message: "the dialog to close after it was confirmed",
-  });
-}
-
-/**
- * Every spec shares one data home, so a spec that ran before this one may have left a project open,
- * and a launch now reopens it (decision 24, D5). This one starts from nothing open.
- */
-async function closeAnyOpenProject(toplevel) {
-  if (!(await present(".rail__project"))) {
-    return;
-  }
-  await openProjectMenu(toplevel);
-  await chooseMenuItem(toplevel, "close-project");
-  await confirmDialog(toplevel);
-  await waitFor(() => present(".rail__empty"), {
-    timeout: 20000,
-    message: "the rail to empty once another spec's project is closed",
   });
 }
 

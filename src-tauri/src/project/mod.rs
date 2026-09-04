@@ -143,7 +143,18 @@ pub async fn project_close(
 /// the project; File draws the list (decision 24, D5).
 #[tauri::command]
 pub async fn project_session(app: AppHandle) -> Result<session::Session, ProjectError> {
-    blocking("session", move || Ok(session::read(&app))).await
+    blocking("session", move || {
+        let session = session::read(&app);
+        // One line per launch, whichever way it goes. "Why did it open that project" has no answer
+        // in the log without it, and it is the only moment at which the answer exists: the rail is
+        // empty before this and may be empty after it, and the two are not the same state.
+        match session.folder.as_deref() {
+            Some(folder) => log::info!("project session: read, reopening {folder}"),
+            None => log::info!("project session: read, nothing to reopen"),
+        }
+        Ok(session)
+    })
+    .await
 }
 
 /// Remember which episode is selected, so the next launch comes back to it (decision 24, D5).

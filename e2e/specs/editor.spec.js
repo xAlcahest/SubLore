@@ -10,6 +10,7 @@ import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow, typeText } from "../lib/input.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
+import { closeAnyOpenProject } from "../lib/rail.js";
 import { findToplevel } from "../lib/x11.js";
 
 /**
@@ -253,24 +254,6 @@ async function openProjectMenu(toplevel) {
   await waitFor(() => present(".railmenu"), {
     timeout: 20000,
     message: "the rail's project menu to open",
-  });
-}
-
-/**
- * Every spec shares one data home and a launch reopens the project that was open (decision 24 D5),
- * so an earlier spec's project is on screen here and `create-project` is not in the menu while one
- * is. This closes whatever is open, so the block below starts from nothing either way.
- */
-async function closeAnyOpenProject(toplevel) {
-  if (!(await present(".rail__project"))) {
-    return;
-  }
-  await openProjectMenu(toplevel);
-  await clickElement(toplevel, ".railmenu__item--close-project");
-  await clickElement(toplevel, ".raildialog__confirm");
-  await waitFor(() => present(".rail__empty"), {
-    timeout: 20000,
-    message: "the rail to empty once another spec's project is closed",
   });
 }
 

@@ -11,6 +11,7 @@
  */
 import { browser } from "@wdio/globals";
 
+import { appLogSinceStart, dataHome } from "./applog.js";
 import { clickAt } from "./input.js";
 import { waitFor } from "./proc.js";
 
@@ -67,13 +68,41 @@ export async function confirmRailDialog(toplevel) {
 }
 
 /**
+ * Whether this launch is about to reopen a project, waiting until the app knows.
+ *
+ * The rail cannot answer it. The restore is asynchronous, so an empty rail means either that there
+ * is no project or that the one there is has not arrived yet, and those are not the same state.
+ * The app says which as soon as it has read the remembered session, and that line is read from this
+ * launch's own part of the shared log.
+ */
+async function willReopen() {
+  const said = await waitFor(
+    () =>
+      /project session: read, (nothing to reopen|reopening )/.exec(appLogSinceStart(dataHome())),
+    {
+      timeout: 30000,
+      message: "the app to say what it remembered of the last session",
+    },
+  );
+  return said[1] !== "nothing to reopen";
+}
+
+/**
  * Start from nothing open, whoever the open project belonged to. Safe to call when the rail is
  * already empty, so a spec can put it in its `before` without asking first.
+ *
+ * The guard here used to be `.rail__project` in the DOM, which lost the race the whole of this file
+ * exists to win: a `before` that ran before the restore painted returned having closed nothing, and
+ * the project landed two tests later. See docs/restore-race.md in the meta repository.
  */
 export async function closeAnyOpenProject(toplevel) {
-  if (!(await present(".rail__project"))) {
+  if (!(await willReopen())) {
     return;
   }
+  await waitFor(() => present(".rail__project"), {
+    timeout: 20000,
+    message: "the project the app said it was reopening to reach the rail",
+  });
   await openProjectMenu(toplevel);
   await chooseRailItem(toplevel, "close-project");
   await confirmRailDialog(toplevel);
