@@ -38,16 +38,51 @@ import { type EpisodeFileView } from "./types/project";
 import { type CueRow } from "./types/subtitle";
 import "./App.css";
 
-/** The command an accelerator asks for, or null when the chrome does not own that key. */
-function acceleratorFor(key: string, shift: boolean): CommandId | null {
-  if (key === "o") {
-    return shift ? "video.open" : "file.open-subtitle";
+/**
+ * Ctrl+Z, Ctrl+Y and Ctrl+S are the cue list's, not the shell's: each flushes an open cue editor
+ * before it acts, and that editor is the grid's. `CueList.tsx` also decides there whether a key
+ * inside a text field belongs to the document or to the webview. Named here so the exclusion is a
+ * decision a reader can find rather than a silence. See docs/accelerators-tasks.md.
+ */
+const HANDLED_BY_THE_GRID: ReadonlySet<CommandId> = new Set([
+  "edit.undo",
+  "edit.redo",
+  "file.save",
+]);
+
+/** A declared accelerator, in the one shape the strings use: `Ctrl+O`, `Ctrl+Shift+S`. */
+type Chord = { shift: boolean; key: string };
+
+function parseAccelerator(text: string | undefined): Chord | null {
+  if (text === undefined) {
+    return null;
   }
-  if (key === "s" && shift) {
-    return "file.save-copy";
+  const parts = text.split("+").map((part) => part.trim().toLowerCase());
+  const key = parts.pop();
+  // Ctrl is required and Alt is not a modifier any of these use: AltGr arrives as ctrl+alt and is
+  // typing. Anything else in the string is one this cannot honour, so it draws and never fires.
+  if (key === undefined || key.length !== 1 || !parts.includes("ctrl")) {
+    return null;
   }
-  if (key === "q" && !shift) {
-    return "app.quit";
+  if (parts.some((part) => part !== "ctrl" && part !== "shift")) {
+    return null;
+  }
+  return { shift: parts.includes("shift"), key };
+}
+
+/**
+ * The command a key press asks for, read off the registry rather than off a list of letters, so a
+ * command that declares a shortcut has one and the label cannot name a key that does nothing.
+ */
+function acceleratorFor(commands: CommandRegistry, key: string, shift: boolean): CommandId | null {
+  for (const command of Object.values(commands)) {
+    if (HANDLED_BY_THE_GRID.has(command.id)) {
+      continue;
+    }
+    const chord = parseAccelerator(command.accelerator);
+    if (chord !== null && chord.key === key && chord.shift === shift) {
+      return command.id;
+    }
   }
   return null;
 }
@@ -461,6 +496,29 @@ export default function App() {
     await playRange(range[0], range[1]);
   }
 
+  /** The step the boundaries move by. One size, no larger variant under Shift (owner ruling 23). */
+  const NUDGE_MS = 10;
+
+  /**
+   * Move one boundary of the cursor's cue. A start pushed past its own end is refused by the
+   * backend and the refusal reaches the status bar, the same as typing one in.
+   */
+  async function nudge(which: "start" | "end", by: number) {
+    await flushEditors();
+    const at = selection.active;
+    const cue = at === null ? null : (subtitle.cues[at] ?? null);
+    if (at === null || cue === null) {
+      return;
+    }
+    // Never below zero: a boundary dragged off the front of the media is not a time.
+    const moved = Math.max(0, (which === "start" ? cue.startMs : cue.endMs) + by);
+    await subtitle.setTimes(
+      at,
+      which === "start" ? moved : cue.startMs,
+      which === "end" ? moved : cue.endMs,
+    );
+  }
+
   /** The video goes to one of the cursor's cue's boundaries. */
   async function videoToBoundary(which: "start" | "end") {
     const at = selection.active;
@@ -599,6 +657,30 @@ export default function App() {
       label: en.menu.timing.toCueEnd,
       enabled: subtitle.summary !== null && selection.active !== null && ready,
       run: () => void videoToBoundary("end"),
+    },
+    {
+      id: "time.start-earlier",
+      label: en.menu.timing.startEarlier,
+      enabled: subtitle.summary !== null && selection.active !== null,
+      run: () => void nudge("start", -NUDGE_MS),
+    },
+    {
+      id: "time.start-later",
+      label: en.menu.timing.startLater,
+      enabled: subtitle.summary !== null && selection.active !== null,
+      run: () => void nudge("start", NUDGE_MS),
+    },
+    {
+      id: "time.end-earlier",
+      label: en.menu.timing.endEarlier,
+      enabled: subtitle.summary !== null && selection.active !== null,
+      run: () => void nudge("end", -NUDGE_MS),
+    },
+    {
+      id: "time.end-later",
+      label: en.menu.timing.endLater,
+      enabled: subtitle.summary !== null && selection.active !== null,
+      run: () => void nudge("end", NUDGE_MS),
     },
     {
       id: "time.play-line",
@@ -753,6 +835,10 @@ export default function App() {
         "time.play-before",
         "time.play-after",
         "time.play-to-end",
+        "time.start-earlier",
+        "time.start-later",
+        "time.end-earlier",
+        "time.end-later",
       ],
     },
     {
@@ -789,8 +875,7 @@ export default function App() {
       if (!event.ctrlKey || event.altKey || event.metaKey) {
         return;
       }
-      // Ctrl+S, Ctrl+Z and Ctrl+Y are the cue list's: it flushes an open editor before it acts.
-      const id = acceleratorFor(event.key.toLowerCase(), event.shiftKey);
+      const id = acceleratorFor(latest.current, event.key.toLowerCase(), event.shiftKey);
       if (id === null) {
         return;
       }

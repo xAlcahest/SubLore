@@ -35,6 +35,10 @@ export const en = {
       playBefore: "Play 500 ms before line",
       playAfter: "Play 500 ms after line",
       playToEnd: "Play from line start to the end",
+      startEarlier: "Start 10 ms earlier",
+      startLater: "Start 10 ms later",
+      endEarlier: "End 10 ms earlier",
+      endLater: "End 10 ms later",
     },
     view: {
       title: "View",

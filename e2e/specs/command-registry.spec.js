@@ -52,6 +52,10 @@ const DECLARED = [
   "video-to-cue-start",
   "video-to-cue-end",
   "edit-select-at-playhead",
+  "time-start-earlier",
+  "time-start-later",
+  "time-end-earlier",
+  "time-end-later",
   "time-play-line",
   "time-play-before",
   "time-play-after",
@@ -475,6 +479,12 @@ describe("the command registry", () => {
       { route: "menu", id: "subtitle-insert", disabled: false },
       { route: "menu", id: "subtitle-delete", disabled: false },
       { route: "menu", id: "subtitle-merge", disabled: false },
+      // The four nudges need a cursor and nothing else, so a document alone ungreys them. The four
+      // playback commands beside them in Timing want a video too, and stay greyed here.
+      { route: "menu", id: "time-start-earlier", disabled: false },
+      { route: "menu", id: "time-start-later", disabled: false },
+      { route: "menu", id: "time-end-earlier", disabled: false },
+      { route: "menu", id: "time-end-later", disabled: false },
       { route: "toolbar", id: "file-save-copy", disabled: false },
     ]);
   });

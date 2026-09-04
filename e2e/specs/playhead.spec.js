@@ -45,6 +45,10 @@ const TIMING_ITEMS = [
   "time-play-before",
   "time-play-after",
   "time-play-to-end",
+  "time-start-earlier",
+  "time-start-later",
+  "time-end-earlier",
+  "time-end-later",
 ];
 
 function dataHome() {
@@ -304,6 +308,46 @@ describe("the times follow the playhead", () => {
       { timeout: 20000, message: `the player to reach ${THIRD_END}` },
     );
     expect(atEnd).toBe(THIRD_END);
+  });
+
+  it("moves one boundary by ten milliseconds and leaves the other where it was", async () => {
+    await cursorTo(toplevel, 3);
+    const before = (await gridRows())[2];
+    expect(before.start).toBe(THIRD_START);
+    expect(before.end).toBe(THIRD_END);
+
+    await runFromMenu(toplevel, "time-start-later");
+    const later = await waitFor(
+      async () => {
+        const now = (await gridRows())[2];
+        return now?.start === "00:00:09.110" ? now : null;
+      },
+      { timeout: 20000, message: "the third cue's start to move ten milliseconds on" },
+    );
+    // Ten, not nine and not eleven, and the end has not moved with it.
+    expect(later.end).toBe(THIRD_END);
+
+    await runFromMenu(toplevel, "time-end-earlier");
+    const shorter = await waitFor(
+      async () => {
+        const now = (await gridRows())[2];
+        return now?.end === "00:00:11.750" ? now : null;
+      },
+      { timeout: 20000, message: "the third cue's end to move ten milliseconds back" },
+    );
+    expect(shorter.start).toBe("00:00:09.110");
+
+    // Two edits, two undos: each nudge is its own step and neither swallowed the other.
+    await clickElement(toplevel, ".toolbar__edit-undo");
+    await clickElement(toplevel, ".toolbar__edit-undo");
+    await waitFor(
+      async () => {
+        const now = (await gridRows())[2];
+        return now?.start === THIRD_START && now?.end === THIRD_END ? true : null;
+      },
+      { timeout: 20000, message: "two undos to put both boundaries back" },
+    );
+    expect(readFileSync(copy).equals(openedBytes)).toBe(true);
   });
 
   it("plays the cursor's cue and stops itself at its end", async () => {
