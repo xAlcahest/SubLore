@@ -200,6 +200,27 @@ Environment knobs:
 Neither entry point builds anything. A missing binary or fixture fails immediately with the command
 to run, because a silent four-minute rebuild inside a test hook is worse than a red line.
 
+## Three ways to make a run tell you nothing
+
+Each of these produced a failure that meant nothing, and cost a re-run to find out.
+
+**Do not edit a spec file while a run is in progress.** Workers read each file as they reach it, so
+a run started before an edit and finished after it mixes an old binary with new expectations. The
+failure looks like a defect and is not one. Wait for the run, then edit.
+
+**Do not pipe a run through `tail`.** The spec reporter prints a failing spec's assertion where it
+happened, and a failure in the eighth of twenty-seven specs is thousands of lines above the summary.
+Write the whole log to a file and grep it:
+
+```sh
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e > /tmp/run.log 2>&1
+grep -nE "✖|failing|Spec Files" /tmp/run.log
+```
+
+**`cargo test -p <crate>` stops at the first failing test binary.** A mutation that reddens
+`tests/mutation.rs` leaves `tests/session.rs` unrun, so the report undercounts what the mutation
+actually broke. Use `--no-fail-fast` whenever the point of the run is to see the full blast radius.
+
 ## Reading a CI run that looks stopped
 
 Each check streams its output while it runs. `.github/scripts/e2e-check.sh` runs the check into
