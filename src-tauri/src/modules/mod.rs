@@ -25,6 +25,7 @@ use sublore_module_api::{
 use sublore_module_host::{scan, Loaded, Refusal};
 
 use crate::log;
+use crate::subtitle::SessionSlot;
 use host::HostCtx;
 
 /// Why a file that looked like a module was not used, as the frontend receives it.
@@ -240,7 +241,8 @@ impl Drop for Held {
             else {
                 continue;
             };
-            let _entered = self.ctx.enter(&file_name(running.module.path()));
+            // No session at teardown: the window is gone and there is nothing to lend.
+            let _entered = self.ctx.enter(&file_name(running.module.path()), None);
             // Safety: `ctx` is what this module's own `create` wrote, handed back exactly once.
             unsafe { destroy(running.ctx) };
             running.ctx = std::ptr::null_mut();
@@ -287,10 +289,21 @@ impl ModuleState {
     /// directory a module is given comes from the app and the app does not exist when the scan does.
     /// Nothing here fails the launch: a module that will not start is one the user is told about
     /// and the app runs without.
-    pub fn start(&self, config_dir: &Path, locale: &str) {
+    pub fn start(&self, config_dir: &Path, locale: &str, session: &SessionSlot) {
         let Ok(mut held) = self.held.lock() else {
             log::error!("modules: the module lock was poisoned before they could be started");
             return;
+        };
+        // Locked for the whole of every module call and lent to the gate, which is what keeps a
+        // borrowed cue alive until the module reads it (module-abi.md §2.5). A poisoned session is
+        // not a reason to refuse to start a module: it is lent none, and its reads answer that
+        // nothing is open.
+        let mut session = match session.lock() {
+            Ok(held) => Some(held),
+            Err(_) => {
+                log::warn!("modules: the session lock is poisoned, so no module is lent one");
+                None
+            }
         };
         let mut all = Vec::new();
         let held = &mut *held;
@@ -315,7 +328,7 @@ impl ModuleState {
             // interface promises them (§2.1), and `instance` is one writable pointer. The gate is
             // armed for the call and disarmed the moment it returns (§2.5).
             let made = {
-                let _entered = ctx.enter(&name);
+                let _entered = ctx.enter(&name, session.as_deref_mut());
                 unsafe {
                     create(
                         &mut instance,
@@ -337,7 +350,7 @@ impl ModuleState {
             };
             // Safety: the sink outlives the call, and `push_item` is this process's own.
             let told = {
-                let _entered = ctx.enter(&name);
+                let _entered = ctx.enter(&name, session.as_deref_mut());
                 unsafe { describe(instance, (&mut sink as *mut Sink).cast(), Some(push_item)) }
             };
             for refusal in &sink.refused {

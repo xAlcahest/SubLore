@@ -160,6 +160,13 @@ pub const SUBLORE_FORMAT_ASS: u32 = 3;
 
 /// The open document. `cue_count` counts every cue, ASS `Comment:` events included, so the index a
 /// module holds is the index an edit takes.
+///
+/// **`path` is borrowed, and an out parameter needs its own validity rule.** Section 2.1's rule,
+/// that a string lives for the call it appears in, is exact for a value pushed through a callback
+/// and self-contradictory here, because the module reads this one after the call has returned. The
+/// rule is: the borrow is good until the module's next host call on the same context, or until the
+/// host call the module is inside returns, whichever comes first. Copy before either. The same
+/// holds for `SubloreCue::text`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct SubloreDocument {
@@ -171,8 +178,14 @@ pub struct SubloreDocument {
     pub path: SubloreStr,
 }
 
-/// One cue. The text is in normalized form, every line break `\n`, which is the form an edit must
-/// be proposed in: one rule rather than two.
+/// One cue. The text is in normalized form, which is the form an edit must be proposed in: one rule
+/// rather than two.
+///
+/// **Normalized means `\r\n` collapses to `\n`, and nothing else.** An ASS line break is the two
+/// characters `\N` and it crosses exactly as the file wrote it, like every other override, so a
+/// module matching text has to expect it. Measured rather than assumed, on 2026-09-04.
+///
+/// `text` is borrowed under `SubloreDocument`'s rule above.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct SubloreCue {

@@ -147,7 +147,11 @@ fn start_modules(app: &tauri::App) {
             );
         }
     }
-    state.start(&directory, "en");
+    state.start(
+        &directory,
+        "en",
+        &app.state::<subtitle::SubtitleState>().slot(),
+    );
 }
 
 /// Build and run the app. Startup errors propagate to `main` so a failed launch is reported.
@@ -229,8 +233,10 @@ pub fn run() -> tauri::Result<()> {
             crash::attach(app);
             // After the app exists, because the directory a module is given comes from it, and
             // before the window asks: the scan itself ran before either (module-abi.md 4.1).
-            start_modules(app);
+            // The session is managed first: a module is lent it for the whole of every call the
+            // host makes, so it has to exist before the first one (module-abi.md §2.5).
             app.manage(subtitle::SubtitleState::default());
+            start_modules(app);
             log::info!(
                 "Sublore {} starting on {}",
                 env!("CARGO_PKG_VERSION"),
