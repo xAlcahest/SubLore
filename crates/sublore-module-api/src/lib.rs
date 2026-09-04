@@ -257,6 +257,21 @@ pub struct SubloreValue {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Matching
+
+/// `find`'s `options`: compare exactly, rather than folding case.
+pub const SUBLORE_FIND_MATCH_CASE: u32 = 1;
+
+/// `find`'s `options`: match the text a reader sees, with ASS override blocks and HTML-style tags
+/// out of the way.
+pub const SUBLORE_FIND_SKIP_TAGS: u32 = 2;
+
+/// Every bit `find` has a meaning for. The host refuses a word with anything else in it rather than
+/// masking it off: a module asking for a comparison it is not getting would produce a wrong result
+/// instead of a missing one, which is the wrong direction to fail in.
+pub const SUBLORE_FIND_OPTIONS: u32 = SUBLORE_FIND_MATCH_CASE | SUBLORE_FIND_SKIP_TAGS;
+
+// ---------------------------------------------------------------------------------------------
 // Contributions
 
 /// What a described item is, in `SubloreItem::kind`.
@@ -350,6 +365,10 @@ pub type SubloreLineFn =
     Option<unsafe extern "C" fn(sink: *mut c_void, line: *const SubloreLine) -> i32>;
 
 /// One match, as byte offsets into the haystack that was passed in.
+///
+/// Returning anything but `SUBLORE_OK` stops the walk, and `find` answers with what was returned.
+/// That is the same rule `push_item` has in the other direction: the side receiving the pushes ends
+/// them, and the side making them reports how they ended.
 pub type SubloreHitFn =
     Option<unsafe extern "C" fn(sink: *mut c_void, start: usize, len: usize) -> i32>;
 

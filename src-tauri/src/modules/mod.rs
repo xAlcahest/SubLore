@@ -9,20 +9,23 @@
 //! to be. The sentence the user reads is assembled in the frontend from a core string and the data
 //! below, which is what keeps that true. See `module-abi.md` §3.4 and §3.5.
 
+mod host;
+
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::Serialize;
 use sublore_module_api::{
-    SubloreHost, SubloreItem, SubloreStr, SUBLORE_ABI_MINOR, SUBLORE_ENABLE_ALWAYS,
-    SUBLORE_ENABLE_DOCUMENT_OPEN, SUBLORE_ENABLE_PROJECT_OPEN, SUBLORE_ENABLE_SELECTION_NON_EMPTY,
-    SUBLORE_HOST_SIZE, SUBLORE_ITEM_FLAG_LAYER, SUBLORE_ITEM_MENU_ITEM, SUBLORE_ITEM_MENU_TITLE,
-    SUBLORE_ITEM_PANEL, SUBLORE_ITEM_SEPARATOR, SUBLORE_ITEM_TOOLBAR_BUTTON, SUBLORE_OK,
+    SubloreHost, SubloreItem, SubloreStr, SUBLORE_ENABLE_ALWAYS, SUBLORE_ENABLE_DOCUMENT_OPEN,
+    SUBLORE_ENABLE_PROJECT_OPEN, SUBLORE_ENABLE_SELECTION_NON_EMPTY, SUBLORE_ITEM_FLAG_LAYER,
+    SUBLORE_ITEM_MENU_ITEM, SUBLORE_ITEM_MENU_TITLE, SUBLORE_ITEM_PANEL, SUBLORE_ITEM_SEPARATOR,
+    SUBLORE_ITEM_TOOLBAR_BUTTON, SUBLORE_OK,
 };
 use sublore_module_host::{scan, Loaded, Refusal};
 
 use crate::log;
+use host::HostCtx;
 
 /// Why a file that looked like a module was not used, as the frontend receives it.
 ///
@@ -191,31 +194,58 @@ unsafe extern "C" fn push_item(sink: *mut c_void, item: *const SubloreItem) -> i
     SUBLORE_OK
 }
 
-/// One loaded module and the instance it created. Dropped together, in that order.
+/// One loaded module and the instance it created.
 struct Running {
     module: Loaded,
     ctx: *mut c_void,
 }
 
-impl Drop for Running {
-    fn drop(&mut self) {
-        // Before the library goes, while its code is still mapped.
-        if let (Some(destroy), false) = (self.module.table().destroy, self.ctx.is_null()) {
-            // Safety: `ctx` is what this module's own `create` wrote, handed back exactly once.
-            unsafe { destroy(self.ctx) };
-        }
-    }
-}
-
-/// The modules this process holds, and the table it lent them.
+/// The modules this process holds, the table it lent them, and the context behind it.
 ///
-/// Field order is the drop order and it matters: every module keeps the host pointer it was given,
-/// so the modules go first and the table they were pointing at goes second.
+/// Field order is the drop order and it matters: every module keeps the host pointer it was given
+/// and that pointer names the context, so the modules go first, the table they were pointing at
+/// second, and the context it named last.
 struct Held {
     /// The libraries, mapped for the life of the process, each with the instance it created.
     modules: Vec<Running>,
     /// Lent to every module for its whole life. Boxed so it does not move under them.
     _host: Box<SubloreHost>,
+    /// What every host callback is reached through. Boxed for the same reason.
+    ctx: Box<HostCtx>,
+}
+
+impl Held {
+    /// Nothing held, and the table and context an empty scan still has to hand out.
+    fn empty() -> Self {
+        let ctx = Box::new(HostCtx::new());
+        let host = Box::new(host::table(ctx.as_ref()));
+        Self {
+            modules: Vec::new(),
+            _host: host,
+            ctx,
+        }
+    }
+}
+
+impl Drop for Held {
+    /// Destroy every instance while its library is still mapped and the context still exists.
+    ///
+    /// Here rather than on `Running`, because the gate has to be armed for `destroy` as well and
+    /// this is the only place that holds both halves. A module that calls back from its own
+    /// `destroy` then meets a refusal instead of a dangling pointer. The fields drop after this
+    /// body, in the order they are declared above.
+    fn drop(&mut self) {
+        for running in &mut self.modules {
+            let (Some(destroy), false) = (running.module.table().destroy, running.ctx.is_null())
+            else {
+                continue;
+            };
+            let _entered = self.ctx.enter(&file_name(running.module.path()));
+            // Safety: `ctx` is what this module's own `create` wrote, handed back exactly once.
+            unsafe { destroy(running.ctx) };
+            running.ctx = std::ptr::null_mut();
+        }
+    }
 }
 
 /// Safety: `Held` is reachable only through the mutex below, and that mutex is what §2.5 of
@@ -243,10 +273,7 @@ impl ModuleState {
                 ..ModuleReport::default()
             },
             contributions: Mutex::new(Vec::new()),
-            held: Mutex::new(Held {
-                modules: Vec::new(),
-                _host: Box::new(empty_host()),
-            }),
+            held: Mutex::new(Held::empty()),
         }
     }
 
@@ -266,6 +293,8 @@ impl ModuleState {
             return;
         };
         let mut all = Vec::new();
+        let held = &mut *held;
+        let ctx: &HostCtx = &held.ctx;
         for (index, running) in held.modules.iter_mut().enumerate() {
             let name = file_name(running.module.path());
             // Copied out rather than held: these are function pointers, and the borrow of the
@@ -281,21 +310,25 @@ impl ModuleState {
             };
 
             let directory = config_dir.to_string_lossy();
-            let mut ctx: *mut c_void = std::ptr::null_mut();
+            let mut instance: *mut c_void = std::ptr::null_mut();
             // Safety: both strings live for the whole call, which is the only lifetime the
-            // interface promises them (§2.1), and `ctx` is one writable pointer.
-            let made = unsafe {
-                create(
-                    &mut ctx,
-                    SubloreStr::borrowed(&directory),
-                    SubloreStr::borrowed(locale),
-                )
+            // interface promises them (§2.1), and `instance` is one writable pointer. The gate is
+            // armed for the call and disarmed the moment it returns (§2.5).
+            let made = {
+                let _entered = ctx.enter(&name);
+                unsafe {
+                    create(
+                        &mut instance,
+                        SubloreStr::borrowed(&directory),
+                        SubloreStr::borrowed(locale),
+                    )
+                }
             };
-            if made != SUBLORE_OK || ctx.is_null() {
+            if made != SUBLORE_OK || instance.is_null() {
                 log::warn!("modules: {name} would not start an instance, reporting {made}");
                 continue;
             }
-            running.ctx = ctx;
+            running.ctx = instance;
 
             let mut sink = Sink {
                 module: index,
@@ -303,7 +336,10 @@ impl ModuleState {
                 refused: Vec::new(),
             };
             // Safety: the sink outlives the call, and `push_item` is this process's own.
-            let told = unsafe { describe(ctx, (&mut sink as *mut Sink).cast(), Some(push_item)) };
+            let told = {
+                let _entered = ctx.enter(&name);
+                unsafe { describe(instance, (&mut sink as *mut Sink).cast(), Some(push_item)) }
+            };
             for refusal in &sink.refused {
                 log::warn!("modules: {name} contributed nothing for one item, because {refusal}");
             }
@@ -331,32 +367,6 @@ impl ModuleState {
     }
 }
 
-/// The host table as this build fills it.
-///
-/// Every slot is empty for now: the calls a module may make back into the app are N8e's, and a slot
-/// left empty is a refusal the module can see rather than a jump it cannot.
-fn empty_host() -> SubloreHost {
-    SubloreHost {
-        size: SUBLORE_HOST_SIZE,
-        minor: SUBLORE_ABI_MINOR,
-        ctx: std::ptr::null_mut(),
-        log: None,
-        should_cancel: None,
-        progress: None,
-        document: None,
-        cue_at: None,
-        for_each_line: None,
-        propose: None,
-        find: None,
-        db_run: None,
-        db_transaction: None,
-        panel_begin: None,
-        panel_row: None,
-        panel_end: None,
-        status: None,
-    }
-}
-
 /// Where a module ships: beside the running executable, and nowhere else (§3.4).
 fn module_directory() -> Option<PathBuf> {
     let mut here = std::env::current_exe().ok()?;
@@ -369,7 +379,10 @@ fn module_directory() -> Option<PathBuf> {
 /// Runs once, at startup, on the thread that starts the app. Nothing else in the process loads a
 /// library, and no path from a configuration file or from the user ever reaches here.
 pub fn load() -> ModuleState {
-    let host = Box::new(empty_host());
+    let ctx = Box::new(HostCtx::new());
+    // The table points at the box above, and both are moved into `Held` below without moving what
+    // they hold: that is what the boxes are for.
+    let host = Box::new(host::table(ctx.as_ref()));
     let Some(directory) = module_directory() else {
         // The executable cannot say where it is, which is not a fault the user can act on and not
         // a reason to stop: the app runs, without modules.
@@ -382,6 +395,7 @@ pub fn load() -> ModuleState {
             held: Mutex::new(Held {
                 modules: Vec::new(),
                 _host: host,
+                ctx,
             }),
         };
     };
@@ -436,6 +450,7 @@ pub fn load() -> ModuleState {
                 })
                 .collect(),
             _host: host,
+            ctx,
         }),
     }
 }

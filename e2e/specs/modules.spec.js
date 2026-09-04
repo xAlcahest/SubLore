@@ -14,6 +14,7 @@
  */
 import { browser, expect } from "@wdio/globals";
 
+import { appLog, dataHome } from "../lib/applog.js";
 import { clickAt, focusWindow, pressKey } from "../lib/input.js";
 import { windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
@@ -21,9 +22,16 @@ import { findToplevel } from "../lib/x11.js";
 
 /** What the refused fixture beside the executable is, and what this build speaks. */
 const FIXTURE_FILE = "sublore_module_wrong_major.so";
-/** The good fixture's own title and item, rendered in the locale the host handed it. */
+/** The good fixture's own title, rendered in the locale the host handed it. */
 const MODULE_TITLE = "Fixture (en)";
-const MODULE_ITEM = "Say something";
+/**
+ * The fixture's item, with the answer the host gave it in the label.
+ *
+ * The fixture asks the host to find "the fog" in "the {\\i1}fog and the fog" with tags skipped.
+ * Those bytes do not contain the term and what a reader sees does, so a two says the comparison
+ * came from `sublore-matcher` through the host table and not from anything in the module.
+ */
+const MODULE_ITEM = "Say something (2 found)";
 /** The fixture reports one above the host's major, and the host's is 1. */
 const THEIRS = 2;
 const OURS = 1;
@@ -101,6 +109,14 @@ describe("modules beside the executable", () => {
       timeout: 15000,
       message: "the dropdown to close",
     });
+  });
+
+  it("puts what the module logged in the app's own log, under the module's file name", () => {
+    // Written by `describe`, through the host's own logger, and carrying the file it came from so
+    // the line can be told from a core one (module-abi.md 4.2).
+    expect(appLog(dataHome())).toContain(
+      'module sublore_module_fixture.so: asked for "the fog" and was given 2 of them',
+    );
   });
 
   it("says so in the status bar, naming the file and both versions", async () => {

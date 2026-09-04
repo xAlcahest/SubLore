@@ -43,6 +43,7 @@ sublore-audio = { path = "../crates/sublore-audio" }
 sublore-edit = { path = "../crates/sublore-edit" }
 sublore-formats = { path = "../crates/sublore-formats" }
 sublore-io = { path = "../crates/sublore-io" }
+sublore-matcher = { path = "../crates/sublore-matcher" }
 sublore-project = { path = "../crates/sublore-project" }
 sublore-module-api = { path = "../crates/sublore-module-api" }
 sublore-module-host = { path = "../crates/sublore-module-host" }
