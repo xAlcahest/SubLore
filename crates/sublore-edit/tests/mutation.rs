@@ -1322,3 +1322,141 @@ fn merging_refuses_a_join_that_would_spell_a_terminator_it_did_not_mean() {
     assert_eq!(error.kind, EditErrorKind::UnwritableText);
     assert_eq!(document.to_bytes(), text.as_bytes());
 }
+
+// F1: one edit that rewrites many cues. The splice runs from the first byte any of them changes to
+// the last, so the cues between ride along unchanged, and that is what makes it one undo step
+// rather than one per cue. See docs/find-replace-tasks.md.
+
+#[test]
+fn rewriting_the_first_and_last_cue_carries_the_one_between_them_along() {
+    let (document, bytes) = open("srt/clean/basic-lf.srt");
+    let untouched =
+        "Nobody had told the crew we were coming,\nso we sat on the dock until it got light.";
+
+    let result = edit(
+        &document,
+        &Edit::SetTexts {
+            edits: vec![
+                (0, "The harbour was full.".to_owned()),
+                (2, "By then the fog had lifted.".to_owned()),
+            ],
+        },
+    )
+    .expect("two cues in file order are editable");
+
+    // The span really does cross the middle cue, which is the whole point: a plan that spliced each
+    // cue separately would carry none of it and would be two undo steps.
+    assert!(
+        result.splice.removed.contains(untouched),
+        "the splice must span the cue between the two it rewrites: {:?}",
+        result.splice.removed
+    );
+    let after = String::from_utf8(result.document.to_bytes()).expect("utf-8");
+    assert!(after.contains("The harbour was full."));
+    assert!(after.contains("By then the fog had lifted."));
+    assert!(
+        after.contains(untouched),
+        "the cue between them must read back exactly as it was: {after}"
+    );
+    assert_bytes_outside_the_edit_are_identical(&bytes, &document, &result, "two of three");
+    assert_reopens_identically(&result.document, "two of three");
+}
+
+#[test]
+fn a_many_cue_edit_naming_one_cue_plans_the_bytes_the_single_cue_edit_plans() {
+    let (document, _) = open("srt/clean/basic-lf.srt");
+    let text = "Rewritten.";
+
+    let one = sublore_edit::plan::plan(
+        &document,
+        &Edit::SetText {
+            cue: 1,
+            text: text.to_owned(),
+        },
+    )
+    .expect("the single-cue plan");
+    let many = sublore_edit::plan::plan(
+        &document,
+        &Edit::SetTexts {
+            edits: vec![(1, text.to_owned())],
+        },
+    )
+    .expect("the many-cue plan naming one");
+
+    // Same bytes, same prediction. Only the label differs, and deliberately: the history coalesces
+    // by label, and a replace must never merge into the keystroke before it.
+    assert_eq!(many.splice, one.splice);
+    assert_eq!(many.expect.from, one.expect.from);
+    assert_eq!(many.expect.removed, one.expect.removed);
+    assert_eq!(many.expect.cues, one.expect.cues);
+    assert_eq!(many.expect.segments_from, one.expect.segments_from);
+    assert_eq!(many.expect.segments_removed, one.expect.segments_removed);
+    assert_eq!(many.expect.segments_inserted, one.expect.segments_inserted);
+    assert_ne!(many.label.kind, one.label.kind);
+}
+
+#[test]
+fn a_cue_named_twice_is_refused_and_writes_nothing() {
+    let (document, bytes) = open("srt/clean/basic-lf.srt");
+    let error = edit(
+        &document,
+        &Edit::SetTexts {
+            edits: vec![(1, "first".to_owned()), (1, "second".to_owned())],
+        },
+    )
+    .expect_err("one cue cannot take two writes");
+    assert_eq!(error.kind, EditErrorKind::NotApplicable);
+    assert_eq!(document.to_bytes(), bytes);
+}
+
+#[test]
+fn cues_out_of_file_order_are_refused() {
+    let (document, _) = open("srt/clean/basic-lf.srt");
+    let error = edit(
+        &document,
+        &Edit::SetTexts {
+            edits: vec![(2, "last".to_owned()), (0, "first".to_owned())],
+        },
+    )
+    .expect_err("the span is built in file order, so the list must be in it");
+    assert_eq!(error.kind, EditErrorKind::NotApplicable);
+}
+
+#[test]
+fn a_text_edit_naming_no_cues_is_refused_rather_than_recorded() {
+    let (document, _) = open("srt/clean/basic-lf.srt");
+    let error = edit(&document, &Edit::SetTexts { edits: Vec::new() })
+        .expect_err("a replace that matched nothing must not become an undo step");
+    assert_eq!(error.kind, EditErrorKind::NotApplicable);
+}
+
+#[test]
+fn a_many_cue_edit_reaching_past_the_last_cue_is_refused() {
+    let (document, _) = open("srt/clean/basic-lf.srt");
+    let error = edit(
+        &document,
+        &Edit::SetTexts {
+            edits: vec![(1, "here".to_owned()), (9, "nowhere".to_owned())],
+        },
+    )
+    .expect_err("cue 9 does not exist in a three cue file");
+    assert_eq!(error.kind, EditErrorKind::NoSuchCue);
+}
+
+#[test]
+fn every_cue_of_an_ass_file_can_be_rewritten_at_once() {
+    let (document, bytes) = open("ass/clean/basic.ass");
+    let count = document.cues().count();
+    let edits: Vec<_> = (0..count).map(|cue| (cue, format!("line {cue}"))).collect();
+
+    let result = edit(&document, &Edit::SetTexts { edits }).expect("every cue at once");
+    let after = String::from_utf8(result.document.to_bytes()).expect("utf-8");
+    for cue in 0..count {
+        assert!(
+            after.contains(&format!("line {cue}")),
+            "cue {cue} was not rewritten: {after}"
+        );
+    }
+    assert_bytes_outside_the_edit_are_identical(&bytes, &document, &result, "every ass cue");
+    assert_reopens_identically(&result.document, "every ass cue");
+}
