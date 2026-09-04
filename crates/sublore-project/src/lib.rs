@@ -14,6 +14,7 @@ pub mod layout;
 pub mod migrate;
 pub mod model;
 pub mod module_guard;
+pub mod module_store;
 pub mod records;
 
 pub use db::Database;

@@ -39,6 +39,19 @@ impl Project {
         &self.summary
     }
 
+    /// The open connection, for the module store beside this file.
+    ///
+    /// Crate-internal: the connection never leaves this crate, which is what keeps `rusqlite` out
+    /// of the app and a module from ever holding a `sqlite3*` of its own (`module-abi.md` §4.7).
+    pub(crate) fn connection(&self) -> &rusqlite::Connection {
+        self.database.conn()
+    }
+
+    /// The same, for the one operation that needs it: a transaction.
+    pub(crate) fn connection_mut(&mut self) -> &mut rusqlite::Connection {
+        self.database.conn_mut()
+    }
+
     /// Re-read the title and the episode count. Every operation here that changes either one calls
     /// it, so `summary` is never stale.
     pub fn refresh_summary(&mut self) -> Result<&ProjectSummary, ProjectError> {
