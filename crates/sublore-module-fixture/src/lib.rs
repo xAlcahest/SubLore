@@ -24,6 +24,8 @@ use sublore_module_api::{
 /// The title, and the one item under it. Ids are the module's own and mean nothing to the core.
 const TITLE_ID: u32 = 1;
 const ITEM_ID: u32 = 2;
+/// An item the host has to refuse, so that its allowlist is defended by something.
+const REFUSED_ID: u32 = 3;
 
 /// What the fixture's own state is. Nothing yet beyond proving `create` and `destroy` pair up.
 struct Fixture {
@@ -128,12 +130,26 @@ unsafe extern "C" fn describe(ctx: *mut c_void, sink: *mut c_void, push: Sublore
             label: SubloreStr::borrowed("Say something"),
             icon: SubloreStr::borrowed(""),
         },
+        // Last, and deliberately wrong: `enable_when` is left at zero, which is the value section
+        // 5.2 says a module that forgot to set it sends. The host must refuse this item rather than
+        // draw a control enabled when it should not be, and the check counts what reached the menu.
+        SubloreItem {
+            id: REFUSED_ID,
+            kind: SUBLORE_ITEM_MENU_ITEM,
+            parent: TITLE_ID,
+            enable_when: 0,
+            flags: 0,
+            label: SubloreStr::borrowed("Never drawn"),
+            icon: SubloreStr::borrowed(""),
+        },
     ];
     for item in &items {
         // A sink that refuses stops the walk: the host is entitled to stop listening, and pushing
         // on past a refusal is how a module talks over one.
         let answer = unsafe { push(sink, item) };
         if answer != SUBLORE_OK {
+            // The host stopped listening. Everything before this reached it, which is the shape
+            // the last item in the list is here to produce.
             return answer;
         }
     }

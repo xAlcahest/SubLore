@@ -1,6 +1,6 @@
 /* global describe, it, before, document, window */
 /**
- * Criteria 3 and 4 of `module-abi.md` §9, through the app: a module file that is present and does
+ * Criteria 2, 3 and 4 of `module-abi.md` §9, through the app: a module file that is present and does
  * not load is a fault, and a fault is said out loud, once transiently in the status bar and once
  * permanently in About.
  *
@@ -19,8 +19,11 @@ import { windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
 
-/** What the fixture beside the executable is, and what this build speaks. */
+/** What the refused fixture beside the executable is, and what this build speaks. */
 const FIXTURE_FILE = "sublore_module_wrong_major.so";
+/** The good fixture's own title and item, rendered in the locale the host handed it. */
+const MODULE_TITLE = "Fixture (en)";
+const MODULE_ITEM = "Say something";
 /** The fixture reports one above the host's major, and the host's is 1. */
 const THEIRS = 2;
 const OURS = 1;
@@ -53,7 +56,7 @@ function textOf(selector) {
   return browser.execute((css) => document.querySelector(css)?.textContent ?? null, selector);
 }
 
-describe("a module that will not load", () => {
+describe("modules beside the executable", () => {
   let toplevel = null;
 
   before(async () => {
@@ -66,6 +69,38 @@ describe("a module that will not load", () => {
       () => browser.execute(() => document.querySelector(".toolbar__file-open-subtitle") !== null),
       { timeout: 30000, message: "the app UI to render" },
     );
+  });
+
+  it("puts the module's own title on the menu bar, with its item under it", async () => {
+    // The core never learned this word. It came out of the module through describe, in the locale
+    // the host handed it, and the title exists because a module pushed one (module-abi.md 5.1).
+    const titles = await browser.execute(() =>
+      Array.from(document.querySelectorAll(".menubar__title")).map(
+        (title) => title.textContent ?? "",
+      ),
+    );
+    expect(titles).toContain(MODULE_TITLE);
+
+    const bar = await findToplevel();
+    await clickElement(bar, `.menubar__title--module-0-1`);
+    await waitFor(() => present(".menubar__menu"), {
+      timeout: 15000,
+      message: "the module's own dropdown to open",
+    });
+    const items = await browser.execute(() =>
+      Array.from(document.querySelectorAll(".menubar__item")).map((item) => item.textContent ?? ""),
+    );
+    expect(items.some((item) => item.includes(MODULE_ITEM))).toBe(true);
+    // Exactly one. The fixture pushes a third item with a state this build does not know, and
+    // section 5.2 says that costs the module its item rather than giving the user a control that
+    // is enabled when it should not be.
+    expect(items).toHaveLength(1);
+
+    pressKey("Escape");
+    await waitFor(async () => ((await present(".menubar__menu")) === false ? true : null), {
+      timeout: 15000,
+      message: "the dropdown to close",
+    });
   });
 
   it("says so in the status bar, naming the file and both versions", async () => {

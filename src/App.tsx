@@ -20,6 +20,7 @@ import { LayerContext, useLayerRegistry } from "./hooks/useLayers";
 import { useAudioTracks } from "./hooks/useAudioTracks";
 import { useLayout } from "./hooks/useLayout";
 import { usePreview } from "./hooks/usePreview";
+import { useContributions, type Contribution } from "./hooks/useContributions";
 import { useModules, refusalLine } from "./hooks/useModules";
 import { useSearch, type SearchOutcome } from "./hooks/useSearch";
 import { useProject } from "./hooks/useProject";
@@ -42,6 +43,16 @@ import {
 import { type EpisodeFileView } from "./types/project";
 import { type CueRow } from "./types/subtitle";
 import "./App.css";
+
+/**
+ * The registry key a contributed item gets: its module's position and the module's own id.
+ *
+ * Generated rather than written, which is what keeps the open repository free of any word a module
+ * chose for itself (interface-spec 2.7, module-abi.md section 7).
+ */
+function moduleCommandId(item: Contribution): CommandId {
+  return `module.${item.module}-${item.id}`;
+}
 
 /*
  * Every bound below was read off the rendered shell at 1024x700, never worked out on paper: W6 put
@@ -131,6 +142,7 @@ export default function App() {
   const search = useSearch();
   // Read once at startup; the scan itself ran before this window existed (module-abi.md 3.5).
   const modules = useModules();
+  const contributions = useContributions();
   const peaks = useAudioPeaks();
   const { layout, changeLayout, storeLayout } = useLayout();
   // The root declaration in shell.css reads this custom property; nothing else may set it (S1).
@@ -860,8 +872,45 @@ export default function App() {
     })),
   ];
   /** The one map both draw routes read, so an item drawn anywhere has an entry here (T3 C1). */
+  /**
+   * A contributed item, as a command like any other.
+   *
+   * The core answers "is a document open", never "is this the module's thing", so `enableWhen` is
+   * the whole of what it knows (module-abi.md 5.2). Running one is not wired yet: `invoke` reaches
+   * the module with N8e, and until then the item draws and refuses, which is the direction a
+   * missing half has to fail in.
+   */
+  function contributed(item: Contribution): Command {
+    const enabled = (() => {
+      switch (item.enableWhen) {
+        case "always":
+          return true;
+        case "documentOpen":
+          return subtitle.summary !== null;
+        case "projectOpen":
+          return project.project !== null;
+        case "selectionNonEmpty":
+          return selection.selected.size > 0;
+      }
+    })();
+    return {
+      id: moduleCommandId(item),
+      label: item.label,
+      enabled,
+      run: () => {
+        // Deliberately nothing yet, and said out loud rather than silently: the call that reaches
+        // a module is N8e's.
+        console.warn("module item activated before the host can carry it", item.id);
+      },
+    };
+  }
+
+  const contributedCommands = contributions
+    .filter((item) => item.kind === "menuItem" || item.kind === "menuTitle")
+    .map(contributed);
+
   const commands: CommandRegistry = Object.fromEntries(
-    declared.map((command) => [command.id, command]),
+    [...declared, ...contributedCommands].map((command) => [command.id, command]),
   );
 
   /*
@@ -932,6 +981,20 @@ export default function App() {
       items: audio.tracks.map((track): CommandId => `audio.track.${track.id}`),
     },
     { id: "help", title: en.menu.help.title, items: ["help.about"] },
+    // A module's own titles, after the core's. A title exists exactly when a module pushed one with
+    // children under it, so there is no branch anywhere that says a module is installed (5.1).
+    ...contributions
+      .filter((item) => item.kind === "menuTitle")
+      .map((title) => ({
+        id: `module-${title.module}-${title.id}`,
+        title: title.label,
+        items: contributions
+          .filter(
+            (item) =>
+              item.kind === "menuItem" && item.module === title.module && item.parent === title.id,
+          )
+          .map(moduleCommandId),
+      })),
   ];
   const toolbar: CommandId[][] = [
     ["file.open-subtitle", "video.open", "file.save", "file.save-copy", "file.discard"],

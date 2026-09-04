@@ -123,6 +123,33 @@ fn quit(app: AppHandle) {
     app.exit(0);
 }
 
+/// Start every loaded module and collect what it contributes.
+///
+/// A configuration directory of the module's own, which is where a licence file would live and
+/// which the core names without knowing what goes in it. The locale is the app's only one today:
+/// `src/i18n/en.ts` is the whole of it, and this is where a real one arrives when there is a second.
+fn start_modules(app: &tauri::App) {
+    let state = app.state::<modules::ModuleState>();
+    let directory = match app.path().app_config_dir() {
+        Ok(base) => base.join("modules"),
+        Err(error) => {
+            log::warn!("modules: no configuration directory for them ({error}), using none");
+            std::path::PathBuf::new()
+        }
+    };
+    // Best effort: a module that needs it and does not find it says so itself, and a directory the
+    // app could not make is not a reason to refuse to start.
+    if !directory.as_os_str().is_empty() {
+        if let Err(error) = std::fs::create_dir_all(&directory) {
+            log::warn!(
+                "modules: {} could not be created ({error})",
+                directory.display()
+            );
+        }
+    }
+    state.start(&directory, "en");
+}
+
 /// Build and run the app. Startup errors propagate to `main` so a failed launch is reported.
 pub fn run() -> tauri::Result<()> {
     crash::install();
@@ -193,12 +220,16 @@ pub fn run() -> tauri::Result<()> {
             video::video_play_range,
             video::video_set_region,
             video::video_set_layers,
+            modules::module_contributions,
             modules::module_report,
             startup_files_command,
             quit
         ])
         .setup(move |app| {
             crash::attach(app);
+            // After the app exists, because the directory a module is given comes from it, and
+            // before the window asks: the scan itself ran before either (module-abi.md 4.1).
+            start_modules(app);
             app.manage(subtitle::SubtitleState::default());
             log::info!(
                 "Sublore {} starting on {}",

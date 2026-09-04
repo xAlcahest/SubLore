@@ -10,6 +10,12 @@ type CommandArea =
   | "edit"
   | "file"
   | "help"
+  /**
+   * A command a loaded module contributed. The core never writes one of these into its own source:
+   * they are generated from what a module described, and the id after the dot is the module's index
+   * and its own id. See docs/module-abi.md section 5.
+   */
+  | "module"
   | "project"
   | "subtitle"
   // Timing against the playhead and the waveform. Its own area rather than part of `subtitle`,

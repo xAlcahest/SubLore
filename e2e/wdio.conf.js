@@ -13,7 +13,7 @@ import { passedTests, recordPassedTest, resetTally } from "./lib/tally.js";
  * Every spec that exists must run. WebdriverIO does not reliably fail a run that executed nothing,
  * so the count is asserted here. Bump it when you add a test; see e2e/README.md.
  */
-const EXPECTED_TESTS = 193;
+const EXPECTED_TESTS = 194;
 
 // Keeps a run out of the real data dir. Created once in the launcher; workers inherit the value.
 process.env.SUBLORE_E2E_DATA_HOME ??= mkdtempSync(path.join(os.tmpdir(), "sublore-e2e-"));
@@ -42,18 +42,18 @@ requireTool("ffmpeg", "extract the audio the transcription spec transcribes");
  * is the shape the loader matches, so the copy is also a rename.
  */
 const MODULE_SPEC = "modules.spec.js";
-const MODULE_FIXTURE = "sublore_module_wrong_major";
+/** One that loads and contributes, one that is refused: the spec asserts both in one launch. */
+const MODULE_FIXTURES = ["sublore_module_fixture", "sublore_module_wrong_major"];
 
 function wantsModuleFixture(specs) {
   return Array.isArray(specs) && specs.some((spec) => spec.endsWith(MODULE_SPEC));
 }
 
-function moduleFixturePaths() {
-  const binary = requireAppBinary();
-  const beside = path.dirname(binary);
+function moduleFixturePaths(name) {
+  const beside = path.dirname(requireAppBinary());
   return {
-    source: path.join(beside, "examples", `lib${MODULE_FIXTURE}.so`),
-    target: path.join(beside, `${MODULE_FIXTURE}.so`),
+    source: path.join(beside, "examples", `lib${name}.so`),
+    target: path.join(beside, `${name}.so`),
   };
 }
 
@@ -61,22 +61,26 @@ function installModuleFixture(specs) {
   if (!wantsModuleFixture(specs)) {
     return;
   }
-  const { source, target } = moduleFixturePaths();
-  if (!existsSync(source)) {
-    throw new Error(
-      `${source} does not exist. The module fixtures are example targets of ` +
-        "crates/sublore-module-fixture; `cargo test --workspace` builds them, and so does " +
-        "`cargo build -p sublore-module-fixture --examples`.",
-    );
+  for (const name of MODULE_FIXTURES) {
+    const { source, target } = moduleFixturePaths(name);
+    if (!existsSync(source)) {
+      throw new Error(
+        `${source} does not exist. The module fixtures are example targets of ` +
+          "crates/sublore-module-fixture; `cargo test --workspace` builds them, and so does " +
+          "`cargo build -p sublore-module-fixture --examples`.",
+      );
+    }
+    copyFileSync(source, target);
   }
-  copyFileSync(source, target);
 }
 
 function removeModuleFixture(specs) {
   if (!wantsModuleFixture(specs)) {
     return;
   }
-  rmSync(moduleFixturePaths().target, { force: true });
+  for (const name of MODULE_FIXTURES) {
+    rmSync(moduleFixturePaths(name).target, { force: true });
+  }
 }
 
 export const config = {

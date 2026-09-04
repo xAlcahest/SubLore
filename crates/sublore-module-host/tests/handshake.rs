@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sublore_module_api::{
-    SubloreHost, SubloreItem, SUBLORE_ABI_MINOR, SUBLORE_HOST_SIZE, SUBLORE_ITEM_MENU_ITEM,
-    SUBLORE_ITEM_MENU_TITLE, SUBLORE_OK,
+    SubloreHost, SubloreItem, SUBLORE_ABI_MINOR, SUBLORE_ENABLE_ALWAYS, SUBLORE_HOST_SIZE,
+    SUBLORE_ITEM_MENU_ITEM, SUBLORE_ITEM_MENU_TITLE, SUBLORE_OK,
 };
 use sublore_module_host::{scan, Refusal};
 
@@ -196,27 +196,55 @@ fn the_good_fixture_loads_and_describes_what_it_contributes() {
     assert_eq!(made, SUBLORE_OK);
     assert!(!ctx.is_null());
 
-    let mut items: Vec<(u32, u32, u32, String)> = Vec::new();
+    let mut items: Vec<Described> = Vec::new();
     let answer = unsafe {
         describe(
             ctx,
-            (&mut items as *mut Vec<(u32, u32, u32, String)>).cast(),
+            (&mut items as *mut Vec<Described>).cast(),
             Some(collect),
         )
     };
     assert_eq!(answer, SUBLORE_OK);
 
-    assert_eq!(items.len(), 2, "a title and one item under it: {items:?}");
-    assert_eq!(items[0].1, SUBLORE_ITEM_MENU_TITLE);
-    assert_eq!(items[0].2, 0, "the title is top level");
-    assert_eq!(items[1].1, SUBLORE_ITEM_MENU_ITEM);
-    assert_eq!(items[1].2, items[0].0, "the item hangs off the title");
+    // A title, one item under it, and one the host is meant to refuse. This sink is not the host
+    // and accepts everything, which is what lets it see the third one at all.
+    assert_eq!(items.len(), 3, "a title and two items: {items:?}");
+    assert_eq!(items[0].kind, SUBLORE_ITEM_MENU_TITLE);
+    assert_eq!(items[0].parent, 0, "the title is top level");
+    assert_eq!(items[1].kind, SUBLORE_ITEM_MENU_ITEM);
+    assert_eq!(items[1].parent, items[0].id, "the item hangs off the title");
+    assert_eq!(items[1].enable_when, SUBLORE_ENABLE_ALWAYS);
+    // The third is the fixture's own trap, and the zero is what makes it one: §5.2 has no value
+    // for it, so a host that draws that item has stopped checking.
+    assert_eq!(
+        items[2].enable_when, 0,
+        "the refusable item must carry a state with no meaning"
+    );
     // The locale went in through `create` and came back out inside a label, which is the only
     // evidence from this side that the string crossed the boundary intact.
-    assert!(items[0].3.contains("en-GB"), "label was {:?}", items[0].3);
+    assert!(
+        items[0].label.contains("en-GB"),
+        "label was {:?}",
+        items[0].label
+    );
 
     unsafe { destroy(ctx) };
     fs::remove_dir_all(&dir).ok();
+}
+
+/// One item as this side received it.
+///
+/// A named type rather than a tuple, and that is not taste. The sink and its caller meet through a
+/// `*mut c_void`, so nothing checks that the two agree about what is on the other end: they once
+/// disagreed by one field here, and the reinterpretation read a different word of the vector and
+/// produced a number that changed between runs. A name is what makes the compiler check it.
+#[derive(Debug)]
+struct Described {
+    id: u32,
+    kind: u32,
+    parent: u32,
+    enable_when: u32,
+    label: String,
 }
 
 /// A sink for `describe`, collecting what a module pushes.
@@ -224,12 +252,18 @@ fn the_good_fixture_loads_and_describes_what_it_contributes() {
 /// # Safety
 /// Called by the module with the pointer this test handed it and one item per call.
 unsafe extern "C" fn collect(sink: *mut std::ffi::c_void, item: *const SubloreItem) -> i32 {
-    let items = unsafe { &mut *sink.cast::<Vec<(u32, u32, u32, String)>>() };
+    let items = unsafe { &mut *sink.cast::<Vec<Described>>() };
     let item = unsafe { &*item };
     let label = unsafe { item.label.as_str() }
         .unwrap_or("<not a string>")
         .to_owned();
-    items.push((item.id, item.kind, item.parent, label));
+    items.push(Described {
+        id: item.id,
+        kind: item.kind,
+        parent: item.parent,
+        enable_when: item.enable_when,
+        label,
+    });
     SUBLORE_OK
 }
 
