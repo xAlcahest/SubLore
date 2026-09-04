@@ -3,8 +3,13 @@
 //! Every check builds the directory it reads: the loader takes a directory, so a check that
 //! inherited one would be asserting about whatever the last one left. The fixtures are copied in
 //! under the name a module ships as, which is not the name cargo produces: cargo writes
-//! `libsublore_module_x.so` and §3.4's pattern is `sublore_module_*.so`, because the pattern is
+//! `libsublore_module_x.so` where §3.4's pattern is `sublore_module_*.so`, because the pattern is
 //! about what we ship beside the executable.
+//!
+//! **Both halves of that name are the platform's**, and this file spells neither by hand. Cargo's
+//! prefix and suffix come from `env::consts`, and so does the one the loader matches, which is
+//! `.dll` on Windows. The first Windows CI run of these checks failed nine of ten on a hardcoded
+//! `.so`, on 2026-09-04; the loader itself had been right since it was written.
 //!
 //! The host table handed over is empty. Nothing here calls back into it: the module's own `create`
 //! and `describe` are what run, and the calls that would reach the host arrive with N8e.
@@ -49,6 +54,28 @@ fn build_dir() -> PathBuf {
     here
 }
 
+/// What cargo names a `cdylib` here: `libx.so`, `x.dll`, `libx.dylib`.
+fn built(artifact: &str) -> String {
+    format!(
+        "{}{artifact}{}",
+        env::consts::DLL_PREFIX,
+        env::consts::DLL_SUFFIX
+    )
+}
+
+/// What a module ships as: the loader's own pattern, whose suffix is the platform's (§3.4).
+///
+/// Hardcoding `.so` here is what made nine of these ten checks fail on Windows CI the first time
+/// that job ran them, on 2026-09-04. The loader was already right; the harness around it was not.
+fn shipped(name: &str) -> String {
+    format!("{name}{}", env::consts::DLL_SUFFIX)
+}
+
+/// The shipped name with the platform's suffix taken back off, for matching on.
+fn stem(name: &str) -> &str {
+    name.strip_suffix(env::consts::DLL_SUFFIX).unwrap_or(name)
+}
+
 /// Copy one built fixture into `directory` under the name a module ships as.
 ///
 /// The artifact is checked against its own sources first. `cargo test -p sublore-module-host`
@@ -56,9 +83,7 @@ fn build_dir() -> PathBuf {
 /// without this every check here would read whatever an earlier build left and would pass on bytes
 /// nobody had compiled. It cost one mutation that reported the wrong reason before it was found.
 fn install(directory: &Path, artifact: &str, as_name: &str) {
-    let source = build_dir()
-        .join("examples")
-        .join(format!("lib{artifact}.so"));
+    let source = build_dir().join("examples").join(built(artifact));
     assert!(
         source.is_file(),
         "{artifact} was not built. Every fixture is an example target, so `cargo build -p \
@@ -66,7 +91,7 @@ fn install(directory: &Path, artifact: &str, as_name: &str) {
          fresh. Looked for {source:?}"
     );
     assert_fresh(artifact, &source);
-    fs::copy(&source, directory.join(format!("{as_name}.so")))
+    fs::copy(&source, directory.join(shipped(as_name)))
         .expect("the fixture should be copyable into the scratch directory");
 }
 
@@ -153,7 +178,11 @@ fn a_directory_with_no_module_in_it_is_silence() {
     let dir = scratch("empty");
     // A file that is not one of ours, so the check is that the pattern refuses it rather than that
     // the directory happened to be bare.
-    fs::write(dir.join("libmpv.so.2"), b"not a module").expect("writable");
+    fs::write(
+        dir.join(format!("libmpv{}.2", env::consts::DLL_SUFFIX)),
+        b"not a module",
+    )
+    .expect("writable");
     fs::write(dir.join("sublore_module_notes.txt"), b"not a library").expect("writable");
 
     let host = host();
@@ -489,7 +518,7 @@ fn five_files_in_one_directory_load_one_and_refuse_four() {
         .path()
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name == "sublore_module_fixture.so"));
+        .is_some_and(|name| name == shipped("sublore_module_fixture")));
     assert_eq!(found.refused.len(), 4);
 
     // Each one by its reason, not merely by the count: a rule flipped in the loader can leave the
@@ -507,11 +536,12 @@ fn five_files_in_one_directory_load_one_and_refuse_four() {
         })
         .collect();
     for (name, why) in &reasons {
-        let expected_kind = match *name {
-            "sublore_module_load_fails.so" => "load",
-            "sublore_module_no_abi_symbol.so" => "notmodule",
-            "sublore_module_wrong_major.so" => "major",
-            "sublore_module_wrong_minor.so" => "minor",
+        // Matched on the stem, because the suffix a module ships under is the platform's.
+        let expected_kind = match stem(name) {
+            "sublore_module_load_fails" => "load",
+            "sublore_module_no_abi_symbol" => "notmodule",
+            "sublore_module_wrong_major" => "major",
+            "sublore_module_wrong_minor" => "minor",
             other => panic!("an unexpected file was refused: {other}"),
         };
         let actual_kind = match why {
