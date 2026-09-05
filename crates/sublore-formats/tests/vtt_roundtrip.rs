@@ -304,3 +304,18 @@ fn kinds(document: &SubtitleDocument) -> Vec<&'static str> {
         })
         .collect()
 }
+
+#[test]
+fn no_clean_fixture_declares_a_style() {
+    // Only ASS has a styles section, so every row of one of these files carries an empty style.
+    // See styles-and-fields-tasks.md S6.5.
+    let clean = dirs("vtt").clean;
+    for (path, bytes) in fixtures(&clean, &["vtt"], MIN_CLEAN) {
+        let document = assert_round_trip(SubtitleFormat::Vtt, &path, &bytes);
+        assert!(
+            document.ass_styles().is_empty(),
+            "{} declares a style it cannot have",
+            path.display()
+        );
+    }
+}

@@ -1484,6 +1484,19 @@ fn field_strings(document: &SubtitleDocument, event: &AssEvent) -> Vec<String> {
         .collect()
 }
 
+/// One row's copy of a written field, as the control that wrote it would read it back.
+fn row_field(row: &CueView, field: AssField) -> &str {
+    match field {
+        AssField::Style => &row.style,
+        AssField::Actor => &row.actor,
+        AssField::Effect => &row.effect,
+        AssField::Layer => &row.layer,
+        AssField::MarginL => &row.margin_l,
+        AssField::MarginR => &row.margin_r,
+        AssField::MarginV => &row.margin_v,
+    }
+}
+
 /// A value of the shape the field holds: the numeric four take an integer, the rest take a word.
 fn sample_value(field: AssField) -> &'static str {
     match field {
@@ -1592,6 +1605,8 @@ fn assert_field_write_moves_nothing_else(
 fn writing_a_field_into_every_clean_fixture_leaves_every_other_byte_identical() {
     let mut wrote = 0usize;
     let mut refused = 0usize;
+    let mut patched = 0usize;
+    let mut files = 0usize;
     for path in clean_fixtures() {
         let relative = path.display().to_string();
         let bytes = std::fs::read(&path).expect("fixture is readable");
@@ -1601,6 +1616,8 @@ fn writing_a_field_into_every_clean_fixture_leaves_every_other_byte_identical() 
             continue;
         }
         let target = count / 2;
+        files += 1;
+        let before_rows = views(&document);
 
         for field in AssField::ALL {
             let label = format!("{relative}: {field:?}");
@@ -1610,9 +1627,17 @@ fn writing_a_field_into_every_clean_fixture_leaves_every_other_byte_identical() 
                 field,
                 value: value.to_owned(),
             };
-            let declared = ass_event(&document, target)
-                .and_then(|event| event.field_index(field))
-                .is_some();
+            // The row is the authority under test, not the parser: what the panel is told decides
+            // whether it may press, so it must agree with what the write does on every pair.
+            // See styles-and-fields-tasks.md F2.
+            let declared = before_rows[target].declared_fields.contains(&field);
+            assert_eq!(
+                declared,
+                ass_event(&document, target)
+                    .and_then(|event| event.field_index(field))
+                    .is_some(),
+                "{label}: the row and the event must declare the same fields"
+            );
 
             if !declared {
                 // No span to replace, so the write is refused rather than the field added.
@@ -1634,12 +1659,165 @@ fn writing_a_field_into_every_clean_fixture_leaves_every_other_byte_identical() 
                 &bytes, &document, &result, target, field, value, &label,
             );
             wrote += 1;
+
+            // What the grid is actually sent. Five of the seven fields produced `from=n removed=0
+            // cues=0` until `CueView` carried them, so the write reached the file and nothing on
+            // screen moved. See styles-and-fields-tasks.md F5.2.
+            let after_rows = views(&result.document);
+            let shown = diff::patch(&before_rows, &after_rows);
+            assert_ne!(
+                before_rows[target], after_rows[target],
+                "{label}: the fixture already spelled {value:?}, so this pair proves nothing"
+            );
+            assert_eq!(
+                shown.from, target,
+                "{label}: the patch must start at the edited row"
+            );
+            assert_eq!(shown.removed, 1, "{label}: the patch must replace one row");
+            assert_eq!(shown.cues.len(), 1, "{label}: the patch must carry one row");
+            assert_eq!(
+                row_field(&shown.cues[0], field),
+                value,
+                "{label}: the row the grid is sent must carry what was written"
+            );
+            patched += 1;
         }
     }
+    // Printed rather than guessed: `cargo test -- --nocapture` reports what this covered.
+    println!(
+        "field writes: {files} clean fixtures with cues, {wrote} writes accepted, \
+         {refused} refused, {patched} produced a patch the grid would draw, \
+         {wrote} of {wrote} accepted where the row declared the field and none where it did not"
+    );
     // In the spirit of MIN_CLEAN: deleting the coverage turns the suite red rather than shrinking
     // it. Today the clean tree offers 113 writable pairs and 230 refusals.
     assert!(wrote >= 113, "only {wrote} field writes were exercised");
     assert!(refused >= 230, "only {refused} refusals were exercised");
+    assert!(patched >= 113, "only {patched} writes reached the grid");
+}
+
+#[test]
+fn two_rows_that_show_the_same_blank_effect_answer_differently_to_a_write() {
+    // On committed fixtures: `basic.ass` declares Effect and leaves it blank, `minimal-fields.ass`
+    // never declares it. Both rows show `""`. One write lands and the other is refused, and the
+    // only thing on the wire that says which is `declared_fields`.
+    // See styles-and-fields-tasks.md F2.
+    let (blank, blank_bytes) = open("ass/clean/basic.ass");
+    let (absent, absent_bytes) = open("ass/clean/minimal-fields.ass");
+    let blank_row = views(&blank).remove(0);
+    let absent_row = views(&absent).remove(0);
+    assert_eq!(blank_row.effect, "");
+    assert_eq!(absent_row.effect, "");
+    assert!(blank_row.declared_fields.contains(&AssField::Effect));
+    assert!(!absent_row.declared_fields.contains(&AssField::Effect));
+
+    let request = |value: &str| Edit::SetField {
+        cue: 0,
+        field: AssField::Effect,
+        value: value.to_owned(),
+    };
+    let written = edit(&blank, &request("fad")).expect("a declared field is writable");
+    assert_eq!(
+        views(&written.document).remove(0).effect,
+        "fad",
+        "the row must read back what was written"
+    );
+    let refused = edit(&absent, &request("fad")).expect_err("an undeclared field is refused");
+    assert_eq!(refused.kind, EditErrorKind::NotApplicable);
+    assert_eq!(
+        absent.to_bytes(),
+        absent_bytes,
+        "a refusal must move no byte"
+    );
+    // And the file that accepted the write still holds every byte outside the field it named.
+    assert_bytes_outside_the_edit_are_identical(&blank_bytes, &blank, &written, "basic.ass");
+}
+
+#[test]
+fn a_declared_style_name_is_spelled_the_way_the_row_that_uses_it_is() {
+    // The load-bearing pairing: `styles-many.ass` declares `Sign Top ` with a trailing space and
+    // its third event names it with the same trailing space. A list carried untrimmed would report
+    // a style the file plainly declares as one the file does not have.
+    let (document, _) = open("ass/clean/styles-many.ass");
+    let declared: Vec<String> = document
+        .ass_styles()
+        .iter()
+        .map(|style| document.slice(style.name).to_owned())
+        .collect();
+    assert_eq!(
+        declared,
+        ["Default", "Sign Top", "Narrator Italic", "Flashback"]
+    );
+
+    let used: Vec<String> = views(&document).into_iter().map(|row| row.style).collect();
+    assert!(
+        used.contains(&"Sign Top".to_owned()),
+        "the fixture must exercise the padded name: {used:?}"
+    );
+    for style in &used {
+        assert!(
+            declared.contains(style),
+            "row style {style:?} is not among the declared {declared:?}"
+        );
+    }
+}
+
+#[test]
+fn a_row_carries_every_field_a_write_can_reach() {
+    // F5.1 and F5.3 on the committed fixtures: the seven a control would read, and a margin whose
+    // file spells it `0000` rather than `0`.
+    let (basic, _) = open("ass/clean/basic.ass");
+    let row = views(&basic).remove(0);
+    assert_eq!(
+        AssField::ALL.map(|field| row_field(&row, field).to_owned()),
+        [
+            "Default".to_owned(),
+            String::new(),
+            String::new(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+            "0".to_owned(),
+        ]
+    );
+
+    let (ssa, _) = open("ass/clean/ssa-v4.ssa");
+    let legacy = views(&ssa).remove(0);
+    assert_eq!(row_field(&legacy, AssField::MarginL), "0000");
+    // SSA v4 declares `Marked` where the specification has `Layer`, so it names no layer at all.
+    assert_eq!(row_field(&legacy, AssField::Layer), "");
+
+    let written = set_field(&ssa, 0, AssField::MarginL, "0040");
+    assert_eq!(
+        row_field(&views(&written.document).remove(0), AssField::MarginL),
+        "0040"
+    );
+}
+
+#[test]
+fn a_field_that_holds_no_number_reaches_the_row_as_the_file_spells_it() {
+    // F5.6 and F5.7: a reader never refuses a file it can display and never invents a value the
+    // file does not hold. Only a new value has to be an integer.
+    let text = concat!(
+        "[Events]\n",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n",
+        "Dialogue: 0000,0:00:01.00,0:00:02.00,Default,, 4 ,left,,,Hello\n",
+    );
+    let document = parse(SubtitleFormat::Ass, text);
+    let row = views(&document).remove(0);
+    assert_eq!(row_field(&row, AssField::Layer), "0000");
+    assert_eq!(row_field(&row, AssField::MarginL), "4");
+    assert_eq!(row_field(&row, AssField::MarginR), "left");
+    assert_eq!(
+        document.to_bytes(),
+        text.as_bytes(),
+        "reading the row must not move a byte"
+    );
+    assert_eq!(
+        refuse_field(&document, 0, AssField::MarginR, "left"),
+        EditErrorKind::NotApplicable,
+        "a new value still has to be an integer"
+    );
 }
 
 /// The value of one declared field, exactly as the file spells it, padding included.
