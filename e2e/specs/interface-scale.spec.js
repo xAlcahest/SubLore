@@ -55,6 +55,13 @@ const FLOOR_PERCENTS = [90, 110, 150];
 /** Percentage widths and scaled type both land on fractions of a pixel. */
 const SLOP_PX = 1;
 
+/**
+ * How far a box holding type may land from the factor its type grew by. The line box is a
+ * whole-pixel ascent on a whole-pixel descent, so it is out by up to half a pixel at each edge: one
+ * at the larger size, and one and a half taken from the smaller one.
+ */
+const LINE_BOX_ROUNDING_PX = 2.5;
+
 /** The second window size S1 states its criterion at. The run's screen is sized to hold it. */
 const WIDE_WIDTH = 1920;
 const WIDE_HEIGHT = 1080;
@@ -98,9 +105,20 @@ function readDrawnSizes() {
       if (element === null) {
         return null;
       }
+      const style = window.getComputedStyle(element);
+      const px = (value) => {
+        const parsed = Number.parseFloat(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const height = element.getBoundingClientRect().height;
+      const pad = px(style.paddingTop) + px(style.paddingBottom);
       return {
-        type: Number.parseFloat(window.getComputedStyle(element).fontSize),
-        height: element.getBoundingClientRect().height,
+        type: px(style.fontSize),
+        height,
+        pad,
+        // The box around the type, without the parts of the box that are not the type: the padding
+        // is in rem and follows the size, the border is the same pixel at every size.
+        content: height - pad - px(style.borderTopWidth) - px(style.borderBottomWidth),
       };
     };
     return {
@@ -191,6 +209,28 @@ async function clickElement(toplevel, selector) {
 
 function present(selector) {
   return browser.execute((css) => document.querySelector(css) !== null, selector);
+}
+
+/**
+ * The seek bar as it is drawn, beside the width its own rule says it never goes under. The video
+ * panel's floor is the transport with the bar at exactly that, so the bar is at its narrowest there
+ * and wider everywhere else.
+ */
+async function seekBar() {
+  const bar = await browser.execute(() => {
+    const slider = document.querySelector(".controls__slider");
+    if (slider === null) {
+      return null;
+    }
+    return {
+      width: slider.getBoundingClientRect().width,
+      minimum: Number.parseFloat(window.getComputedStyle(slider).minWidth),
+    };
+  });
+  if (bar === null || !Number.isFinite(bar.minimum)) {
+    throw new Error(".controls__slider is missing, or its rule gives it no width to hold it at");
+  }
+  return bar;
 }
 
 /** Pick one of the View menu's five sizes, through the menu, the way a person reaches it. */
@@ -332,11 +372,22 @@ describe("the interface size", () => {
         ratio: 1.5,
       });
     }
-    // The boxes follow the type but not to the last pixel: each carries a one-pixel border that is
-    // one pixel at every size, so a control that grew by half loses a little of it to the border.
+    // The boxes follow the type, read without the parts of a box that are not the type. The whole
+    // height cannot be asked for half again: a border is the same pixel at both sizes, and the line
+    // box the type sits in is a whole-pixel ascent on a whole-pixel descent, which rounds up as
+    // readily as down. Asking for a ratio of at most 1.5 asked that no box ever round up, and
+    // `.menubar__title` has no border to lose the rounding into, so it was the one that could not.
     for (const part of ["menuTitle", "transportButton", "gridHeader"]) {
-      const grew = at150[part].height / at100[part].height;
-      expect({ part, follows: grew > 1.4 && grew <= 1.5 }).toEqual({ part, follows: true });
+      const off = Number(Math.abs(at150[part].content - 1.5 * at100[part].content).toFixed(3));
+      expect({ part, off, follows: off <= LINE_BOX_ROUNDING_PX }).toEqual({
+        part,
+        off,
+        follows: true,
+      });
+      // The other half of the box, and the half with no rounding to hide in: the padding is in rem,
+      // so it is half again over. A padding written in pixels stops here.
+      const padGrew = Number((at150[part].pad / at100[part].pad).toFixed(2));
+      expect({ part, padGrew }).toEqual({ part, padGrew: 1.5 });
     }
     // The one part that does not follow, said here rather than left for a reader to notice: a cue
     // row's box is the fixed 28px `ROW_HEIGHT` in CueList.tsx at every size, so its type grows and
@@ -428,12 +479,19 @@ describe("the interface size", () => {
       // the floor is asked to match it, rather than a number standing in for one row.
       await dragSash(toplevel, VIDEO_SASH, 2000, 0);
       const atCeiling = await shellSizes();
+      const barWithRoom = await seekBar();
       expect(atCeiling.tools).toBeGreaterThanOrEqual(MIN_TOOLS_WIDTH * scale - SLOP_PX);
 
       await dragSash(toplevel, VIDEO_SASH, -2000, 0);
       const atVideoFloor = await shellSizes();
       expect(atVideoFloor.video).toBeLessThan(atCeiling.video);
       expect(atVideoFloor.transport).toBe(atCeiling.transport);
+      // The seek bar gave the panel its slack and stopped at the width its own rule holds it at,
+      // which is the width the floor keeps room for: a floor measured without it would leave a
+      // transport on one row with nothing in it to drag.
+      const barAtFloor = await seekBar();
+      expect(barAtFloor.width).toBeLessThan(barWithRoom.width);
+      expect(barAtFloor.width).toBeGreaterThanOrEqual(barAtFloor.minimum);
       expect(atVideoFloor.line).toBeGreaterThanOrEqual(MIN_CURRENT_LINE * scale - SLOP_PX);
 
       // The grid edge, both ends: the current line at one, the header and three rows at the other.

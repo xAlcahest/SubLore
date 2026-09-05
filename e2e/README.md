@@ -316,8 +316,13 @@ are the contract. Renaming one breaks the harness. T1 took three of them away wi
 belonged to — `.bar__input`, `.subbar__input` and `.subbar__dest` — and nothing here uses them any
 more.
 
-`.bar__button`, `.stage__surface`, `.stage__empty`, `.controls__button`,
+`.bar__button`, `.stage__surface`, `.stage__empty`, `.controls`, `.controls__button`,
 `.controls__slider`, `.subbar__open`, `.subbar__save-copy`
+
+`.controls` and `.controls__slider` carry more than their names here. The video panel's floor is not
+a number any more: it is what that row asks for on one line, so `dividers.spec.js` and
+`interface-scale.spec.js` read the row's height at both ends of its edge, and read the seek bar
+against the `min-width` its own rule gives it. Take that rule away and those checks stop, loudly.
 
 T7 replaced the project panel's buttons and fields with the rail tree and its context menu, so every
 `.project__*` name is gone. What stands in their place: `.rail`, `.rail__cap`, `.rail__empty`,

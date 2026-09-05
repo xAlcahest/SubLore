@@ -49,9 +49,11 @@
   font-size: 0.875rem;
 }
 
+/* Takes the row's slack, down to this width and no further: the panel's floor is the row with the
+   bar at exactly this, so a seek bar at the floor is still a bar a pointer can land on (D1). */
 .controls__slider {
   flex: 1;
-  min-width: 0;
+  min-width: 2.5rem;
 }
 
 .controls__time {

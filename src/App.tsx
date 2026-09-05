@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { choosePath, type ChooseKind } from "./chooser";
 import AboutDialog from "./components/AboutDialog";
@@ -12,7 +12,7 @@ import StatusBar from "./components/StatusBar";
 import Toolbar from "./components/Toolbar";
 import Waveform from "./components/Waveform";
 import TranscribePanel from "./components/TranscribePanel";
-import VideoControls from "./components/VideoControls";
+import VideoControls, { transportReadings } from "./components/VideoControls";
 import VideoStage from "./components/VideoStage";
 import { useAudioPeaks } from "./hooks/useAudioPeaks";
 import { useCueSelection } from "./hooks/useCueSelection";
@@ -31,6 +31,7 @@ import { useVideoPlayer } from "./hooks/useVideoPlayer";
 import { en } from "./i18n/en";
 import { fill } from "./i18n/format";
 import { commandFor, ownsTheKeyboard } from "./keyboard";
+import { widestRow } from "./measure";
 import { requestQuit } from "./quit";
 import { replaceOne, type Match, type Query } from "./search";
 import {
@@ -59,10 +60,12 @@ function moduleCommandId(item: Contribution): CommandId {
  * a ceiling under its own panel's default height that way and the panel could not be dragged back.
  *
  * Each is the number at 100 per cent, and each is taken against the interface size before it is
- * used (S2): at 150 the transport under the video is wider, so a fixed 220 stops keeping it on one
- * row. Each was read again at 90 and at 150, in WebKitGTK because that is the engine the app's
- * webview is, and both ends are written beside it. The instrument gave D1's own numbers back at
- * 100, which is what says it is the same measurement.
+ * used (S2). Each was read again at 90 and at 150, in WebKitGTK because that is the engine the
+ * app's webview is, and both ends are written beside it.
+ *
+ * Reading a bound once is not enough for a bound the fonts decide, which is why the video panel's
+ * floor is no longer here: it is measured off the row it has to keep on one line, every time the
+ * interface size or that row's copy changes. See `widestRow` in src/measure.ts.
  */
 
 /**
@@ -87,14 +90,6 @@ const MIN_WAVEFORM_HEIGHT = 64;
  * the W6 ceiling above.
  */
 const MIN_CURRENT_LINE = 72;
-
-/**
- * The narrowest video panel whose transport is still one row. Squeezed further the transport wraps
- * onto four rows and eats the picture, which is the sliver D1 refuses; measured by growing the
- * panel until `.controls` came back to its unwrapped height. It came back at 196 at 90 per cent and
- * at 326 at 150, and the scaled bound stops above both.
- */
-const MIN_VIDEO_WIDTH = 220;
 
 /**
  * The narrowest tools column whose current line still fits the height the column gives it: at 176
@@ -146,7 +141,8 @@ export default function App() {
   const peaks = useAudioPeaks();
   const { layout, changeLayout, storeLayout } = useLayout();
   // The root declaration in shell.css reads this custom property; nothing else may set it (S1).
-  useEffect(() => {
+  // Before the paint, and before the effect below it, which measures type this size decides.
+  useLayoutEffect(() => {
     if (layout !== null) {
       document.documentElement.style.setProperty(
         "--interface-scale",
@@ -160,6 +156,9 @@ export default function App() {
   const toolsRef = useRef<HTMLElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLElement>(null);
+  // Null until the transport has been measured, which is before the first paint: a floor of zero
+  // would be no floor at all, and a number here would be a floor read on one machine's fonts.
+  const [transportFloor, setTransportFloor] = useState<number | null>(null);
   const [frame, setFrame] = useState({
     videoWidth: 0,
     toolsWidth: 0,
@@ -229,7 +228,35 @@ export default function App() {
   // Every bound above is a number at 100 per cent, so each is taken against the size the user
   // picked; 1 is what the fallback in tokens.css draws at, before the layout has been read (S2).
   const scale = layout?.interfaceScale ?? 1;
-  const minVideoWidth = MIN_VIDEO_WIDTH * scale;
+  const duration = state.duration ?? 0;
+
+  // The video panel's floor: what the transport under it asks for on one row, taken off that row
+  // rather than written down, because every width in it is one the machine's fonts decide (S2).
+  // Before the paint, so the edge below is never drawn against a floor that has not been read yet.
+  useLayoutEffect(() => {
+    const controls = topRef.current?.querySelector<HTMLElement>(".controls") ?? null;
+    if (controls === null) {
+      return;
+    }
+    let live = true;
+    const measure = () => {
+      const width = widestRow(controls, transportReadings(duration));
+      // Up to the whole pixel: the sum is in fractions of one, and the engine breaks a line in
+      // sixty-fourths of one.
+      if (live && width !== null) {
+        setTransportFloor(Math.ceil(width));
+      }
+    };
+    measure();
+    // Type can arrive after the first paint, and every width above is the width of some type. The
+    // promise has no failure: a page whose fonts never settle keeps the reading taken above.
+    void document.fonts.ready.then(measure, () => {});
+    return () => {
+      live = false;
+    };
+  }, [scale, duration]);
+
+  const minVideoWidth = transportFloor ?? 0;
   const minCurrentLine = MIN_CURRENT_LINE * scale;
   const minWaveformHeight = MIN_WAVEFORM_HEIGHT * scale;
   // The grid's three rows are a fixed 28px at every size, so only its header is scaled, and never
@@ -237,8 +264,10 @@ export default function App() {
   const minGridHeight = MIN_GRID_HEIGHT + MIN_GRID_HEAD * Math.max(0, scale - 1);
 
   // The video panel is stored as a share of the row, so it keeps its proportion when the window
-  // changes width; the sash works in pixels, which is what the row measures.
-  const videoWidth = layout === null ? 0 : layout.videoFraction * frame.topWidth;
+  // changes width; the sash works in pixels, which is what the row measures. Never under the floor:
+  // a share stored at a wider window, or at a smaller interface size, opens below it.
+  const videoWidth =
+    layout === null ? 0 : Math.max(minVideoWidth, layout.videoFraction * frame.topWidth);
   const maxVideoWidth = Math.max(
     minVideoWidth,
     frame.videoWidth + frame.toolsWidth - MIN_TOOLS_WIDTH * scale,
@@ -1065,7 +1094,16 @@ export default function App() {
           <div className="shell__top" ref={topRef}>
             <section
               className="shell__video"
-              style={layout === null ? undefined : { width: `${layout.videoFraction * 100}%` }}
+              style={
+                layout === null
+                  ? undefined
+                  : {
+                      width: `${layout.videoFraction * 100}%`,
+                      // The floor holds where the panel is drawn, not only where it may be dragged:
+                      // a stored share opens the panel without a gesture anywhere near it.
+                      minWidth: transportFloor ?? undefined,
+                    }
+              }
             >
               <VideoStage hasVideo={ready} onRegionChange={setRegion} />
               <VideoControls
@@ -1077,8 +1115,10 @@ export default function App() {
                 onSeek={(target) => void seek(target)}
               />
             </section>
-            {/* The edge the owner asked for: the video gets bigger by dragging it (D1). */}
-            {layout !== null && (
+            {/* The edge the owner asked for: the video gets bigger by dragging it (D1). It waits
+              for the floor the same way it waits for the layout: an edge with no floor under it
+              could be dragged to a width that has no transport. */}
+            {layout !== null && transportFloor !== null && (
               <Sash
                 axis="x"
                 edge="video"

@@ -1,6 +1,7 @@
 import { useId, useState, type ChangeEvent } from "react";
 
 import { en } from "../i18n/en";
+import { type RowReading } from "../measure";
 
 /** m:ss. The separator is punctuation, not translatable copy. */
 function formatTime(seconds: number): string {
@@ -8,6 +9,25 @@ function formatTime(seconds: number): string {
   const minutes = Math.floor(safe / 60);
   const rest = safe % 60;
   return `${minutes}:${rest.toString().padStart(2, "0")}`;
+}
+
+/**
+ * Every reading the transport can show for this media, so the panel's floor is the widest of them
+ * and not whichever one happened to be up when it was measured: the button says play or pause, and
+ * the time is at its widest with the duration on both sides, its digits being tabular.
+ */
+export function transportReadings(duration: number): RowReading[] {
+  const time = `${formatTime(duration)} / ${formatTime(duration)}`;
+  return [en.video.play, en.video.pause].map((label) => (row: HTMLElement) => {
+    const button = row.querySelector(".controls__button");
+    const span = row.querySelector(".controls__time");
+    if (button !== null) {
+      button.textContent = label;
+    }
+    if (span !== null) {
+      span.textContent = time;
+    }
+  });
 }
 
 type VideoControlsProps = {

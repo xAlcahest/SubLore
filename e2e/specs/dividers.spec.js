@@ -20,7 +20,6 @@ import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, dragAt, focusWindow, pressAndTravel, releaseButton } from "../lib/input.js";
 import { repoRoot, requireWaveformFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
-import { interfaceScale } from "../lib/scale.js";
 import { waitForSurfaceOnStage } from "../lib/surface.js";
 import { findToplevel } from "../lib/x11.js";
 
@@ -30,14 +29,24 @@ const GRID_SASH = ".sash--grid";
 const SUBTITLE = path.join(repoRoot, "fixtures", "subtitles", "srt", "clean", "basic-lf.srt");
 
 /**
- * Mirrors the bounds `src/App.tsx` measured off the rendered shell at this window size. Each is the
- * number at 100 per cent, and `App.tsx` takes it against the interface size before it uses it (S2),
- * so a check against the bare number is a check on a floor the app no longer has.
+ * Mirrors the bounds `src/App.tsx` measured off the rendered shell at this window size, each of
+ * them the number at 100 per cent. This file runs at the size the app opens at, which is larger, so
+ * each is read here as a lower bound and never as the bound itself (S2).
+ *
+ * The video panel's floor is not among them any more. It is what the transport under the panel
+ * asks for on one row, which is a width the machine's fonts decide, so it is asserted here as the
+ * property it exists for and never as a number: the row is one row at the floor, and the seek bar
+ * in it is down to the width its own rule floors it at.
  */
-const MIN_VIDEO_WIDTH = 220;
 const MIN_TOOLS_WIDTH = 176;
 const MIN_GRID_HEIGHT = 109;
 const MIN_CURRENT_LINE = 72;
+
+/**
+ * What a width read back off the page may be over the width it was clamped to: the floor is rounded
+ * up to a whole pixel, and a share of a row stored and multiplied back lands on a fraction of one.
+ */
+const ROUNDING_PX = 2;
 
 /** What the two edges open at: 38% of the top row, and 13.5rem at the default root size. */
 const DEFAULT_VIDEO_FRACTION = 0.38;
@@ -117,6 +126,55 @@ async function clickElement(toplevel, selector) {
 
 function present(selector) {
   return browser.execute((css) => document.querySelector(css) !== null, selector);
+}
+
+function textOf(selector) {
+  return browser.execute((css) => document.querySelector(css)?.textContent ?? null, selector);
+}
+
+/**
+ * The seek bar as it is drawn, beside the width its own rule says it never goes under. The video
+ * panel's floor is the transport with the bar at exactly that, so the two are equal there and the
+ * bar is wider everywhere else.
+ */
+async function seekBar() {
+  const bar = await browser.execute(() => {
+    const slider = document.querySelector(".controls__slider");
+    if (slider === null) {
+      return null;
+    }
+    return {
+      width: slider.getBoundingClientRect().width,
+      minimum: Number.parseFloat(window.getComputedStyle(slider).minWidth),
+    };
+  });
+  if (bar === null || !Number.isFinite(bar.minimum)) {
+    throw new Error(".controls__slider is missing, or its rule gives it no width to hold it at");
+  }
+  return bar;
+}
+
+/**
+ * The seek bar's slack while the transport shows its other reading. The button's two words are not
+ * the same width and the floor keeps room for the wider of them, so the row is only full in one of
+ * the two and both have to be read. Playback is what puts the other word up, and the video is left
+ * paused, the way it was found.
+ */
+async function slackInTheOtherReading(toplevel) {
+  const paused = await textOf(".controls__button");
+  const saysSomethingElse = async () => ((await textOf(".controls__button")) === paused ? null : 1);
+  await clickElement(toplevel, ".controls__button");
+  await waitFor(saysSomethingElse, {
+    timeout: 10000,
+    message: "the transport button to show its other word, which is what this reading needs",
+  });
+  const bar = await seekBar();
+  await clickElement(toplevel, ".controls__button");
+  await waitFor(async () => ((await saysSomethingElse()) === null ? 1 : null), {
+    timeout: 10000,
+    message: "the transport button to go back to the word it showed before this check played it",
+  });
+  return bar.width - bar.minimum;
 }
 
 async function attachToApp() {
@@ -214,8 +272,9 @@ describe("the shell's three edges", () => {
     if (sash === null) {
       throw new Error(`${VIDEO_SASH} is missing from the DOM, so there is nothing to drag`);
     }
-    // Whichever side has room, so the read is never taken against a bound the drag stopped at.
-    const travel = before.video - 140 >= MIN_VIDEO_WIDTH ? -140 : 140;
+    // Toward the wider of the two panels, so the read is never taken against a bound the drag
+    // stopped at: both floors are well under half the row, so the wider panel has this much to give.
+    const travel = before.video >= before.tools ? -140 : 140;
     const fromX = toplevel.absX + sash.midX;
     const fromY = toplevel.absY + sash.midY;
 
@@ -241,23 +300,32 @@ describe("the shell's three edges", () => {
   });
 
   it("stops the video edge at a floor and a ceiling where both panels are still usable", async () => {
-    await dragSash(toplevel, VIDEO_SASH, -2000, 0);
-    const atFloor = await shellSizes();
-    // Rounded on both sides: a share of a row that is stored and multiplied back lands a tenth of a
-    // pixel off the bound it was clamped to.
-    const floor = Math.round(MIN_VIDEO_WIDTH * (await interfaceScale()));
-    expect(`the video floor is ${floor} and the panel is ${Math.round(atFloor.video)}`).toBe(
-      `the video floor is ${floor} and the panel is ${floor}`,
-    );
-    // Still a transport, not a sliver: the floor was measured as the width that keeps it on one row.
-    expect((await boxOf(".controls")).height).toBeLessThan(60);
-
+    // The ceiling first: the transport's height with room to spare is read off this run, and the
+    // floor below is asked to match it. Nothing here stands in for one row.
     await dragSash(toplevel, VIDEO_SASH, 2000, 0);
     const atCeiling = await shellSizes();
+    const oneRow = (await boxOf(".controls")).height;
     expect(atCeiling.tools).toBeGreaterThanOrEqual(MIN_TOOLS_WIDTH - 1);
-    expect(atCeiling.video).toBeGreaterThan(atFloor.video);
     // Still a current line, not a sliver.
     expect((await boxOf(".currentline")).height).toBeGreaterThanOrEqual(MIN_CURRENT_LINE);
+
+    await dragSash(toplevel, VIDEO_SASH, -2000, 0);
+    const atFloor = await shellSizes();
+    expect(atFloor.video).toBeLessThan(atCeiling.video);
+    // Still a transport, not a sliver: at the floor the row is the height it is when the panel has
+    // room, so it is on the one row and has not wrapped onto a second.
+    expect((await boxOf(".controls")).height).toBe(oneRow);
+    // Still a seek bar, at the width its own rule holds it at, which is what the floor keeps room
+    // for: a floor that had been the row without it would leave nothing to put a pointer on.
+    const bar = await seekBar();
+    expect(bar.width).toBeGreaterThanOrEqual(bar.minimum);
+    // And no wider than one row needs: in whichever of its two readings the transport is widest,
+    // the row at the floor is full. A floor a hand had made generous leaves the slack here. The
+    // media runs under ten minutes, so the position beside the duration reads the same width.
+    const slack = Number(
+      Math.min(bar.width - bar.minimum, await slackInTheOtherReading(toplevel)).toFixed(2),
+    );
+    expect({ slack, full: slack < ROUNDING_PX }).toEqual({ slack, full: true });
 
     // Left well clear of the default, so the check that all three are remembered can see it.
     await dragSash(toplevel, VIDEO_SASH, -2000, 0);
