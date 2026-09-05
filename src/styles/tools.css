@@ -124,9 +124,10 @@
 .waveform__canvas {
   display: block;
   flex: 1 1 0;
-  /* A floor, in the interface's own units: a strip that wrapped to three rows in a narrow column
-     would otherwise take the whole panel and leave no wave to read. */
-  min-height: 2rem;
+  /* The strip's rows come before the wave's height, the way the reference's sizer gives its toolbar
+     what it asks for and its display the rest (`src/audio_box.cpp:104-107`). The floor is what is
+     left of the wave when the panel is that short, in the interface's own units. */
+  min-height: 1rem;
   width: 100%;
   font-size: 0.6875rem;
 }
@@ -136,6 +137,10 @@
  * reference puts it (`src/audio_box.cpp:104-107`). Wraps rather than clips: fourteen text buttons
  * are wider than the tools column at 1024x700, the way the transport and the current line's times
  * already are, and a row that scrolled sideways would hold its last buttons past the window edge.
+ *
+ * The panel holds every row at 90 per cent at any width, and at 110 down to the narrowest window
+ * there is. At 150 per cent under about 1090 px the three rows want 122 px in a 128 px panel, so
+ * the last rows scroll: fourteen words need the room the reference's fourteen icons do not.
  */
 .wavebar {
   display: flex;
