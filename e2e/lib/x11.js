@@ -183,3 +183,22 @@ export function findWindowsWithAppGeometry() {
     (window) => window.width === windowWidth && window.height === windowHeight,
   );
 }
+
+/**
+ * The smallest width the window declares to whatever places it, read from `WM_NORMAL_HINTS`.
+ *
+ * This is what actually keeps a person's window above the shell's floor: a window manager honours
+ * the hint. Under the bare X server this battery runs on there is no window manager and nothing
+ * enforces it, so the hint is what can be asserted here and the shell pulling a window back up is
+ * not. See N32.
+ *
+ * @returns the declared minimum width, or null when the window declares none.
+ */
+export function minimumWidthHint(id) {
+  const printed = execFileSync("xprop", ["-id", String(id), "WM_NORMAL_HINTS"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const found = printed.replace(/\s+/g, " ").match(/minimum size: (\d+) by (\d+)/);
+  return found === null ? null : Number(found[1]);
+}
