@@ -227,7 +227,7 @@ grep -nE "✖|failing|Spec Files" /tmp/run.log
 `tests/mutation.rs` leaves `tests/session.rs` unrun, so the report undercounts what the mutation
 actually broke. Use `--no-fail-fast` whenever the point of the run is to see the full blast radius.
 
-## Three ways the instrument lied, all found by running it
+## Four ways the instrument lied, all found by running it
 
 **`xdotool` cannot press a function key by name on this X server.** `xdotool key F3` presses Alt
 before the key, with or without `--clearmodifiers`, and the webview is told `altKey` is true, so the
@@ -258,6 +258,17 @@ now states two positions, the item it wants and the item the menu's cursor start
 `RailMenu` opens on the first item that can _run_ while its arrow walk steps over everything: a Down
 count is a distance and never an index, and a constant that reads like an index is how the same bug
 was written twice. See BACKLOG N26.
+
+**A status line that reads the same before and after cannot say the change happened.**
+`asr.spec.js`'s Discard check waited for `SRT · N cues · LF` and then read the grid. The document
+being replaced was itself a transcription of the same stub run, so it had the same cue count and the
+same format and that line was already what the check was waiting for: the wait was satisfied without
+anything having happened, and the assertion read the old grid. It passed for weeks by winning a
+race, and it lost that race the day an unrelated wait a few lines earlier changed the timing. It now
+waits for the offer to take the result to go away, which is true only after the result has been
+taken. The check three tests further down had the right shape already, with a comment saying so, so
+this was a lesson the file had learned once and not applied twice. Same class as N26 above, and the
+same rule underneath both: a guard that cannot tell "not there" from "not there yet" is a race.
 
 ## Reading a CI run that looks stopped
 
