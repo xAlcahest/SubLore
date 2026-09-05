@@ -81,7 +81,7 @@ capture's exit status instead.
 | `scripts/quit-gate-check.js`            | 17 checks                                                                            | A quit that is not a window close — `AppHandle::exit`, what a menu's Quit item will call — asks what the X button asks: the unsaved-changes dialog, cancel keeping the app and the file, a second quit asking again instead of riding the cancelled answer out, discard exiting 0 with the file untouched, save writing the edit, and a clean quit still exiting (BACKLOG N6). Driven through the File menu's own Quit item from the keyboard, and through Ctrl+Q in the save branch, and red unless the app's log says the quit went that way. |
 | `scripts/startup-args-check.js`         | 7 checks                                                                             | A name on the command line that is not valid Unicode costs that one name and never the launch: the window comes up, the subtitle beside it is the one opened, a real file whose name starts with a dash is opened rather than filtered away, and every argument the app refuses is named in the log (gate 2; `lib.rs:55-57` for the name that is not Unicode, `:62-69` for the dash, `:154-155` for the log).                                                                                                                                   |
 | `scripts/no-display-check.js`           | 5 checks                                                                             | A launch with no display exits non-zero and not with the panic status, having printed one line naming `DISPLAY` and what to do about it, with no panic trace and no crash report (BACKLOG N4). It is the one check that runs without an X server.                                                                                                                                                                                                                                                                                               |
-| `scripts/picker-thread-check.js`        | 14 checks                                                                            | Choosing a project folder and a project file leaves no thread but the main one running `gtk_main_iteration`, read with `eu-stack`, and a cancelled choice still returns as a cancellation (BACKLOG N1c). Then a second run of the app over the same data home: the folder chooser opens at the folder chosen before the app was closed, a remembered folder that has been deleted is dropped and its chooser still answers, and the cancellation before the restart left the memory alone (BACKLOG N7).                                         |
+| `scripts/picker-thread-check.js`        | 20 checks                                                                            | Choosing a project folder and a project file leaves no thread but the main one running `gtk_main_iteration`, read with `eu-stack`, and a cancelled choice still returns as a cancellation (BACKLOG N1c). Then a second run of the app over the same data home: the chooser opens at the folder chosen before the app closed and Open project is what ran over it, a remembered folder that has been deleted is dropped and its chooser still answers, and the cancellation before the restart left the memory alone (BACKLOG N7).               |
 | `scripts/mpv-context-check.js`          | 5 checks                                                                             | A `gpu-context` mpv refuses costs the request and not the window: the app still starts, the refusal is in the log, mpv falls back to the pinned `x11egl`, and the video still attaches (BACKLOG N2b).                                                                                                                                                                                                                                                                                                                                           |
 | `scripts/scaled-surface-check.js`       | 5 checks                                                                             | At an integer display scale the video surface doubles with the window instead of quadrupling or standing still. It does not prove N2c's fractional case, and its header says why.                                                                                                                                                                                                                                                                                                                                                               |
 | `scripts/webview-paint-check.js`        | 5 checks                                                                             | In the configuration users actually get — the NVIDIA WebKit workarounds armed by the app's own detection — the window paints instead of coming up blank, and the app's recorded decision agrees with the machine's driver state.                                                                                                                                                                                                                                                                                                                |
@@ -221,7 +221,7 @@ grep -nE "✖|failing|Spec Files" /tmp/run.log
 `tests/mutation.rs` leaves `tests/session.rs` unrun, so the report undercounts what the mutation
 actually broke. Use `--no-fail-fast` whenever the point of the run is to see the full blast radius.
 
-## Two ways the instrument lied, both found by running it
+## Three ways the instrument lied, all found by running it
 
 **`xdotool` cannot press a function key by name on this X server.** `xdotool key F3` presses Alt
 before the key, with or without `--clearmodifiers`, and the webview is told `altKey` is true, so the
@@ -239,6 +239,19 @@ three seconds from where the seek had put it. It waits on the transport now, whi
 position the seek set, so the slider reading the target is the render the canvas was painted in.
 This is the same class as `docs/environment-anchored-assertions.md`: a number calibrated on an idle
 machine is a number that is wrong on a busy one.
+
+**A side effect more than one command produces cannot say which command ran.**
+`picker-thread-check.js` proved "Add episode reached the project" by watching the size and mtime of
+`project.sublore-wal`. Its keyboard walk landed on Close project instead, a clean close of a WAL
+database checkpoints and removes that file, and a file that has gone is a file that changed: the
+check printed `ok` on a project it had just closed, and then failed four steps later at a chooser
+the closed rail could no longer reach. Two things came out of it. The commands in
+`src-tauri/src/project/mod.rs` each write one line naming what they did, so a check driving the rail
+without a DOM can say which command ran instead of inferring it from a side effect. And a menu walk
+now states two positions, the item it wants and the item the menu's cursor starts on, because
+`RailMenu` opens on the first item that can _run_ while its arrow walk steps over everything: a Down
+count is a distance and never an index, and a constant that reads like an index is how the same bug
+was written twice. See BACKLOG N26.
 
 ## Reading a CI run that looks stopped
 

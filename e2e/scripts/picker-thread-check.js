@@ -25,6 +25,11 @@
  * the lines `project::choose_path` writes. A dialog that closed proves nothing on its own — a
  * keystroke that missed closes it just as well as one that landed.
  *
+ * That is a rule about what a step caused, and N26 is what it costs to break it. The episode half
+ * used to be proved by the project's write-ahead log changing, which a close changes as surely as a
+ * write, so a walk that pressed Close project reported an episode added. Every gesture here now
+ * ends at a line naming the command that ran, which is why `project::mod` writes one per command.
+ *
  * N7 lives here too, in a second run of the app over the same data home, because this is the only
  * thing that drives a chooser without WebDriver. AC: "choosing a folder, closing the app and
  * choosing again opens the chooser at the folder chosen last, proved by a check that fails when the
@@ -36,15 +41,7 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import console from "node:console";
-import {
-  copyFileSync,
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -72,7 +69,7 @@ import { killGroup, processGroupMembers, waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
 
 /** Gutting an assertion has to be as red as failing one, so the checks count themselves. */
-const EXPECTED_CHECKS = 15;
+const EXPECTED_CHECKS = 20;
 let checksRun = 0;
 
 /**
@@ -107,19 +104,38 @@ const RAIL_EPISODE_TABS = 2;
 /**
  * Where each command sits in the menu its node opens (decision 24, A3).
  *
- * Fixed positions, and the ruling of 2026-09-03 is what makes them fixed: a command that cannot run
- * is greyed and never absent, so the project node always draws the same five in the same order and
- * the episode node the same five. The rail's own arrow walk steps over nothing, so an index is a
- * position in the DOM rather than a count of what happens to be available.
+ * These are positions, and the ruling of 2026-09-03 is what makes them fixed: a command that cannot
+ * run is greyed and never absent, so the project node always draws the same five in the same order
+ * and the episode node the same five.
  *
- * `ADD_EPISODE` was 0 until 2026-09-04, from a rail that offered a different menu, and this check
- * had never run against the rebuilt one: it pressed Open project and waited for a write that a
- * chooser was never going to make.
+ * The keyboard's starting position is a separate question, and it is the one that cost N26. The
+ * menu puts the cursor on the first item that can run, not on the first item, while its arrow walk
+ * wraps and steps over greyed items rather than skipping them. So a Down count is a distance from
+ * that start and never an absolute position, and every walk below has to say both.
+ *
+ * `ADD_EPISODE` was 0 until 2026-09-04 and was then read off the list as 2. Both were spent as
+ * counts: the first pressed Open project, the second pressed Close project, and the assertion
+ * behind it could not tell either from an episode being added.
  */
-const CREATE_PROJECT = 0;
-const OPEN_PROJECT = 1;
-const ADD_EPISODE = 2;
+const PROJECT_MENU = { create: 0, open: 1, addEpisode: 2, close: 3, delete: 4 };
+const PROJECT_MENU_ITEMS = 5;
+
+/** Nothing on the episode node's menu greys, so its cursor always opens on the first item. */
 const ATTACH_MEDIA = 0;
+const EPISODE_MENU_ITEMS = 5;
+
+/**
+ * Where the cursor is when the project node's menu opens.
+ *
+ * Create project is the only one of the five whose greying moves: it is the command for a rail with
+ * no project open, so a menu opened over nothing starts on it and a menu opened over a project
+ * starts on Open project. This is a model of the app held outside the app, so no walk below may use
+ * it on a state it has not first made the app confirm, and every gesture it aims is followed by an
+ * assertion that names the command that actually ran.
+ */
+function projectMenuStart(projectOpen) {
+  return projectOpen ? PROJECT_MENU.open : PROJECT_MENU.create;
+}
 
 /** What opens a node's menu: a click on the project node, the menu key on an episode. */
 const CLICK = "space";
@@ -163,6 +179,40 @@ async function said(dataHome, pattern, timeout = 15000) {
     return false;
   }
 }
+
+/**
+ * Did the app say this again, on top of the `before` matches already in the log?
+ *
+ * One data home outlives both launches here, so a line matched over the whole file may belong to a
+ * step that is over or to an app that has exited. Counting from a mark taken before the gesture is
+ * how the cancellation assertions below already scope themselves, and every new assertion is
+ * scoped the same way.
+ */
+async function counted(dataHome, pattern, before, timeout = 20000) {
+  return waitFor(() => (appLog(dataHome).match(pattern) ?? []).length > before, {
+    timeout,
+    message: `another line matching ${pattern}`,
+  }).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** How many times the log already says this. Paired with `counted` around a gesture. */
+function soFar(dataHome, pattern) {
+  return (appLog(dataHome).match(pattern) ?? []).length;
+}
+
+/**
+ * The lines `project::mod` writes, which are the only way this check can name the command that ran.
+ *
+ * `SETTLED` is the load-bearing one. It comes from `project_select_episode`, which the interface
+ * calls from an effect, so it is written after the rail has drawn the episode it reports rather
+ * than merely after the database has it. That is the difference between "the write landed" and
+ * "the node the next walk tabs onto exists", and N26 turned on it.
+ */
+const CLOSED = /project: closed/g;
+const SETTLED = /project: episode \d+ is the selected one/g;
 
 /**
  * Refuse to report a clean process when the tool was never allowed to look.
@@ -324,12 +374,18 @@ async function focusRailNode(toplevel, at, tabs) {
   }
 }
 
-/** Open a rail node's menu and walk the keyboard down to the item at `index`. */
-async function walkToMenuItem(toplevel, at, { tabs, index, opener }) {
+/**
+ * Open a rail node's menu and walk the keyboard from `from` to `item`.
+ *
+ * Both are positions in the list the node draws; the Downs between them are the distance, taken the
+ * way the menu's own walk takes it, which wraps and steps over greyed items.
+ */
+async function walkToMenuItem(toplevel, at, { tabs, item, from = 0, items, opener }) {
   await focusRailNode(toplevel, at, tabs);
   pressKey(opener);
   await sleep(400);
-  for (let step = 0; step < index; step += 1) {
+  const downs = (item - from + items) % items;
+  for (let step = 0; step < downs; step += 1) {
     pressKey("Down");
     await sleep(80);
   }
@@ -358,10 +414,11 @@ async function pressUntilChooser(toplevel, at, route, title, { attempts = 8, ali
     }
   }
   throw new Error(
-    `no chooser named "${title}" after ${attempts} walks to item ${route.index} of the menu on the ` +
-      `node ${route.tabs} tab stops past ${JSON.stringify(CHROME_TEXT)}. Either that point is no ` +
-      `longer the chrome's status line, or the rail's focus order or menu order changed.\n` +
-      `${last?.message ?? ""}`,
+    `no chooser named "${title}" after ${attempts} walks to item ${route.item} of the menu on the ` +
+      `node ${route.tabs} tab stops past ${JSON.stringify(CHROME_TEXT)}, from a menu whose cursor ` +
+      `was taken to start on item ${route.from ?? 0}. Either that point is no longer the rail's ` +
+      `heading, or the rail's focus order, the menu order, or the greying that moves the cursor ` +
+      `changed.\n${last?.message ?? ""}`,
   );
 }
 
@@ -460,12 +517,27 @@ async function main() {
       describeThreads(before.others),
     );
 
+    // The state the first walk counts from, taken from the app rather than assumed. With nothing
+    // reopened, Create project can run, so it is where the menu puts the keyboard.
+    check(
+      "the first launch has no project to reopen, so its project menu opens on Create project",
+      await said(dataHome, /project session: read, nothing to reopen$/m),
+      `this launch reopened something, so the menu does not start where the walk below thinks. ` +
+        `The app's log held:\n${appLog(dataHome)}`,
+    );
+
     // The folder half. `pressUntilChooser` throws unless a chooser is on screen, so a `check` here
     // would only ever be true and would inflate the counter.
     const folderChooser = await pressUntilChooser(
       toplevel,
       at,
-      { tabs: RAIL_ROOT_TABS, index: CREATE_PROJECT, opener: CLICK },
+      {
+        tabs: RAIL_ROOT_TABS,
+        item: PROJECT_MENU.create,
+        from: projectMenuStart(false),
+        items: PROJECT_MENU_ITEMS,
+        opener: CLICK,
+      },
       FOLDER_TITLE,
       { alive },
     );
@@ -497,37 +569,60 @@ async function main() {
     // The file half. Attaching is an episode's command, so there has to be an episode: the rail
     // asks for its name in a field of its own, which is typed into here and nowhere else.
     //
-    // No DOM here, so the episode is waited for through the database: every write past the create
-    // lands in the write-ahead log beside it, which is stamped before the gesture rather than after.
-    const wal = `${projectFile}-wal`;
-    const walMark = () => (existsSync(wal) ? `${statSync(wal).size}@${statSync(wal).mtimeMs}` : "");
-    const before_episode = walMark();
+    // This used to be waited for through the size and mtime of the project's write-ahead log, and
+    // that is the assertion N26 was hiding behind. It asked whether the file had changed, and a
+    // clean close of a WAL database removes the file, which is a change: the walk pressed Close
+    // project and the check said the episode had landed. It is now proved by the app naming the
+    // command and the title it ran with, and then by the rail reporting the node it came back to,
+    // which is the one the walk after this tabs onto.
+    const EPISODE_TITLE = "One";
+    const ADDED = new RegExp(`project: added episode "${quoted(EPISODE_TITLE)}"`, "g");
+    const addedBefore = soFar(dataHome, ADDED);
+    const closedBefore = soFar(dataHome, CLOSED);
+    const settledBefore = soFar(dataHome, SETTLED);
     await walkToMenuItem(toplevel, at, {
       tabs: RAIL_ROOT_TABS,
-      index: ADD_EPISODE,
+      item: PROJECT_MENU.addEpisode,
+      // A project is open: the create above is proved by the file the check just found.
+      from: projectMenuStart(true),
+      items: PROJECT_MENU_ITEMS,
       opener: CLICK,
     });
     pressKey("space");
     await sleep(600);
-    typeText("One");
+    typeText(EPISODE_TITLE);
     pressKey("Return");
-    const added = await waitFor(() => walMark() !== before_episode, {
-      timeout: 20000,
-      message: "the episode to reach the project database",
-    })
-      .then(() => true)
-      .catch(() => false);
+    const added = await counted(dataHome, ADDED, addedBefore);
+    // Close project sits one item past Add episode, so a walk that overshot by one is the first
+    // thing to name rather than the last thing to work out from the log below.
+    const closedInstead =
+      soFar(dataHome, CLOSED) > closedBefore
+        ? ", and the app says it closed the project instead, which is the item after Add episode"
+        : "";
     check(
-      "the episode the rail asked for reached the project",
+      "the episode the rail asked for reached the project, under the name that was typed",
       added,
-      `${wal} is still ${before_episode}, so Add episode wrote nothing. The app's log held:\n` +
-        `${appLog(dataHome)}`,
+      `nothing said an episode called ${JSON.stringify(EPISODE_TITLE)} was added, so either the ` +
+        `walk ran some other command or the name never reached the field${closedInstead}. ` +
+        `The app's log held:\n${appLog(dataHome)}`,
+    );
+    check(
+      "and the rail came back to it, so there is an episode node for the walk below to tab onto",
+      await counted(dataHome, SETTLED, settledBefore),
+      `the episode is in the project and the rail never reported the one it is on, so the tree has ` +
+        `not redrawn and the tab count below is against a rail that has no episode in it. The ` +
+        `app's log held:\n${appLog(dataHome)}`,
     );
 
     const fileChooser = await pressUntilChooser(
       toplevel,
       at,
-      { tabs: RAIL_EPISODE_TABS, index: ATTACH_MEDIA, opener: MENU_KEY },
+      {
+        tabs: RAIL_EPISODE_TABS,
+        item: ATTACH_MEDIA,
+        items: EPISODE_MENU_ITEMS,
+        opener: MENU_KEY,
+      },
       FILE_TITLE,
       { alive },
     );
@@ -541,24 +636,23 @@ async function main() {
     // A cancelled choice is an outcome, not a failure, and the panel has to be told so. Counted
     // from before the Escape: matching the whole log would pass on a cancellation from earlier.
     const CANCELLED = /chooser: the project-file choice was cancelled/g;
-    const before_escape = (appLog(dataHome).match(CANCELLED) ?? []).length;
+    const before_escape = soFar(dataHome, CANCELLED);
     const cancelled = await pressUntilChooser(
       toplevel,
       at,
-      { tabs: RAIL_EPISODE_TABS, index: ATTACH_MEDIA, opener: MENU_KEY },
+      {
+        tabs: RAIL_EPISODE_TABS,
+        item: ATTACH_MEDIA,
+        items: EPISODE_MENU_ITEMS,
+        opener: MENU_KEY,
+      },
       FILE_TITLE,
       { alive },
     );
     await cancelChooser(cancelled, "file");
     check(
       "a chooser dismissed with Escape comes back as a cancellation",
-      await waitFor(() => (appLog(dataHome).match(CANCELLED) ?? []).length > before_escape, {
-        timeout: 15000,
-        message: "the cancellation this Escape caused",
-      }).then(
-        () => true,
-        () => false,
-      ),
+      await counted(dataHome, CANCELLED, before_escape, 15000),
       `Escape produced no cancellation beyond the ${before_escape} already logged. ` +
         `The app's log held:\n${appLog(dataHome)}`,
     );
@@ -589,11 +683,18 @@ async function main() {
     // here rather than assumed: an Escape that missed would leave the same log as a memory the
     // cancellation never touched.
     const FOLDER_CANCELLED = /chooser: the project-folder choice was cancelled/g;
-    const cancelledBefore = (appLog(dataHome).match(FOLDER_CANCELLED) ?? []).length;
+    const cancelledBefore = soFar(dataHome, FOLDER_CANCELLED);
     const browsed = await pressUntilChooser(
       toplevel,
       at,
-      { tabs: RAIL_ROOT_TABS, index: OPEN_PROJECT, opener: CLICK },
+      {
+        tabs: RAIL_ROOT_TABS,
+        item: PROJECT_MENU.open,
+        // Still the project this run created and added an episode to: nothing has closed it.
+        from: projectMenuStart(true),
+        items: PROJECT_MENU_ITEMS,
+        opener: CLICK,
+      },
       FOLDER_TITLE,
       { alive },
     );
@@ -605,13 +706,7 @@ async function main() {
     await cancelChooser(browsed, "folder");
     check(
       "a folder chooser browsed elsewhere and then dismissed comes back as a cancellation",
-      await waitFor(
-        () => (appLog(dataHome).match(FOLDER_CANCELLED) ?? []).length > cancelledBefore,
-        { timeout: 15000, message: "the cancellation this Escape caused" },
-      ).then(
-        () => true,
-        () => false,
-      ),
+      await counted(dataHome, FOLDER_CANCELLED, cancelledBefore, 15000),
       `Escape produced no cancellation beyond the ${cancelledBefore} already logged. ` +
         `The app's log held:\n${appLog(dataHome)}`,
     );
@@ -626,33 +721,64 @@ async function main() {
     `chooser: chose a project-folder: ${quoted(projectFolder)}$`,
     "gm",
   );
-  const chosenBefore = (appLog(dataHome).match(CHOSE_FOLDER) ?? []).length;
+  const OPENED = new RegExp(`project: opened ${quoted(projectFolder)}$`, "gm");
+  const chosenBefore = soFar(dataHome, CHOSE_FOLDER);
+  const restartSettled = soFar(dataHome, SETTLED);
   const second = launch(dataHome);
   try {
     const toplevel = await waitForWindow(second);
     const at = (point) => ({ x: toplevel.absX + point.x, y: toplevel.absY + point.y });
     const alive = () => second.exit === null;
 
+    // The state both walks below count from, and the one thing that changed when the first run
+    // stopped closing the project it had just made: this launch comes up with one open, so its
+    // project menu opens on Open project rather than on Create project.
+    check(
+      "the second launch reopens the project the first one left open",
+      await said(
+        dataHome,
+        new RegExp(`project session: read, reopening ${quoted(projectFolder)}$`, "m"),
+      ),
+      `this launch reopened nothing or reopened something else, so the walks below start from the ` +
+        `wrong item. The app's log held:\n${appLog(dataHome)}`,
+    );
+    check(
+      "and the rail settled on the episode it was left on, so the reopen has been drawn",
+      await counted(dataHome, SETTLED, restartSettled, 30000),
+      `the app said it was reopening and never reported the episode the rail came back to, so the ` +
+        `menu the walk below opens may still be the empty rail's. The app's log held:\n` +
+        `${appLog(dataHome)}`,
+    );
+
     // Accepted with nothing chosen in it, so the folder it hands back is the folder it opened at.
+    const openedBefore = soFar(dataHome, OPENED);
     const reopened = await pressUntilChooser(
       toplevel,
       at,
-      { tabs: RAIL_ROOT_TABS, index: OPEN_PROJECT, opener: CLICK },
+      {
+        tabs: RAIL_ROOT_TABS,
+        item: PROJECT_MENU.open,
+        from: projectMenuStart(true),
+        items: PROJECT_MENU_ITEMS,
+        opener: CLICK,
+      },
       FOLDER_TITLE,
       { alive },
     );
     await acceptChooser(reopened, "folder");
     check(
       "the folder chooser opened at the folder chosen before the app was closed",
-      await waitFor(() => (appLog(dataHome).match(CHOSE_FOLDER) ?? []).length > chosenBefore, {
-        timeout: 15000,
-        message: `a second choice of ${projectFolder}`,
-      }).then(
-        () => true,
-        () => false,
-      ),
+      await counted(dataHome, CHOSE_FOLDER, chosenBefore, 15000),
       `the chooser handed back something other than ${projectFolder}, so it did not open there. ` +
         `The app's log held:\n${appLog(dataHome)}`,
+    );
+    // Create project raises the same chooser and writes the same line about the folder it was
+    // answered with, so the line above cannot say which of the two the walk pressed. This can.
+    check(
+      "and Open project is the command that ran over it, not Create project",
+      await counted(dataHome, OPENED, openedBefore, 15000),
+      `the folder came back and nothing opened it, so the walk pressed a neighbouring item. The ` +
+        `app's log held:\n${appLog(dataHome)}`,
     );
 
     // A remembered folder that is gone is a folder the user moved or deleted between sessions.
@@ -660,7 +786,14 @@ async function main() {
     const defaulted = await pressUntilChooser(
       toplevel,
       at,
-      { tabs: RAIL_ROOT_TABS, index: OPEN_PROJECT, opener: CLICK },
+      {
+        tabs: RAIL_ROOT_TABS,
+        item: PROJECT_MENU.open,
+        // The open just above succeeded, so a project is still open here.
+        from: projectMenuStart(true),
+        items: PROJECT_MENU_ITEMS,
+        opener: CLICK,
+      },
       FOLDER_TITLE,
       { alive },
     );
