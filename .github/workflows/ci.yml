@@ -146,6 +146,12 @@ jobs:
       # Without this the loader is free to find another libmpv-2.dll first, and it did: the three
       # test targets that actually reference mpv symbols died with STATUS_ENTRYPOINT_NOT_FOUND
       # while the unit tests, which reference none, passed (gate 2, run 33366855143).
+      # WebView2Loader.dll is the same shape of problem and was found the same way. `webview2-com-sys`
+      # puts it in `target\debug` and the test binaries live in `target\debug\deps`, so the library's
+      # own test binary, the one that links the webview, does not find it beside itself and the
+      # loader takes whichever one PATH offers. Traced under wine on the owner's machine on
+      # 2026-09-05: with the DLL absent the binary will not start, with it beside the binary the same
+      # binary lists its 157 tests. See BACKLOG.md N29.
       - name: Put libmpv beside the test binaries (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -155,7 +161,13 @@ jobs:
           foreach ($to in @("target\debug", "target\debug\deps")) {
             Copy-Item "$env:LIBMPV_LIB_DIR\libmpv-2.dll" $to -Force
           }
-          Get-ChildItem target\debug\libmpv-2.dll, target\debug\deps\libmpv-2.dll |
+          # Found rather than assumed: the build script chooses the architecture directory, and a
+          # copy that silently found nothing is what this step exists to stop.
+          $loader = Get-ChildItem -Recurse -Filter WebView2Loader.dll target\debug |
+            Where-Object { $_.DirectoryName -notlike "*\deps" } | Select-Object -First 1
+          if (-not $loader) { throw "no WebView2Loader.dll under target\debug to put beside the test binaries" }
+          Copy-Item $loader.FullName target\debug\deps -Force
+          Get-ChildItem target\debug\libmpv-2.dll, target\debug\deps\libmpv-2.dll, target\debug\deps\WebView2Loader.dll |
             ForEach-Object { "placed $($_.FullName) ($($_.Length) bytes)" }
 
       - name: Test Rust
