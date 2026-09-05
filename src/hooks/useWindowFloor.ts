@@ -42,11 +42,11 @@ export function useWindowFloor(
   scale: number,
   chrome: string,
   block: number | null,
-): { width: number | null; failed: boolean; seen: number | null } {
+): { width: number | null; failed: boolean; seen: string | null } {
   const [rows, setRows] = useState<number | null>(null);
   const [refused, setRefused] = useState(false);
   const [missing, setMissing] = useState(false);
-  const [seen, setSeen] = useState<number | null>(null);
+  const [seen, setSeen] = useState<string | null>(null);
 
   // Before the paint, for the same reason the transport's floor is read there: the number the
   // window is given must not be one read against type that has already been replaced. Nothing here
@@ -92,10 +92,10 @@ export function useWindowFloor(
     // is the one that has read itself narrower than the floor, and the window's own answer about
     // how wide it is can still be the one from before the resize that prompted the call. See N32.
     const carry = (hold: boolean) => {
-      void invoke<number>("layout_set_minimum_width", { width, hold })
+      void invoke<number[]>("layout_set_minimum_width", { width, hold })
         .then((was) => {
           setRefused(false);
-          setSeen(was);
+          setSeen(was.join("/"));
         })
         .catch(() => setRefused(true));
     };
