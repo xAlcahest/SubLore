@@ -46,7 +46,16 @@ function Get-Imports($binary) {
 function Test-Binary($binary) {
   Write-Host "`n=== $(Split-Path $binary -Leaf) ==="
   $named = $false
-  foreach ($entry in (Get-Imports $binary).GetEnumerator()) {
+  $imports = Get-Imports $binary
+  # Every DLL it imports, named first, including the ones nothing below can ask about. A DLL whose
+  # imports are all by ordinal was skipped in silence, and "an ordinal import" is one of the two
+  # answers this script's own closing sentence leaves open: it has to at least say which DLL.
+  $byOrdinal = @($imports.GetEnumerator() | Where-Object { $_.Value.Count -eq 0 } | ForEach-Object { $_.Key })
+  Write-Host "  imports $($imports.Count) DLLs: $(($imports.Keys) -join ', ')"
+  if ($byOrdinal.Count -gt 0) {
+    Write-Host "  by ordinal only, so nothing below asks about them: $($byOrdinal -join ', ')"
+  }
+  foreach ($entry in $imports.GetEnumerator()) {
     $dll = $entry.Key
     $names = $entry.Value
     if ($names.Count -eq 0) { continue }
