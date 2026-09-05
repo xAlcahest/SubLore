@@ -353,6 +353,9 @@ describe("the waveform panel's ruler, strip and window", () => {
   });
 
   it("brings the current line's audio on screen when the cursor moves onto it", async () => {
+    // The document opens with the cursor on row 1, so it is put on another row first: a click on
+    // the row the cursor is already on is not a move, and the panel follows moves.
+    await cursorToRow(toplevel, 2);
     // Deep enough that no window holds the first cue and the last one at once: the fixture's cues
     // are at 2.1 to 4.9 seconds and 9.1 to 11.8, and four steps in leaves well under seven seconds
     // on the panel.

@@ -124,33 +124,40 @@
 .waveform__canvas {
   display: block;
   flex: 1 1 0;
-  min-height: 0;
+  /* A floor, in the interface's own units: a strip that wrapped to three rows in a narrow column
+     would otherwise take the whole panel and leave no wave to read. */
+  min-height: 2rem;
   width: 100%;
   font-size: 0.6875rem;
 }
 
 /*
  * The panel's own strip of controls, under the wave and inside the panel, which is where the
- * reference puts it (`src/audio_box.cpp:104-107`). One row at every width: the panel's height is
- * what the sash stores and what three checks measure, so a strip that wrapped would take that
- * height off the wave a line at a time. Fourteen text buttons are wider than a narrow tools column,
- * so the row scrolls sideways instead of growing.
+ * reference puts it (`src/audio_box.cpp:104-107`). Wraps rather than clips: fourteen text buttons
+ * are wider than the tools column at 1024x700, the way the transport and the current line's times
+ * already are, and a row that scrolled sideways would hold its last buttons past the window edge.
  */
 .wavebar {
   display: flex;
-  flex: none;
-  flex-wrap: nowrap;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.3rem;
   min-width: 0;
+  /* Rows the panel is too short to hold scroll rather than being cut by its edge: the panel clips
+     what it cannot fit, and a button cut in half is a button lost. */
+  min-height: 0;
   padding: 0.3rem 0.5rem;
-  overflow-x: auto;
+  overflow-y: auto;
   border-top: 1px solid var(--line);
   background: var(--bg-panel);
   scrollbar-width: thin;
 }
 
+/* Shrinkable, so a column dragged narrower than one button clips that button's own word rather
+   than hanging it over the window edge. */
 .wavebar__button {
+  min-width: 0;
   padding: 0.15rem 0.4rem;
   border: 1px solid var(--line-strong);
   background: var(--bg-sunken);
@@ -158,6 +165,8 @@
   font: inherit;
   font-size: 0.75rem;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wavebar__button:disabled {
