@@ -2,6 +2,8 @@
 //! in Sublore is one of these. Offsets are body offsets, BOM excluded, exactly like
 //! `sublore_formats::Span`. See BACKLOG.md M2.1.
 
+use sublore_formats::AssField;
+
 use crate::error::{EditError, EditErrorKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,6 +60,9 @@ pub enum EditKind {
     /// a replace that rewrote forty cues must never merge into the keystroke before it.
     SetTexts,
     SetTimes,
+    /// Which field is on the label, not just that a field was written: two fields of one cue must
+    /// never merge into one undo step. See ass-field-write-tasks.md W3.
+    SetField(AssField),
     Insert,
     Delete,
     Split,

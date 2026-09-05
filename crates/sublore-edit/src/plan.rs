@@ -7,8 +7,8 @@
 //! `sublore-formats`: the parsers stay the only authority on grammar.
 
 use sublore_formats::{
-    Cue, CueDetail, Newline, Segment, SegmentKind, Span, SrtCue, SubtitleDocument, SubtitleFormat,
-    MAX_TIMECODE_MS,
+    AssEvent, AssField, Cue, CueDetail, Newline, Segment, SegmentKind, Span, SrtCue,
+    SubtitleDocument, SubtitleFormat, MAX_TIMECODE_MS,
 };
 
 use crate::diff;
@@ -40,6 +40,13 @@ pub enum Edit {
         cue: usize,
         start_ms: u32,
         end_ms: u32,
+    },
+    /// One declared field of one ASS event, written verbatim. The text field is not among the
+    /// fields `AssField` can name. See docs/ass-field-write-tasks.md W3.
+    SetField {
+        cue: usize,
+        field: AssField,
+        value: String,
     },
     /// `before == cues().count()` appends.
     Insert {
@@ -114,6 +121,7 @@ pub fn plan(document: &SubtitleDocument, edit: &Edit) -> Result<Planned, EditErr
             start_ms,
             end_ms,
         } => plan_set_times(document, *cue, *start_ms, *end_ms),
+        Edit::SetField { cue, field, value } => plan_set_field(document, *cue, *field, value),
         Edit::Insert {
             before,
             start_ms,
@@ -140,6 +148,11 @@ pub fn edit(document: &SubtitleDocument, edit: &Edit) -> Result<Edited, EditErro
     let after = sublore_formats::parse(document.format(), &assemble(document, &body))
         .map_err(|error| EditError::from_parse(EditErrorKind::Reparse, error))?;
     verify::verify(document, &after, &planned.expect)?;
+    // `verify` reads cue counts, times and text and no other field, so a field write proves
+    // itself against the re-parsed document. See docs/ass-field-write-tasks.md W6.
+    if let Edit::SetField { cue, field, value } = edit {
+        verify_field(document, &after, *cue, *field, value)?;
+    }
 
     let cue_delta = delta(document.cues().count(), after.cues().count());
     Ok(Edited {
@@ -943,6 +956,258 @@ fn plan_set_times(
     })
 }
 
+// ---------------------------------------------------------------------------------------------
+// One ASS event field
+// ---------------------------------------------------------------------------------------------
+
+/// The ASS event a cue index names, or a refusal. SRT blocks and VTT cues have no declared fields
+/// and their formats have nowhere to put one.
+fn ass_event_of(document: &SubtitleDocument, index: usize) -> Result<&AssEvent, EditError> {
+    let cue = locate(document, index)?.cue;
+    match &cue.detail {
+        CueDetail::Ass(event) => Ok(event),
+        CueDetail::Srt(_) | CueDetail::Vtt(_) => Err(EditError::new(
+            EditErrorKind::NotApplicable,
+            "the cue is not an ASS event, so it holds no declared field",
+        )),
+    }
+}
+
+/// The part of a field's span a write replaces: the span without its leading spaces and tabs and
+/// its trailing spaces, tabs and carriage return, which is the trim a column renders it with.
+///
+/// Keeping the padding outside the splice is what leaves the space after `Dialogue:` and a
+/// hand-spaced line exactly as the file wrote them, and what makes committing a field unchanged a
+/// no-op rather than a silent reformat. See docs/ass-field-write-tasks.md W4.
+/// What a field value is written as. A value with anything in it goes in as it was given, because
+/// C5.2 rules that trimming for display must never trim on the way back out and a style may
+/// genuinely be named `Sign Top `. A value that is nothing but padding is written as empty: the
+/// panel already draws it as empty, and written whole it landed outside the core and appended a
+/// byte and an undo step on every commit. See W4.
+fn written_value(value: &str) -> &str {
+    if value
+        .trim_start_matches([' ', '\t'])
+        .trim_end_matches([' ', '\t', '\r'])
+        .is_empty()
+    {
+        return "";
+    }
+    value
+}
+
+fn field_core(document: &SubtitleDocument, span: Span) -> Span {
+    let raw = document.slice(span);
+    let lead = raw
+        .len()
+        .saturating_sub(raw.trim_start_matches([' ', '\t']).len());
+    let rest = raw.get(lead..).unwrap_or("");
+    let trail = rest
+        .len()
+        .saturating_sub(rest.trim_end_matches([' ', '\t', '\r']).len());
+    Span::new(
+        span.start.saturating_add(lead),
+        span.end.saturating_sub(trail),
+    )
+}
+
+/// Whether the field holds an integer, and whether that integer may be negative: a margin may, a
+/// layer may not.
+fn integer_field(field: AssField) -> Option<bool> {
+    match field {
+        AssField::Layer => Some(false),
+        AssField::MarginL | AssField::MarginR | AssField::MarginV => Some(true),
+        AssField::Style | AssField::Actor | AssField::Effect => None,
+    }
+}
+
+/// Digits, an optional single leading `-` where `signed`, and a value an `i32` holds. Leading
+/// zeros are kept: `ssa-v4.ssa` spells its margins `0000` and the file is written what it is given.
+fn is_integer(value: &str, signed: bool) -> bool {
+    let digits = match value.strip_prefix('-') {
+        Some(rest) if signed => rest,
+        Some(_) => return false,
+        None => value,
+    };
+    !digits.is_empty()
+        && digits.bytes().all(|byte| byte.is_ascii_digit())
+        && value.parse::<i32>().is_ok()
+}
+
+/// What a field may not hold, refused before anything is spliced. See ass-field-write-tasks.md W5.
+fn validate_field_value(field: AssField, value: &str) -> Result<(), EditError> {
+    let unwritable = |detail: &str| EditError::new(EditErrorKind::UnwritableText, detail);
+    // The worst one: a comma cuts a field the `Format:` line does not declare, so every field
+    // after it shifts and the text field swallows the tail. It moves the user's own writing.
+    if value.contains(',') {
+        return Err(unwritable(
+            "a comma separates ASS fields, so a field value may not hold one",
+        ));
+    }
+    if value.contains('\n') {
+        return Err(unwritable("an ASS event holds no line break"));
+    }
+    if value.contains('\r') {
+        return Err(unwritable(
+            "a carriage return in an ASS field cannot be read back",
+        ));
+    }
+    // Refused and never stripped: dropping a byte the caller passed in changes the user's data
+    // without saying so, which is what `render_timecode` refuses to do with a rounded timestamp.
+    if value
+        .chars()
+        .any(|character| matches!(character, '\u{0}'..='\u{1f}' | '\u{7f}'))
+    {
+        return Err(unwritable(
+            "a control character cannot be written into an ASS field",
+        ));
+    }
+    if let Some(signed) = integer_field(field) {
+        if !is_integer(value, signed) {
+            return Err(EditError::new(
+                EditErrorKind::NotApplicable,
+                format!("{} holds an integer, not {value:?}", field.as_str()),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Write one declared field of one ASS event, verbatim, inside that field's own span.
+///
+/// One cue: a write across a selection is a loop over this and the loop belongs with the panel
+/// that has a selection (W7). The commas belong to no field, so a splice that stays inside a core
+/// cannot reach one whether the field is first, last before the text, or in between.
+fn plan_set_field(
+    document: &SubtitleDocument,
+    index: usize,
+    field: AssField,
+    value: &str,
+) -> Result<Planned, EditError> {
+    let located = locate(document, index)?;
+    let CueDetail::Ass(event) = &located.cue.detail else {
+        return Err(EditError::new(
+            EditErrorKind::NotApplicable,
+            "the cue is not an ASS event, so it holds no declared field",
+        ));
+    };
+    // Refused, never added: declaring a field means rewriting the `Format:` line and every event
+    // under it, which touches the bytes of every cue the user did not edit (W5.1).
+    let Some(at) = event.field_index(field) else {
+        return Err(EditError::new(
+            EditErrorKind::NotApplicable,
+            format!(
+                "the section's Format line declares no {} before the text",
+                field.as_str()
+            ),
+        ));
+    };
+    let Some(span) = event.fields.get(at).copied() else {
+        return Err(EditError::new(
+            EditErrorKind::NotApplicable,
+            format!(
+                "field {at} is outside the event's {} fields",
+                event.fields.len()
+            ),
+        ));
+    };
+    validate_field_value(field, value)?;
+
+    let written = written_value(value);
+    let core = field_core(document, span);
+    Ok(Planned {
+        splice: Splice::new(
+            core.start,
+            document.slice(core).to_owned(),
+            written.to_owned(),
+        ),
+        label: EditLabel {
+            kind: EditKind::SetField(field),
+            cue: index,
+        },
+        expect: Expectation {
+            from: index,
+            removed: 1,
+            cues: vec![ExpectedCue {
+                text_raw: document.slice(located.cue.text).to_owned(),
+                start_ms: located.cue.start.millis(),
+                end_ms: located.cue.end.millis(),
+            }],
+            segments_from: located.segment_index,
+            segments_removed: 1,
+            segments_inserted: 1,
+        },
+    })
+}
+
+/// The three things `verify` does not look at: the edited event still carries the same number of
+/// fields, the named field reads back exactly the bytes the plan wrote, and every other field of
+/// that event slices to the same string. See docs/ass-field-write-tasks.md W6.
+fn verify_field(
+    before: &SubtitleDocument,
+    after: &SubtitleDocument,
+    index: usize,
+    field: AssField,
+    value: &str,
+) -> Result<(), EditError> {
+    let old = ass_event_of(before, index)?;
+    let new = ass_event_of(after, index)?;
+    // The field count is what catches a separator smuggled in whatever else went wrong.
+    if old.fields.len() != new.fields.len() {
+        return Err(EditError::new(
+            EditErrorKind::Unverified,
+            format!(
+                "cue {index} carried {} fields and now carries {}",
+                old.fields.len(),
+                new.fields.len()
+            ),
+        ));
+    }
+    let Some((at, span)) = old
+        .field_index(field)
+        .and_then(|at| Some((at, old.fields.get(at).copied()?)))
+    else {
+        return Err(EditError::new(
+            EditErrorKind::Unverified,
+            format!("cue {index} no longer declares a {}", field.as_str()),
+        ));
+    };
+
+    let core = field_core(before, span);
+    let expected = format!(
+        "{}{}{}",
+        before.slice(Span::new(span.start, core.start)),
+        written_value(value),
+        before.slice(Span::new(core.end, span.end))
+    );
+    for (position, written) in new.fields.iter().enumerate() {
+        let read_back = after.slice(*written);
+        if position == at {
+            if read_back != expected {
+                return Err(EditError::new(
+                    EditErrorKind::Unverified,
+                    format!(
+                        "cue {index} field {at} reads {read_back:?}, the plan wrote {expected:?}"
+                    ),
+                ));
+            }
+            continue;
+        }
+        let Some(kept) = old.fields.get(position).copied() else {
+            return Err(EditError::new(
+                EditErrorKind::Unverified,
+                format!("cue {index} field {position} went missing"),
+            ));
+        };
+        if before.slice(kept) != read_back {
+            return Err(EditError::new(
+                EditErrorKind::Unverified,
+                format!("cue {index} field {position} was not edited and changed"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn plan_insert(
     document: &SubtitleDocument,
     before: usize,
@@ -1431,9 +1696,12 @@ fn plan_merge(document: &SubtitleDocument, index: usize) -> Result<Planned, Edit
 mod tests {
     use super::{
         default_shape, is_blank_line, render_text, render_timecode, shape_of, validate_text,
-        TimeShape,
+        verify_field, TimeShape,
     };
-    use sublore_formats::{timecode::parse_timecode, SubtitleFormat, MAX_TIMECODE_MS};
+    use crate::error::EditErrorKind;
+    use sublore_formats::{
+        timecode::parse_timecode, AssField, SubtitleDocument, SubtitleFormat, MAX_TIMECODE_MS,
+    };
 
     /// Every rendered timestamp is proved by the scanner that will read it back.
     fn round_trip(millis: u32, shape: TimeShape) -> String {
@@ -1529,5 +1797,55 @@ mod tests {
         assert_eq!(render_text("a\nb", "\n"), "a\nb");
         assert!(is_blank_line(" \t\r"));
         assert!(!is_blank_line(" x"));
+    }
+
+    /// One event under a fixed six-field `Format:` line.
+    fn ass(event: &str) -> SubtitleDocument {
+        let text =
+            format!("[Events]\nFormat: Layer, Start, End, Style, Name, Text\nDialogue: {event}\n");
+        sublore_formats::parse(SubtitleFormat::Ass, text.as_bytes()).expect("the sample parses")
+    }
+
+    fn kind_of(before: &SubtitleDocument, after: &SubtitleDocument, value: &str) -> EditErrorKind {
+        verify_field(before, after, 0, AssField::Actor, value)
+            .expect_err("this shape must be refused")
+            .kind
+    }
+
+    /// `verify::verify` reads cue counts, times and text and no other field, so these three checks
+    /// are the whole proof that a field write landed where it said it did. Held here rather than
+    /// through a plan, because a plan that produced any of them would be the bug.
+    /// See docs/ass-field-write-tasks.md W6.
+    #[test]
+    fn a_field_write_proves_itself_against_the_reparsed_document() {
+        let before = ass("0,0:00:01.00,0:00:02.00,Default,Ingrid,Hello");
+
+        let written = ass("0,0:00:01.00,0:00:02.00,Default,Marek,Hello");
+        assert!(verify_field(&before, &written, 0, AssField::Actor, "Marek").is_ok());
+
+        // A field the write did not name moved with it.
+        let strayed = ass("0,0:00:01.00,0:00:02.00,Sign,Marek,Hello");
+        assert_eq!(
+            kind_of(&before, &strayed, "Marek"),
+            EditErrorKind::Unverified
+        );
+
+        // It landed somewhere else, so the named field reads back the wrong bytes.
+        let elsewhere = ass("0,0:00:01.00,0:00:02.00,Marek,Ingrid,Hello");
+        assert_eq!(
+            kind_of(&before, &elsewhere, "Marek"),
+            EditErrorKind::Unverified
+        );
+
+        // The event lost a field: what a smuggled separator looks like whatever else went wrong.
+        let shortened = sublore_formats::parse(
+            SubtitleFormat::Ass,
+            b"[Events]\nFormat: Layer, Start, End, Text\nDialogue: 0,0:00:01.00,0:00:02.00,Hello\n",
+        )
+        .expect("the sample parses");
+        assert_eq!(
+            kind_of(&before, &shortened, "Marek"),
+            EditErrorKind::Unverified
+        );
     }
 }

@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 
 use common::{assert_expected_error, assert_round_trip, dirs, fixtures};
 use sublore_formats::{
-    AssEvent, AssEventKind, Cue, CueDetail, Newline, SegmentKind, SubtitleDocument, SubtitleFormat,
+    AssEvent, AssEventKind, AssField, Cue, CueDetail, Newline, SegmentKind, SubtitleDocument,
+    SubtitleFormat,
 };
 
 const FORMAT: SubtitleFormat = SubtitleFormat::Ass;
@@ -44,14 +45,14 @@ fn round_trip(path: &Path, bytes: &[u8]) -> SubtitleDocument {
         );
         // A named field at or past the text would be pointing inside the dialogue, and the column
         // reads it through `slice`, which is a `debug_assert!` and an empty string in release.
-        for (what, at) in [("style", event.style_field), ("name", event.name_field)] {
-            let Some(at) = at else {
+        for field in AssField::ALL {
+            let Some(at) = event.field_index(field) else {
                 continue;
             };
             assert!(
                 at < event.text_field,
-                "{name}: segment {index} names its {what} at field {at}, at or past the text \
-                 field {}",
+                "{name}: segment {index} names its {} at field {at}, at or past the text field {}",
+                field.as_str(),
                 event.text_field
             );
         }

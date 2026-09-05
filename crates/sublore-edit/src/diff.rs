@@ -1,6 +1,6 @@
 //! The cue list the UI sees, and the smallest patch between two of them. See BACKLOG.md M2.1.
 
-use sublore_formats::{AssEvent, AssEventKind, CueDetail, Span, SubtitleDocument};
+use sublore_formats::{AssEvent, AssEventKind, AssField, CueDetail, Span, SubtitleDocument};
 
 /// A cue as the UI sees it: no spans, text normalized.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,11 +76,11 @@ pub fn views(document: &SubtitleDocument) -> Vec<CueView> {
                 CueDetail::Vtt(_) | CueDetail::Ass(_) => None,
             },
             style: match &cue.detail {
-                CueDetail::Ass(event) => named_field(document, event, event.style_field),
+                CueDetail::Ass(event) => named_field(document, event, event.field_index(AssField::Style)),
                 CueDetail::Srt(_) | CueDetail::Vtt(_) => String::new(),
             },
             actor: match &cue.detail {
-                CueDetail::Ass(event) => named_field(document, event, event.name_field),
+                CueDetail::Ass(event) => named_field(document, event, event.field_index(AssField::Actor)),
                 CueDetail::Srt(_) | CueDetail::Vtt(_) => String::new(),
             },
         })

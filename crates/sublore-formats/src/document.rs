@@ -220,7 +220,7 @@ fn section_name(line: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{Segment, SegmentKind, SubtitleDocument, SubtitleFormat};
-    use crate::cue::{AssEvent, AssEventKind, Cue, CueDetail, SrtCue};
+    use crate::cue::{AssEvent, AssEventKind, AssField, Cue, CueDetail, SrtCue};
     use crate::span::Span;
     use crate::text::SourceText;
     use crate::timecode::Timecode;
@@ -260,8 +260,7 @@ mod tests {
                 descriptor: Span::new(0, 0),
                 fields: Vec::new(),
                 text_field: 0,
-                style_field: None,
-                name_field: None,
+                named: [None; AssField::COUNT],
             }),
         }
     }
