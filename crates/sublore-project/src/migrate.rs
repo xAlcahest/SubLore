@@ -67,6 +67,20 @@ CREATE TABLE module_schema (
 );
 ";
 
+/// Migration 3. The number that tells one project from another, for a module that keeps anything
+/// per project (BACKLOG.md N33).
+///
+/// Core-owned for the reason `module_schema` above is: a free core has to be able to read it, and a
+/// table whose existence depends on a paid component is a table nothing can rely on. One row,
+/// pinned by the CHECK `series` already uses. The value is written by `identity.rs` and never here:
+/// zero is reserved to mean no project is open, and frozen migration text cannot express a refusal.
+const V3: &str = "
+CREATE TABLE project_identity (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    project_key INTEGER NOT NULL
+);
+";
+
 /// Every migration, in ascending order. Frozen once shipped.
 pub(crate) const MIGRATIONS: &[Migration] = &[
     Migration {
@@ -76,6 +90,10 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 2,
         sql: V2,
+    },
+    Migration {
+        version: 3,
+        sql: V3,
     },
 ];
 

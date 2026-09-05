@@ -83,6 +83,16 @@ const ROW_ACTION_ID = 8;
  * say. See `module-abi.md` §4.7 and criterion 7 of §9.
  */
 const STORED = /module sublore_module_fixture\.so: stored a note, and the table now holds (\d+)/g;
+/**
+ * The fixture's own line for each project edge, and the key it was handed.
+ *
+ * `project_closing` is handed no key, so the number in the closing line is the module's memory of
+ * the open edge. That is the whole evidence that the two calls are about one project.
+ */
+const OPENED = /module sublore_module_fixture\.so: a project opened, key (-?\d+)/g;
+const CLOSING = /module sublore_module_fixture\.so: a project is closing, key (-?\d+)/g;
+/** What the fixture writes from inside every activation: the item, and the key it arrived with. */
+const INVOKED = /module sublore_module_fixture\.so: invoked item (\d+) with key (-?\d+)/g;
 /** What the fixture puts in the first cue, in its own words so nothing else could have written it. */
 const WROTE = "The module wrote this line.";
 /** The first cue of the fixture below, before any module touches it. */
@@ -222,6 +232,61 @@ async function storeAndRead(toplevel) {
     { timeout: 20000, message: "the module to say what it stored" },
   );
   return Number(said[1]);
+}
+
+/** Every line the fixture logged for `pattern`, in the order it logged them. */
+function edgesFrom(pattern) {
+  return [...appLog(dataHome()).matchAll(pattern)];
+}
+
+/** Wait until the fixture has logged one more line for `pattern` than it had at `before`. */
+async function nextEdge(pattern, before, what) {
+  const said = await waitFor(
+    () => {
+      const all = edgesFrom(pattern);
+      return all.length > before ? all[all.length - 1] : null;
+    },
+    { timeout: 20000, message: what },
+  );
+  return said;
+}
+
+/** Open an existing project in `folder` through the rail, the way a person reaches it. */
+async function openProjectIn(toplevel, folder) {
+  await openProjectMenu(toplevel);
+  await chooseRailItem(toplevel, "open-project");
+  const chooser = await waitForChooser("Choose a project folder");
+  await answerChooser(chooser, folder, "project folder");
+  focusWindow(toplevel.id);
+  await waitFor(() => present(".rail__project"), {
+    timeout: 20000,
+    message: `the project in ${folder} to reach the rail`,
+  });
+}
+
+/** An empty folder of this spec's own, ready to take a project. */
+function emptyFolder(name) {
+  const folder = path.join(dataHome(), name);
+  rmSync(folder, { recursive: true, force: true });
+  mkdirSync(folder, { recursive: true });
+  return folder;
+}
+
+/** Fill the fixture's panel and wait until its two rows are drawn. */
+async function fillThePanel(toplevel) {
+  await runModuleItem(toplevel, FILL_ITEM);
+  await waitFor(() => present(".modulepanel"), {
+    timeout: 20000,
+    message: "the panel the module filled to be drawn",
+  });
+}
+
+/** Wait until no module panel is on screen at all. */
+async function waitForNoPanel(message) {
+  await waitFor(async () => ((await present(".modulepanel")) === false ? true : null), {
+    timeout: 20000,
+    message,
+  });
 }
 
 describe("modules beside the executable", () => {
@@ -606,5 +671,183 @@ describe("modules beside the executable", () => {
 
     // The greyed one never arrived, and the run after it did.
     expect((appLog(dataHome()).match(STORED) ?? []).length).toBe(before);
+  });
+
+  // ------------------------------------------------------------------------------------------
+  // The project edges, N33. What a person does, what they then see, and what the module is told.
+
+  it("tells a module a project opened, and which one", async () => {
+    // Criterion 1. The key is the project's own, out of its own database, and zero is what "no
+    // project is open" is spelled as, so a key of zero here would be no key at all.
+    await closeAnyOpenProject(toplevel);
+    const before = edgesFrom(OPENED).length;
+
+    const folder = emptyFolder("lifecycle-a");
+    await makeProjectIn(toplevel, folder);
+
+    const said = await nextEdge(OPENED, before, "the module to be told a project opened");
+    expect(Number(said[1])).not.toBe(0);
+  });
+
+  it("tells a module a project is closing, naming the one that is going", async () => {
+    // Criterion 2. The closing slot is handed no key, so the number in this line is the module's
+    // own memory of the open edge: the two lines naming one key is what says they are one project.
+    const opened = edgesFrom(OPENED);
+    const key = opened[opened.length - 1][1];
+    const before = edgesFrom(CLOSING).length;
+
+    await openProjectMenu(toplevel);
+    await chooseRailItem(toplevel, "close-project");
+    await confirmRailDialog(toplevel);
+    await waitFor(() => present(".rail__empty"), {
+      timeout: 20000,
+      message: "the rail to come back empty after the project was closed",
+    });
+
+    const said = await nextEdge(CLOSING, before, "the module to be told the project is closing");
+    expect(said[1]).toBe(key);
+  });
+
+  it("tells a module both edges of a swap, in the order they happened", async () => {
+    // Criterion 3, and the point of the whole block. Open Project is the one project command a
+    // person can reach with another project already open, and `open` closes the last one itself, so
+    // this gesture never reaches the `project_close` command. The host synthesizes the close, and a
+    // module sees the same two calls in the same order either way.
+    await closeAnyOpenProject(toplevel);
+    const folderA = emptyFolder("lifecycle-swap-a");
+    const folderB = emptyFolder("lifecycle-swap-b");
+    // B is made and closed first, so the swap below is one gesture on a project that already exists.
+    await makeProjectIn(toplevel, folderB);
+    await closeAnyOpenProject(toplevel);
+
+    let opens = edgesFrom(OPENED).length;
+    await makeProjectIn(toplevel, folderA);
+    const keyA = (await nextEdge(OPENED, opens, "A to be opened"))[1];
+
+    const closings = edgesFrom(CLOSING).length;
+    opens = edgesFrom(OPENED).length;
+    await openProjectIn(toplevel, folderB);
+
+    const closingA = await nextEdge(CLOSING, closings, "A to be told it is closing");
+    const openedB = await nextEdge(OPENED, opens, "B to be told it opened");
+    // A closing carries A's key, and B's is not A's: the module can tell one from the other.
+    expect(closingA[1]).toBe(keyA);
+    expect(openedB[1]).not.toBe(keyA);
+    expect(Number(openedB[1])).not.toBe(0);
+    // And in that order, which is what a module that flushes on the close depends on.
+    expect(closingA.index).toBeLessThan(openedB.index);
+  });
+
+  it("gives a project closed and opened again the key it had before", async () => {
+    // Criterion 4. Through the file rather than through one connection's memory, which is what a
+    // module keying anything per project needs and what a key taken from the path would also pass.
+    const folder = path.join(dataHome(), "lifecycle-swap-b");
+    const opened = edgesFrom(OPENED);
+    const key = opened[opened.length - 1][1];
+
+    await openProjectMenu(toplevel);
+    await chooseRailItem(toplevel, "close-project");
+    await confirmRailDialog(toplevel);
+    await waitFor(() => present(".rail__empty"), {
+      timeout: 20000,
+      message: "the rail to come back empty",
+    });
+
+    const before = edgesFrom(OPENED).length;
+    await openProjectIn(toplevel, folder);
+    const again = await nextEdge(OPENED, before, "the project to be opened a second time");
+    expect(again[1]).toBe(key);
+  });
+
+  it("carries the open project's key into an activation, and zero when nothing is open", async () => {
+    // Criterion 8. The window sends no key at all: the host reads it off the project it has just
+    // locked, which is the only place that knows one.
+    const opened = edgesFrom(OPENED);
+    const key = opened[opened.length - 1][1];
+
+    let before = edgesFrom(INVOKED).length;
+    await runModuleItem(toplevel, STORE_ITEM);
+    const inside = await nextEdge(
+      INVOKED,
+      before,
+      "the module to say what key it was invoked with",
+    );
+    expect(inside[2]).toBe(key);
+
+    // Nothing open, and an item that is enabled anyway: the zero is honest rather than accidental.
+    await closeAnyOpenProject(toplevel);
+    before = edgesFrom(INVOKED).length;
+    await runModuleItem(toplevel, FILL_ITEM);
+    const outside = await nextEdge(
+      INVOKED,
+      before,
+      "the module to be invoked with no project open",
+    );
+    expect(outside[2]).toBe("0");
+  });
+
+  it("leaves nothing of one project's panel on screen when another arrives", async () => {
+    // Criterion 5, and the defect this block exists to end: a module fills a panel from project A,
+    // the translator opens B, and A's rows are still drawn. The swap has no close in it from the
+    // window's side, which is why clearing on close alone leaves this one failing.
+    await closeAnyOpenProject(toplevel);
+    const folderA = emptyFolder("lifecycle-panel-a");
+    const folderB = emptyFolder("lifecycle-panel-b");
+    await makeProjectIn(toplevel, folderB);
+    await closeAnyOpenProject(toplevel);
+    await makeProjectIn(toplevel, folderA);
+
+    await fillThePanel(toplevel);
+    expect(await browser.execute(() => document.querySelectorAll(".modulepanel__row").length)).toBe(
+      2,
+    );
+
+    await openProjectIn(toplevel, folderB);
+
+    // Gone, not emptied in place: the panel itself is off the screen, rows and all.
+    await waitForNoPanel("the first project's panel to go when the second one arrived");
+    expect(await browser.execute(() => document.querySelectorAll(".modulepanel__row").length)).toBe(
+      0,
+    );
+  });
+
+  it("takes a module's panels down when the project is closed", async () => {
+    // Criterion 6. The obvious half, and it is here because the check above is the one that fails
+    // when the clearing is written as "on close" alone.
+    await fillThePanel(toplevel);
+
+    await openProjectMenu(toplevel);
+    await chooseRailItem(toplevel, "close-project");
+    await confirmRailDialog(toplevel);
+    await waitFor(() => present(".rail__empty"), {
+      timeout: 20000,
+      message: "the rail to come back empty after the project was closed",
+    });
+
+    await waitForNoPanel("the panel to go with the project it was drawn from");
+  });
+
+  it("takes them down when the project is deleted, and tells the module before the files go", async () => {
+    // Criterion 7. `project_closing` runs while the project is still in the slot, which on this
+    // path means a module may write into a file that is about to be removed. The user asked for the
+    // delete, and a wasted write is not a data risk.
+    const folder = emptyFolder("lifecycle-deleted");
+    await makeProjectIn(toplevel, folder);
+    const opened = await nextEdge(OPENED, edgesFrom(OPENED).length - 1, "the project to open");
+    const key = opened[1];
+    await fillThePanel(toplevel);
+
+    const before = edgesFrom(CLOSING).length;
+    await openProjectMenu(toplevel);
+    await chooseRailItem(toplevel, "delete-project");
+    await confirmRailDialog(toplevel);
+    await waitFor(() => !existsSync(path.join(folder, "project.sublore")), {
+      timeout: 20000,
+      message: `project.sublore to be gone from ${folder}`,
+    });
+
+    const said = await nextEdge(CLOSING, before, "the module to be told the project is closing");
+    expect(said[1]).toBe(key);
+    await waitForNoPanel("the panel to go with the project that was deleted");
   });
 });

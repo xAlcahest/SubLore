@@ -42,6 +42,16 @@ export type ModulePanels = {
   publish: (published: PublishedPanel[]) => void;
   /** The user closed one. */
   close: (module: number, panelId: number) => void;
+  /**
+   * The open project changed, so every panel goes.
+   *
+   * Every panel, including one a module drew with nothing to do with any project: the core never
+   * learns what a row means (module-abi.md 5.3) and must not start asking. The two failures are not
+   * symmetric. A panel cleared that need not have been costs one gesture to bring back; a panel kept
+   * that should have gone is content from a file the user did not open, which is the defect N33
+   * exists to end.
+   */
+  clear: () => void;
 };
 
 export function useModulePanels(): ModulePanels {
@@ -79,5 +89,11 @@ export function useModulePanels(): ModulePanels {
     );
   }, []);
 
-  return { panels, publish, close };
+  // The same array back when there is nothing to clear, so an edge crossed with no panel on screen
+  // does not cost a render.
+  const clear = useCallback(() => {
+    setPanels((current) => (current.length === 0 ? current : []));
+  }, []);
+
+  return { panels, publish, close, clear };
 }

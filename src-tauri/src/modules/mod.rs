@@ -18,13 +18,15 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use sublore_module_api::{
-    SubloreHost, SubloreInvocation, SubloreItem, SubloreStr, SUBLORE_ENABLE_ALWAYS,
+    SubloreHost, SubloreInvocation, SubloreItem, SubloreModule, SubloreStr, SUBLORE_ENABLE_ALWAYS,
     SUBLORE_ENABLE_DOCUMENT_OPEN, SUBLORE_ENABLE_PROJECT_OPEN, SUBLORE_ENABLE_SELECTION_NON_EMPTY,
     SUBLORE_ERR_BAD_STRING, SUBLORE_ERR_UNSUPPORTED, SUBLORE_ITEM_FLAG_LAYER,
     SUBLORE_ITEM_MENU_ITEM, SUBLORE_ITEM_MENU_TITLE, SUBLORE_ITEM_PANEL, SUBLORE_ITEM_SEPARATOR,
     SUBLORE_ITEM_TOOLBAR_BUTTON, SUBLORE_NO_CUE, SUBLORE_OK,
 };
 use sublore_module_host::{scan, Loaded, Refusal};
+use sublore_project::records::Project;
+use sublore_project::NO_PROJECT_KEY;
 use tauri::{AppHandle, Emitter};
 
 use crate::log;
@@ -232,6 +234,157 @@ pub(crate) struct ModuleProgress {
 struct ModuleEnded {
     call_id: u64,
     code: i32,
+}
+
+/// How long a project edge may take a module before the log names it.
+///
+/// A measurement rather than a bound, and the doc says why: the call is foreign code on a blocking
+/// thread, killing that thread would leave the project lock and the armed record behind, and
+/// unwinding out of `extern "C"` aborts. What the host can do is say which module made the user
+/// wait, on the same footing as `MAX_PANEL_ROWS`. See docs/module-lifecycle-tasks.md §7.
+const SLOW_EDGE_MS: u128 = 250;
+
+/// Which edge a project crossed, as one call into one module.
+///
+/// `project_closing` carries no key: the interface separates the two slots, and a module that wants
+/// to know which project is going remembers what it was told when that project arrived.
+#[derive(Clone, Copy)]
+enum Edge {
+    /// A project reached the slot, with the key it was opened under.
+    Opened(i64),
+    /// The project in the slot is about to leave it. Called before, so a module's last write has
+    /// somewhere to land.
+    Closing,
+}
+
+impl Edge {
+    /// The slot's own name, which is what the log says when a module is slow or refuses.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Opened(_) => "project_opened",
+            Self::Closing => "project_closing",
+        }
+    }
+}
+
+/// Tell one module about one edge, or nothing at all when its table left that slot empty.
+///
+/// **The slot is read before it is called.** Both are optional in the interface, a table filled by a
+/// different compilation leaves an unfilled slot null, and reading a null and calling it is
+/// undefined behaviour rather than a refusal (module-abi.md §2.5).
+///
+/// A non-zero answer never stops the project: the user asked for it, so a refusal is one warn line
+/// and the command carries on.
+fn tell_one(
+    ctx: &HostCtx,
+    name: &str,
+    table: &SubloreModule,
+    instance: *mut c_void,
+    project: Option<&mut Option<Project>>,
+    storage: Option<String>,
+    edge: Edge,
+) {
+    // Its `create` failed, so there is no instance to call, which is what `invoke` finds too.
+    if instance.is_null() {
+        return;
+    }
+    let mut lent = Lent::default();
+    if let Some(project) = project {
+        // The project and the module's storage prefix, and nothing else: no session and no
+        // activation, which is what makes the session-backed reads and the panel calls refuse.
+        lent = lent.with_project(project, storage);
+    }
+
+    let started = std::time::Instant::now();
+    let code = match edge {
+        Edge::Opened(key) => {
+            let Some(opened) = table.project_opened else {
+                log::debug!("modules: {name} fills no project_opened, so it is not told");
+                return;
+            };
+            let _entered = ctx.enter(name, lent);
+            // Safety: the module's own function, given the instance its `create` wrote, with the
+            // project locked for the whole of the call.
+            unsafe { opened(instance, key) }
+        }
+        Edge::Closing => {
+            let Some(closing) = table.project_closing else {
+                log::debug!("modules: {name} fills no project_closing, so it is not told");
+                return;
+            };
+            let _entered = ctx.enter(name, lent);
+            // Safety: as above.
+            unsafe { closing(instance) }
+        }
+    };
+
+    let took = started.elapsed().as_millis();
+    if took > SLOW_EDGE_MS {
+        log::warn!(
+            "modules: {name} spent {took} ms in {}, and the user waited for it",
+            edge.name()
+        );
+    }
+    if code != SUBLORE_OK {
+        log::warn!(
+            "modules: {name} answered {code} to {}, which does not stop the project",
+            edge.name()
+        );
+    }
+}
+
+/// Which way a project crossed, before the slot has been read.
+///
+/// [`Edge`] is what one module is told and carries the key; this is what the caller asks for. The
+/// two are separate so the key is read off the project `tell` has locked and never off an earlier
+/// look at the slot: one read, so there is no window between deciding what to say and saying it.
+#[derive(Clone, Copy)]
+enum Crossing {
+    Opened,
+    Closing,
+}
+
+/// Tell every loaded module about one edge, in load order, one at a time.
+///
+/// **A crossing with nothing in the slot is no crossing.** That is what makes both call sites in
+/// `across_a_project_edge` unconditional: a close with nothing open and an open that failed both
+/// end here and tell nobody.
+///
+/// The project is locked once for the whole round and lent to each call, which is what lets a module
+/// read and write its own storage from inside one. The module lock is the caller's and is held
+/// across this, so no activation overlaps it and one module refusing does not stop the next.
+fn tell(held: &mut Held, slot: &SharedProject, crossing: Crossing) {
+    let mut project = match slot.lock() {
+        Ok(open) => open,
+        Err(_) => {
+            log::warn!("modules: the project lock is poisoned, so no module is told an edge");
+            return;
+        }
+    };
+    // The key off the project in hand. No project is nothing to say, on either crossing.
+    let edge = match (crossing, project.as_ref()) {
+        (_, None) => return,
+        (Crossing::Opened, Some(open)) => Edge::Opened(open.key()),
+        (Crossing::Closing, Some(_)) => Edge::Closing,
+    };
+    let mut project = Some(&mut *project);
+    let held = &mut *held;
+    let ctx: &HostCtx = &held.ctx;
+    for running in &held.modules {
+        // `as_deref_mut` below reborrows rather than moves, so one lock serves every module.
+        let name = file_name(running.module.path());
+        // The module's own storage prefix, taken from its file name, exactly as `invoke` takes it.
+        let storage = running.module.id().map(str::to_owned);
+        tell_one(
+            ctx,
+            &name,
+            running.module.table(),
+            running.ctx,
+            project.as_deref_mut(),
+            storage,
+            edge,
+        );
+    }
 }
 
 /// The activation a Stop can still reach, while there is one.
@@ -527,6 +680,34 @@ impl ModuleState {
         }
     }
 
+    /// Run a project command with every module told the edges around it.
+    ///
+    /// **The module lock is held for the whole of it.** That is what puts a project edge behind an
+    /// activation already running, and what stops a second project command splitting a close call
+    /// from the close it is about. The project lock is taken inside it and after it, which is the
+    /// order `invoke` fixed and the only one this process takes the pair in.
+    ///
+    /// **The slot decides, not the caller.** Whatever is in it before `work` is told it is closing,
+    /// and whatever is in it afterwards is told it opened. So the swap `project/mod.rs` actually
+    /// performs, where `create` and `open` close the last project themselves and never reach the
+    /// `project_close` command, looks to a module exactly like a close followed by an open. A
+    /// command that fails and leaves the slot empty tells nobody anything opened. See
+    /// docs/module-lifecycle-tasks.md §2.
+    pub fn across_a_project_edge<T>(&self, slot: &SharedProject, work: impl FnOnce() -> T) -> T {
+        let Ok(mut held) = self.held.lock() else {
+            // The project change still happens: a poisoned module lock is our bug, and refusing the
+            // user's own command over it would be the worse of the two outcomes.
+            log::error!(
+                "modules: the module lock is poisoned, so none was told the project changed"
+            );
+            return work();
+        };
+        tell(&mut held, slot, Crossing::Closing);
+        let outcome = work();
+        tell(&mut held, slot, Crossing::Opened);
+        outcome
+    }
+
     /// Carry a user's activation of a contributed item into the module that contributed it.
     ///
     /// The session is locked here and lent to the gate for the whole call, which is what makes a
@@ -586,6 +767,15 @@ impl ModuleState {
                 None
             }
         };
+        // Read off the project just locked, never taken from the window: a key the window supplies
+        // is a key the window can get wrong, and it has no business knowing one (BACKLOG.md N33).
+        let at = SubloreInvocation {
+            project_key: project
+                .as_deref()
+                .and_then(Option::as_ref)
+                .map_or(NO_PROJECT_KEY, Project::key),
+            ..*at
+        };
         // Armed before the call and cleared after it, so a Stop that arrives late finds another id
         // or nothing, which is `asr_transcribe_cancel`'s rule in its own words (H8 decision 2).
         let cancel = Arc::new(AtomicBool::new(false));
@@ -605,7 +795,7 @@ impl ModuleState {
         let entered = held.ctx.enter(&name, lent);
         // Safety: the module's own function, given the instance its `create` wrote and a record
         // valid for the call, with the session locked for the whole of it.
-        let code = unsafe { invoke(running.ctx, item, at) };
+        let code = unsafe { invoke(running.ctx, item, &at) };
         let patches = entered.proposed();
         let panels = entered.panels();
         let abandoned = entered.abandoned_panel();
@@ -826,7 +1016,6 @@ pub struct InvokeAt {
     /// The activated row's handle, in decimal, for the reason [`RowDto`] carries it that way.
     pub row: String,
     pub panel_id: u32,
-    pub project_key: i64,
 }
 
 /// A contributed item was activated. Everything about which item is the module's own (§5.3).
@@ -866,7 +1055,9 @@ pub async fn module_invoke(
         cue: at.cue.unwrap_or(SUBLORE_NO_CUE),
         row,
         panel_id: at.panel_id,
-        project_key: at.project_key,
+        // Filled by `ModuleState::invoke` off the project it locks, which is the only place that
+        // knows one. Zero here means nothing yet, and zero there means no project is open.
+        project_key: NO_PROJECT_KEY,
     };
 
     let Some(state) = app.try_state::<ModuleState>() else {
@@ -926,4 +1117,382 @@ pub async fn module_invoke(
 #[tauri::command]
 pub fn module_cancel(state: tauri::State<'_, ModuleState>, call_id: u64) {
     state.inner().cancel(call_id);
+}
+
+#[cfg(test)]
+mod tests {
+    //! The rules of a project edge that are cheaper and stricter to hold here than through the app.
+    //!
+    //! The fixture beside the executable has to fill both slots to prove the E2E criteria at all, so
+    //! it cannot also be the module that fills neither. These drive fabricated tables instead: a
+    //! table is `#[repr(C)]` and a slot is a nullable function pointer, so one built here is exactly
+    //! what a module's own compilation hands over. See docs/module-lifecycle-tasks.md §6.
+
+    use super::{tell_one, Edge, HostCtx};
+    use std::ffi::c_void;
+    use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
+    use std::sync::Mutex;
+    use sublore_module_api::{
+        SubloreCell, SubloreCue, SubloreDocument, SubloreHost, SubloreModule, SubloreProposal,
+        SubloreStr, SUBLORE_CELL_TEXT, SUBLORE_ERR_DENIED, SUBLORE_ERR_NOTHING_OPEN, SUBLORE_OK,
+        SUBLORE_PROPOSAL_SET_CUE_TEXT,
+    };
+    use sublore_project::records::Project;
+
+    /// The id the checks arm with, and the file name it is derived from.
+    const NAME: &str = "sublore_module_fake.so";
+    const STORAGE: &str = "fake";
+
+    /// The table a fake module reaches the host through, exactly as a real one keeps it from `load`.
+    static HOST: AtomicPtr<SubloreHost> = AtomicPtr::new(std::ptr::null_mut());
+
+    /// What every fake below wrote down, as a check reads it back. One lock rather than one counter
+    /// each, so the order the modules were told in is in the record too.
+    static SAID: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    /// The host table's checks are process-wide through `HOST`, so these run one at a time.
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    fn note(line: impl Into<String>) {
+        if let Ok(mut held) = SAID.lock() {
+            held.push(line.into());
+        }
+    }
+
+    fn taken() -> Vec<String> {
+        SAID.lock()
+            .map(|mut held| std::mem::take(&mut *held))
+            .unwrap_or_default()
+    }
+
+    /// Arm `HOST` with a table over `ctx` and answer a guard that disarms it again.
+    ///
+    /// The box is leaked for the length of the check rather than dropped under the fakes: a table a
+    /// module still holds a pointer to is exactly what must not go away, and a check that freed it
+    /// would be checking a use-after-free rather than an edge.
+    fn arm(ctx: &HostCtx) {
+        let table = Box::leak(Box::new(super::host::table(ctx)));
+        HOST.store(table as *mut SubloreHost, Ordering::Release);
+    }
+
+    fn host<'a>() -> &'a SubloreHost {
+        let table = HOST.load(Ordering::Acquire);
+        assert!(!table.is_null(), "the check armed the host table first");
+        unsafe { &*table }
+    }
+
+    /// A directory of this check's own, and a project inside it.
+    fn project(tag: &str) -> (std::path::PathBuf, Option<Project>) {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos())
+            .unwrap_or(0);
+        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "sublore-module-edge-{tag}-{}-{nanos}-{unique}",
+            std::process::id()
+        ));
+        let folder = dir.join("Series");
+        std::fs::create_dir_all(&folder).expect("the project folder should be creatable");
+        let project = Project::create(&folder, "A series", std::time::SystemTime::now())
+            .expect("a project should be made");
+        (dir, Some(project))
+    }
+
+    /// One instance pointer that is not null and that no fake below dereferences.
+    fn instance() -> *mut c_void {
+        std::ptr::NonNull::<u8>::dangling().as_ptr().cast()
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // The fakes. Each writes down that it was called, and nothing else.
+
+    unsafe extern "C" fn opened_notes(_ctx: *mut c_void, key: i64) -> i32 {
+        note(format!("opened {key}"));
+        SUBLORE_OK
+    }
+
+    unsafe extern "C" fn closing_notes(_ctx: *mut c_void) -> i32 {
+        note("closing");
+        SUBLORE_OK
+    }
+
+    unsafe extern "C" fn opened_refuses(_ctx: *mut c_void, key: i64) -> i32 {
+        note(format!("first refused {key}"));
+        SUBLORE_ERR_DENIED
+    }
+
+    unsafe extern "C" fn opened_after(_ctx: *mut c_void, key: i64) -> i32 {
+        note(format!("second told {key}"));
+        SUBLORE_OK
+    }
+
+    /// Write into this module's own table from inside the edge, and write down the code.
+    unsafe extern "C" fn opened_stores(_ctx: *mut c_void, _key: i64) -> i32 {
+        note(format!("opened stored {}", unsafe { store() }));
+        SUBLORE_OK
+    }
+
+    unsafe extern "C" fn closing_stores(_ctx: *mut c_void) -> i32 {
+        note(format!("closing stored {}", unsafe { store() }));
+        SUBLORE_OK
+    }
+
+    /// One statement in the module's own tables, through the host, and the code it answered.
+    unsafe fn store() -> i32 {
+        let table = host();
+        let Some(run) = table.db_run else {
+            return SUBLORE_ERR_DENIED;
+        };
+        unsafe {
+            run(
+                table.ctx,
+                SubloreStr::borrowed("CREATE TABLE IF NOT EXISTS m_fake_notes (id INTEGER)"),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                None,
+            )
+        }
+    }
+
+    /// Ask for everything a lifecycle call is not lent, and write down what each one answered.
+    unsafe extern "C" fn opened_asks_for_everything(_ctx: *mut c_void, _key: i64) -> i32 {
+        let table = host();
+        let mut document = SubloreDocument {
+            format: 0,
+            cue_count: 0,
+            revision: 0,
+            dirty: 0,
+            path: SubloreStr::borrowed(""),
+        };
+        let asked = table
+            .document
+            .map(|call| unsafe { call(table.ctx, &mut document) });
+        note(format!("document {asked:?}"));
+
+        let mut cue = SubloreCue {
+            start_ms: 0,
+            end_ms: 0,
+            text: SubloreStr::borrowed(""),
+            is_comment: 0,
+            has_number: 0,
+            number: 0,
+        };
+        let asked = table
+            .cue_at
+            .map(|call| unsafe { call(table.ctx, 0, &mut cue) });
+        note(format!("cue_at {asked:?}"));
+
+        let proposal = SubloreProposal {
+            kind: SUBLORE_PROPOSAL_SET_CUE_TEXT,
+            revision: 0,
+            cue: 0,
+            text: SubloreStr::borrowed("anything"),
+        };
+        let asked = table
+            .propose
+            .map(|call| unsafe { call(table.ctx, &proposal) });
+        note(format!("propose {asked:?}"));
+
+        let asked = table.panel_begin.map(|call| unsafe { call(table.ctx, 1) });
+        note(format!("panel_begin {asked:?}"));
+
+        let cells = [SubloreCell {
+            kind: SUBLORE_CELL_TEXT,
+            text: SubloreStr::borrowed("a row"),
+            number: 0,
+            r#ref: 1,
+        }];
+        let asked = table
+            .panel_row
+            .map(|call| unsafe { call(table.ctx, cells.as_ptr(), cells.len()) });
+        note(format!("panel_row {asked:?}"));
+
+        let asked = table.panel_end.map(|call| unsafe { call(table.ctx) });
+        note(format!("panel_end {asked:?}"));
+
+        if let Some(call) = table.status {
+            unsafe { call(table.ctx, SubloreStr::borrowed("working")) };
+        }
+        if let Some(call) = table.progress {
+            unsafe { call(table.ctx, 1, 2) };
+        }
+        let asked = table.should_cancel.map(|call| unsafe { call(table.ctx) });
+        note(format!("should_cancel {asked:?}"));
+        SUBLORE_OK
+    }
+
+    // ------------------------------------------------------------------------------------------
+
+    fn table_with(
+        opened: Option<unsafe extern "C" fn(*mut c_void, i64) -> i32>,
+        closing: Option<unsafe extern "C" fn(*mut c_void) -> i32>,
+    ) -> SubloreModule {
+        SubloreModule {
+            project_opened: opened,
+            project_closing: closing,
+            ..SubloreModule::empty()
+        }
+    }
+
+    fn tell(ctx: &HostCtx, table: &SubloreModule, open: &mut Option<Project>, edge: Edge) {
+        tell_one(
+            ctx,
+            NAME,
+            table,
+            instance(),
+            Some(open),
+            Some(STORAGE.to_owned()),
+            edge,
+        );
+    }
+
+    #[test]
+    fn a_table_with_neither_slot_filled_is_never_called() {
+        // The rule the house style names: read the slot before calling it. A null read and called is
+        // undefined behaviour, so the mutation that removes the read aborts rather than reddens, and
+        // that abort is this check's evidence.
+        let _serial = SERIAL.lock().unwrap_or_else(|held| held.into_inner());
+        let (dir, mut open) = project("neither");
+        let ctx = HostCtx::new();
+        arm(&ctx);
+        let empty = SubloreModule::empty();
+
+        tell(&ctx, &empty, &mut open, Edge::Opened(77));
+        tell(&ctx, &empty, &mut open, Edge::Closing);
+
+        assert!(taken().is_empty(), "an unfilled slot is no call at all");
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_table_with_one_of_the_two_filled_gets_that_one_and_only_that_one() {
+        // Wanting one edge and not the other is not a defect, so the other is silence.
+        let _serial = SERIAL.lock().unwrap_or_else(|held| held.into_inner());
+        let (dir, mut open) = project("one-of-two");
+        let ctx = HostCtx::new();
+        arm(&ctx);
+
+        let opens_only = table_with(Some(opened_notes), None);
+        tell(&ctx, &opens_only, &mut open, Edge::Opened(11));
+        tell(&ctx, &opens_only, &mut open, Edge::Closing);
+        assert_eq!(taken(), vec!["opened 11"]);
+
+        let closes_only = table_with(None, Some(closing_notes));
+        tell(&ctx, &closes_only, &mut open, Edge::Opened(11));
+        tell(&ctx, &closes_only, &mut open, Edge::Closing);
+        assert_eq!(taken(), vec!["closing"]);
+
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_module_refusing_an_edge_does_not_stop_the_one_after_it() {
+        // The user asked for the project, so a refusal is a warn line and the round carries on.
+        let _serial = SERIAL.lock().unwrap_or_else(|held| held.into_inner());
+        let (dir, mut open) = project("refuses");
+        let ctx = HostCtx::new();
+        arm(&ctx);
+
+        let first = table_with(Some(opened_refuses), None);
+        let second = table_with(Some(opened_after), None);
+        tell(&ctx, &first, &mut open, Edge::Opened(5));
+        tell(&ctx, &second, &mut open, Edge::Opened(5));
+
+        assert_eq!(taken(), vec!["first refused 5", "second told 5"]);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_module_reads_its_own_storage_from_inside_both_edges() {
+        // Why `project_opened` runs after the slot is filled and `project_closing` before it is
+        // emptied: a module's per-project setup has to have somewhere to read, and its last write
+        // somewhere to land. A call made on the other side of the change is lent no project and
+        // answers that nothing is open.
+        let _serial = SERIAL.lock().unwrap_or_else(|held| held.into_inner());
+        let (dir, mut open) = project("storage");
+        let ctx = HostCtx::new();
+        arm(&ctx);
+
+        let stores = table_with(Some(opened_stores), Some(closing_stores));
+        tell(&ctx, &stores, &mut open, Edge::Opened(9));
+        tell(&ctx, &stores, &mut open, Edge::Closing);
+        assert_eq!(
+            taken(),
+            vec![
+                format!("opened stored {SUBLORE_OK}"),
+                format!("closing stored {SUBLORE_OK}")
+            ]
+        );
+
+        // And the same call with nothing in the slot says so, which is what the mutation produces.
+        let mut nothing = None;
+        tell(&ctx, &stores, &mut nothing, Edge::Opened(9));
+        assert_eq!(
+            taken(),
+            vec![format!("opened stored {SUBLORE_ERR_NOTHING_OPEN}")]
+        );
+
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_edge_is_lent_the_project_and_refused_the_session_and_the_panels() {
+        // The nothing-open answer comes before any denial, because "there is nothing to read" is a
+        // different fact from "you may not read it", and `host.rs` already orders them that way.
+        let _serial = SERIAL.lock().unwrap_or_else(|held| held.into_inner());
+        let (dir, mut open) = project("lent");
+        let ctx = HostCtx::new();
+        arm(&ctx);
+
+        let asks = table_with(Some(opened_asks_for_everything), None);
+        tell(&ctx, &asks, &mut open, Edge::Opened(3));
+
+        assert_eq!(
+            taken(),
+            vec![
+                format!("document Some({SUBLORE_ERR_NOTHING_OPEN})"),
+                format!("cue_at Some({SUBLORE_ERR_NOTHING_OPEN})"),
+                format!("propose Some({SUBLORE_ERR_NOTHING_OPEN})"),
+                format!("panel_begin Some({SUBLORE_ERR_DENIED})"),
+                format!("panel_row Some({SUBLORE_ERR_DENIED})"),
+                format!("panel_end Some({SUBLORE_ERR_DENIED})"),
+                // Nobody has asked for anything, which is H8's rule for every call with no
+                // activation behind it.
+                "should_cancel Some(0)".to_owned(),
+            ]
+        );
+
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_module_whose_create_failed_is_skipped_rather_than_called_through_a_null() {
+        let _serial = SERIAL.lock().unwrap_or_else(|held| held.into_inner());
+        let (dir, mut open) = project("no-instance");
+        let ctx = HostCtx::new();
+        arm(&ctx);
+
+        let filled = table_with(Some(opened_notes), Some(closing_notes));
+        tell_one(
+            &ctx,
+            NAME,
+            &filled,
+            std::ptr::null_mut(),
+            Some(&mut open),
+            Some(STORAGE.to_owned()),
+            Edge::Opened(1),
+        );
+        assert!(taken().is_empty(), "there is no instance to call");
+
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

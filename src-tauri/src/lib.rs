@@ -805,9 +805,13 @@ fn shutdown_video(app_handle: &AppHandle) {
 /// Close the project database on the way out, so a normal quit checkpoints its WAL. Idempotent
 /// for the same reason as above.
 fn shutdown_project(app_handle: &AppHandle) {
-    if let Some(state) = app_handle.try_state::<project::ProjectState>() {
-        state.shutdown();
-    }
+    let Some(state) = app_handle.try_state::<project::ProjectState>() else {
+        return;
+    };
+    // Quit is a close, and the module is told here rather than from `Held::drop`: `destroy` is not
+    // a close, and a module that flushes on `project_closing` has to have somewhere to flush to,
+    // which means before the database handle goes. See docs/module-lifecycle-tasks.md §2.
+    project::across_edges(app_handle, &state.handle(), || state.shutdown());
 }
 
 #[cfg(test)]

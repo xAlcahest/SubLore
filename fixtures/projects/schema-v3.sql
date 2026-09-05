@@ -1,0 +1,5 @@
+table|episode_files|episode_files|CREATE TABLE episode_files ( id INTEGER PRIMARY KEY, episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE, role TEXT NOT NULL CHECK (role IN ('media', 'source', 'target')), path TEXT NOT NULL, byte_length INTEGER, modified_at INTEGER, added_at INTEGER NOT NULL, UNIQUE (episode_id, path) )
+table|episodes|episodes|CREATE TABLE episodes ( id INTEGER PRIMARY KEY, series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, title TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE (series_id, ordinal) )
+table|module_schema|module_schema|CREATE TABLE module_schema ( module_id TEXT PRIMARY KEY, version INTEGER NOT NULL, updated_at INTEGER NOT NULL )
+table|project_identity|project_identity|CREATE TABLE project_identity ( id INTEGER PRIMARY KEY CHECK (id = 1), project_key INTEGER NOT NULL )
+table|series|series|CREATE TABLE series ( id INTEGER PRIMARY KEY CHECK (id = 1), title TEXT NOT NULL, created_at INTEGER NOT NULL )
