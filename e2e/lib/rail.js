@@ -93,16 +93,23 @@ async function willReopen() {
  *
  * The guard here used to be `.rail__project` in the DOM, which lost the race the whole of this file
  * exists to win: a `before` that ran before the restore painted returned having closed nothing, and
- * the project landed two tests later. See docs/restore-race.md in the meta repository.
+ * the project landed two tests later. See docs/restore-race.md in the meta repository. It then used
+ * the launch's answer alone, which lost a second way: a project opened later in the same session is
+ * not one the launch remembered. Both readings are needed and neither is enough.
  */
 export async function closeAnyOpenProject(toplevel) {
-  if (!(await willReopen())) {
+  // The launch's own answer decides only whether the rail is worth waiting for. A project this
+  // session opened after the launch is one the launch never mentioned, so treating "nothing to
+  // reopen" as "nothing to close" leaves it open: that is the same guard answering the wrong
+  // question, which is the defect this file was written for, one step over.
+  if (await willReopen()) {
+    await waitFor(() => present(".rail__project"), {
+      timeout: 20000,
+      message: "the project the app said it was reopening to reach the rail",
+    });
+  } else if (!(await present(".rail__project"))) {
     return;
   }
-  await waitFor(() => present(".rail__project"), {
-    timeout: 20000,
-    message: "the project the app said it was reopening to reach the rail",
-  });
   await openProjectMenu(toplevel);
   await chooseRailItem(toplevel, "close-project");
   await confirmRailDialog(toplevel);
