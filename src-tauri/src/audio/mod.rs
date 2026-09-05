@@ -412,7 +412,16 @@ pub async fn audio_switch_track(
         }
         // The job in flight for the old track is superseded by this one, which is what the slot
         // already does for any other media or stream.
-        start_job(&app, PathBuf::from(media), ff_index)?;
+        if let Err(error) = start_job(&app, PathBuf::from(media), ff_index) {
+            // Said out loud, because it is the one refusal a user sees as nothing happening: the
+            // slot frees itself after the job's own last line, so a switch back to the track that
+            // just finished lands in that window and is refused. See BACKLOG.md N27.
+            log::warn!(
+                "waveform: the switch to audio track {id} started no job: {}",
+                error.detail
+            );
+            return Err(error);
+        }
         Ok(AudioTrackList::as_switched(tracks, id))
     })
     .await
