@@ -409,7 +409,19 @@ async function derivedFloor() {
  */
 async function settleAt(id, ask, height, took) {
   askForWindowSize(id, ask, height);
-  waitForWindowSize(id, took, height);
+  try {
+    waitForWindowSize(id, took, height);
+  } catch (refused) {
+    // The page's own width beside X's, because the floor is only put back while the page reads
+    // itself narrower than it (`useWindowFloor.ts`), and a disagreement between the two is
+    // invisible from the X side alone. See the CI failure on 57c1a7f.
+    const page = await browser.execute(() => ({
+      inner: window.innerWidth,
+      floor: Number(document.querySelector(".shell")?.dataset.minimumWidth ?? -1),
+      ratio: window.devicePixelRatio,
+    }));
+    throw new Error(`${refused.message}\nthe page reads ${JSON.stringify(page)}`);
+  }
   await waitFor(
     async () => ((await browser.execute(() => window.innerWidth)) === took ? 1 : null),
     {
