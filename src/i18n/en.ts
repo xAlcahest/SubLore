@@ -28,6 +28,8 @@ export const en = {
     },
     timing: {
       title: "Timing",
+      prevCue: "Previous line",
+      nextCue: "Next line",
       startToPlayhead: "Set start to playhead",
       endToPlayhead: "Set end to playhead",
       toCueStart: "Jump to cue start",
@@ -35,9 +37,17 @@ export const en = {
       selectAtPlayhead: "Select cue at playhead",
       /** The 500 ms is in the label on purpose: the key says what it will do before you press it. */
       playLine: "Play line",
+      /** The pair differs only while a boundary is being dragged: this one plays where the hand has
+       * put it, and Play line plays what the document still holds (interface-spec 5.9). */
+      playSelection: "Play selection",
+      stop: "Stop playing",
       playBefore: "Play 500 ms before line",
       playAfter: "Play 500 ms after line",
+      playFirst: "Play first 500 ms of line",
+      playLast: "Play last 500 ms of line",
       playToEnd: "Play from line start to the end",
+      leadIn: "Add lead-in",
+      leadOut: "Add lead-out",
       startEarlier: "Start 10 ms earlier",
       startLater: "Start 10 ms later",
       endEarlier: "End 10 ms earlier",
@@ -46,6 +56,8 @@ export const en = {
     view: {
       title: "View",
       waveform: "Waveform",
+      centreOnCue: "Centre the waveform on the current line",
+      followCue: "Follow the current line",
       subtitles: "Subtitles on video",
       /** One of the five interface size radio items (S1). `{percent}` is a whole number. */
       scale: "{percent}%",
@@ -263,6 +275,28 @@ export const en = {
       commandFailed: "Sublore could not finish that action. Restart Sublore if it happens again.",
     },
   },
+  /**
+   * The words on the waveform panel's own strip. Short because the strip sits in a column that can
+   * be dragged narrow; each button carries the command's full label as its title and its accessible
+   * name, so nothing here is the only place a control is named.
+   */
+  wavebar: {
+    prevCue: "Prev",
+    nextCue: "Next",
+    playSelection: "Sel",
+    playLine: "Line",
+    stop: "Stop",
+    playBefore: "Before",
+    playAfter: "After",
+    playFirst: "First",
+    playLast: "Last",
+    playToEnd: "To end",
+    leadIn: "Lead in",
+    leadOut: "Lead out",
+    centreOnCue: "Centre",
+    followCue: "Follow",
+  },
+
   waveform: {
     sash: "Waveform height",
     canvas: "Waveform, arrows to scroll, plus and minus to zoom",

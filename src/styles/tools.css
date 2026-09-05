@@ -84,13 +84,29 @@
  * The waveform, above the current line (M2.4 W5). It is absent until a job produces its first
  * chunk: a panel with no provider takes no space, and an empty one is the placeholder the layout
  * document refuses.
+ *
+ * A column: the ruler's band, then the wave, then the panel's own strip. `overflow: hidden` is the
+ * guard that nothing inside it can ever spill past the edge the sash drags.
  */
 .waveform {
   display: flex;
   flex: none;
+  flex-direction: column;
   height: 128px;
+  overflow: hidden;
   border-bottom: 1px solid var(--line);
   background: var(--bg-media);
+}
+
+/* The ruler's own band, above the body. It is a canvas of its own so that the body's height stays
+   the wave's: everything the wave is drawn against is measured from the middle of that box. Its
+   height is written inline, from the type it actually draws (interface-spec 5.3). */
+.waveform__ruler {
+  display: block;
+  flex: none;
+  width: 100%;
+  cursor: ew-resize;
+  font-size: 0.6875rem;
 }
 
 /* Where the panel would be when the media carries no audio (decision 24 E3). A line of prose, in
@@ -107,6 +123,54 @@
    changes the backing store rather than stretching what was already drawn. */
 .waveform__canvas {
   display: block;
+  flex: 1 1 0;
+  min-height: 0;
   width: 100%;
-  height: 100%;
+  font-size: 0.6875rem;
+}
+
+/*
+ * The panel's own strip of controls, under the wave and inside the panel, which is where the
+ * reference puts it (`src/audio_box.cpp:104-107`). One row at every width: the panel's height is
+ * what the sash stores and what three checks measure, so a strip that wrapped would take that
+ * height off the wave a line at a time. Fourteen text buttons are wider than a narrow tools column,
+ * so the row scrolls sideways instead of growing.
+ */
+.wavebar {
+  display: flex;
+  flex: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+  background: var(--bg-panel);
+  scrollbar-width: thin;
+}
+
+.wavebar__button {
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-sunken);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.wavebar__button:disabled {
+  color: var(--ink-faint);
+}
+
+/* A toggle drawn as a pressed button, exactly as the main toolbar draws one (interface-spec 4). */
+.wavebar__button[aria-pressed="true"] {
+  background: var(--accent-bg);
+}
+
+.wavebar__divider {
+  width: 1px;
+  height: 0.9rem;
+  background: var(--line-strong);
 }

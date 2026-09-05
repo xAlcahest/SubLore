@@ -118,6 +118,13 @@ function asMillis(timecode) {
  *
  * One row of the backing store is enough: a marker runs the full height, so any row it crosses
  * carries it. The colours come from the tokens the drawing reads, never from a copy here.
+ *
+ * The row read is the middle one rather than the top. Every drawn boundary now carries a triangular
+ * foot at each end, pointing into its own line's span, so the top row of the end marker's column is
+ * painted in the marker's colour for six CSS pixels to its left and "the first column in that
+ * colour" would be the foot's tip instead of the marker. At the middle there is nothing but the
+ * marker: the neighbouring lines' boundaries are the same shape but a different colour, far enough
+ * from both of these for the tolerance below.
  */
 function markerColumns() {
   return browser.execute(() => {
@@ -130,7 +137,8 @@ function markerColumns() {
       const hex = root.getPropertyValue(name).trim().replace("#", "");
       return [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16));
     };
-    const row = canvas.getContext("2d").getImageData(0, 0, canvas.width, 1).data;
+    const middle = Math.floor(canvas.height / 2);
+    const row = canvas.getContext("2d").getImageData(0, middle, canvas.width, 1).data;
     const find = (want) => {
       for (let x = 0; x < canvas.width; x += 1) {
         const at = x * 4;
@@ -359,13 +367,61 @@ describe("dragging a cue boundary on the waveform", () => {
     expect(readFileSync(copy).equals(openedBytes)).toBe(true);
   });
 
-  it("ignores a press that is nowhere near a boundary", async () => {
-    await watchCommands();
-    await dragColumns(toplevel, nowhereNear, -travel);
-    // Nothing crossed the boundary, which is what "the press did nothing" has to mean.
-    expect(await takeCommands()).toEqual([]);
-    const rows = await gridRows();
-    expect([rows[1].start, rows[1].end]).toEqual([SECOND_START, SECOND_END]);
+  /**
+   * A12 of docs/audio-panel-tasks.md, and the gesture that replaced the one this test used to make.
+   *
+   * Until 2026-09-05 a press away from both boundaries did nothing, and this test asserted that.
+   * The reference moves the start to the press and hands the end to the drag, so one gesture times
+   * the line from scratch (`src/audio_timing_dialogue.cpp:604-615`), and the old assertion was a
+   * contract for behaviour the reference contradicts. It is replaced, not weakened: what is checked
+   * is where both boundaries land, which is a stronger statement than "nothing happened".
+   */
+  it("times the line from scratch from a press away from either boundary", async () => {
+    const pressAt = Math.round(columns.width * 0.6);
+    const releaseAt = Math.round(columns.width * 0.7);
+    expect(pressAt - columns.end).toBeGreaterThan(GRAB_COLUMNS);
+    expect(releaseAt).toBeGreaterThan(pressAt);
+    // Both landings are clear of every other cue's boundaries by more than the snap distance, so
+    // what the release writes is where the hand was and not where a snap pulled it. Taken off the
+    // grid rather than written down, because the panel's width is not this file's to choose.
+    const neighbours = (await gridRows())
+      .filter((_, index) => index !== 1)
+      .flatMap((row) => [asMillis(row.start), asMillis(row.end)])
+      .map((ms) => ms / msPerColumn);
+    expect(neighbours.length).toBeGreaterThan(0);
+    for (const at of neighbours) {
+      expect(Math.abs(pressAt - at)).toBeGreaterThan(GRAB_COLUMNS);
+      expect(Math.abs(releaseAt - at)).toBeGreaterThan(GRAB_COLUMNS);
+    }
+
+    await dragColumns(toplevel, pressAt, releaseAt - pressAt);
+
+    const rows = await waitFor(
+      async () => {
+        const now = await gridRows();
+        return now[1]?.start !== SECOND_START ? now : null;
+      },
+      { timeout: 20000, message: "the second row to be retimed by the press and the drag" },
+    );
+    expect(Math.abs(asMillis(rows[1].start) - pressAt * msPerColumn)).toBeLessThan(
+      msPerColumn * 1.5,
+    );
+    expect(Math.abs(asMillis(rows[1].end) - releaseAt * msPerColumn)).toBeLessThan(
+      msPerColumn * 1.5,
+    );
+    expect(readFileSync(copy).equals(openedBytes)).toBe(true);
+
+    // One undo puts the whole gesture back, and the checks below open on the fixture's own times.
+    await clickElement(toplevel, ".toolbar__edit-undo");
+    const back = await waitFor(
+      async () => {
+        const now = await gridRows();
+        return now[1]?.start === SECOND_START ? now : null;
+      },
+      { timeout: 20000, message: "one undo to put the second row back" },
+    );
+    expect(back[1].end).toBe(SECOND_END);
+    expect(await disabledOf(".toolbar__edit-undo")).toBe(true);
   });
 
   it("refuses a drag that would leave the end at or before the start", async () => {

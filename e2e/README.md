@@ -473,6 +473,41 @@ what that check asserts — that no field ever holds a path — is unchanged. It
 Ctrl+Z and Ctrl+S inside either belong to the document rather than to the webview, which is the
 distinction `editor.spec.js`'s ctrl+z check turns on.
 
+Added by the audio panel pass of 2026-09-05: `.waveform__ruler` and `.wavebar`, `.wavebar__button`,
+`.wavebar__divider` and `.wavebar__<command>`, where `<command>` is the command token the way the
+toolbar's own classes carry it. The strip is deliberately not `.toolbar__button`: `command-registry`
+and `chrome.spec.js` both walk every `.toolbar__button` in the document as one ordered strip, and a
+second bar under that name would join it.
+
+Both live inside `.waveform`, which is why `shell.spec.js`'s list of the tools column's children did
+not change: the ruler above the wave, the strip below it, and the whole panel still exactly the
+height the layout stores. That is also the reason the strip is one row that scrolls sideways rather
+than a row that wraps. A wrapping strip takes the height it needs out of the panel, and the panel's
+height is pinned at 128 and at a floor of 64 by `waveform-sash.spec.js`, `dividers.spec.js` and
+`interface-scale.spec.js`, so every extra line would come off the wave or off the current line's own
+floor.
+
+The ruler is a canvas of its own rather than a band inside `.waveform__canvas`, and that is a
+contract, not an implementation detail. `waveform.spec.js` and `waveform-view.spec.js` read the wave
+as a distance from `canvas.height / 2` and `waveform-follow.spec.js` finds the playhead in row 0, so
+anything else drawn inside that backing store changes what all three measure.
+
+`waveform-timing.spec.js` and `waveform-panel.spec.js` read the markers at the middle row of the
+backing store, not at row 0: every drawn boundary, the neighbouring lines' included, carries a
+triangular foot at each end pointing into its own line's span, so row 0 of the end marker's column
+is the foot's tip six CSS pixels to its left.
+
+`waveform-panel.spec.js` reads the ruler's ticks one row above the band's own bottom rule, and works
+out how thick that rule is from `window.devicePixelRatio`. Every size the two canvases draw is a CSS
+pixel multiplied by that ratio, because both backing stores are sized in device pixels and neither
+context is scaled; the rule itself is the full width at every zoom, so it is the one row that can
+never answer "did the ruler change".
+
+Three tokens the pixel checks read by name: `--marker-other` for the neighbouring lines' boundaries,
+and `--wave-other`, `--wave-other-selected` and `--wave-current` for the three background tints a
+line's own span can carry. Each is far enough from `--accent`, `--marker-start` and `--marker-end`
+that the colour searches above cannot confuse them.
+
 `shell.spec.js` asserts the waveform's absence as "nothing else takes space in `.shell__tools`",
 never as a missing selector, and shows the reading catching a panel it inserts itself before it
 reads the real column. A waveform shipped under another name walks past the second and not past the
