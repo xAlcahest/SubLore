@@ -132,6 +132,22 @@ export const en = {
     loaded: "{file}, loaded",
     /** In About, when the launch asked for none. */
     skipped: "Modules were not looked for: the app was started with --no-modules.",
+    /**
+     * While a module's own work runs. Every word here is about work and about stopping it: the
+     * core has no name for what any module does, and none of these may acquire one.
+     */
+    work: {
+      /** Shown until the module says something of its own, and never instead of what it says. */
+      working: "Working…",
+      stop: "Stop",
+      count: "{done} of {total}",
+    },
+    /** The table a module fills. About tables, for the same reason. */
+    panel: {
+      /** A percent cell, whose number the module gave and the core does not check. */
+      percent: "{value}%",
+      close: "Close",
+    },
   },
   about: {
     title: "About Sublore",

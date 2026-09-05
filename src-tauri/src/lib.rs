@@ -225,6 +225,7 @@ pub fn run() -> tauri::Result<()> {
             video::video_play_range,
             video::video_set_region,
             video::video_set_layers,
+            modules::module_cancel,
             modules::module_contributions,
             modules::module_invoke,
             modules::module_report,

@@ -6,6 +6,8 @@ import CueList from "./components/CueList";
 import CurrentLine from "./components/CurrentLine";
 import FindBar, { type FindMode } from "./components/FindBar";
 import MenuBar from "./components/MenuBar";
+import ModulePanel from "./components/ModulePanel";
+import ModuleWorkBand from "./components/ModuleWorkBand";
 import ProjectRail from "./components/ProjectRail";
 import Sash from "./components/Sash";
 import StatusBar from "./components/StatusBar";
@@ -22,6 +24,8 @@ import { useLayout } from "./hooks/useLayout";
 import { useWindowFloor } from "./hooks/useWindowFloor";
 import { usePreview } from "./hooks/usePreview";
 import { useContributions, type Contribution } from "./hooks/useContributions";
+import { useModulePanels } from "./hooks/useModulePanels";
+import { useModuleWork } from "./hooks/useModuleWork";
 import { useModules, refusalLine } from "./hooks/useModules";
 import { useSearch, type SearchOutcome } from "./hooks/useSearch";
 import { useProject } from "./hooks/useProject";
@@ -54,6 +58,25 @@ import "./App.css";
  */
 function moduleCommandId(item: Contribution): CommandId {
   return `module.${item.module}-${item.id}`;
+}
+
+/**
+ * The panel a contributed item belongs to, or zero for one that belongs to none.
+ *
+ * A panel's own id is the primary row action, and an item whose parent is a panel is a secondary
+ * one: both send that panel's id, and everything else sends zero (module-abi.md 4.1).
+ */
+function panelOf(item: Contribution, all: Contribution[]): number {
+  if (item.kind === "panel") {
+    return item.id;
+  }
+  const parent = all.find(
+    (candidate) =>
+      candidate.kind === "panel" &&
+      candidate.module === item.module &&
+      candidate.id === item.parent,
+  );
+  return parent?.id ?? 0;
 }
 
 /*
@@ -179,7 +202,11 @@ export default function App() {
     (at, removed, inserted) => rowsMovedRef.current(at, removed, inserted),
     [],
   );
-  const subtitle = useSubtitleFile(onRowsMoved);
+  // What a module's activation puts on screen, and how far it has got while it runs. Two states,
+  // because a module may publish a table without doing anything long, and the reverse.
+  const modulePanels = useModulePanels();
+  const moduleWork = useModuleWork();
+  const subtitle = useSubtitleFile(onRowsMoved, modulePanels.publish);
   const preview = usePreview();
   const project = useProject();
   // A finished transcription becomes the open document, and the backend asks about unsaved work on
@@ -956,17 +983,26 @@ export default function App() {
           return selection.selected.size > 0;
       }
     })();
+    const panelId = panelOf(item, contributions);
     return {
       id: moduleCommandId(item),
       label: item.label,
       enabled,
       // The module's own id and the state the gesture carried, and nothing about what it does.
-      run: () => void subtitle.invokeModule(item.module, item.id, selection.active),
+      // The band comes down when this settles, which is the second of its two reasons to.
+      run: (row) =>
+        void subtitle
+          .invokeModule(item.module, item.id, selection.active, panelId, row)
+          .finally(moduleWork.clear),
     };
   }
 
+  // A panel is a command too, because activating one of its rows activates the panel: it is the
+  // primary row action, and it needs a registry record to be greyed and gated like any other.
   const contributedCommands = contributions
-    .filter((item) => item.kind === "menuItem" || item.kind === "menuTitle")
+    .filter(
+      (item) => item.kind === "menuItem" || item.kind === "menuTitle" || item.kind === "panel",
+    )
     .map(contributed);
 
   const commands: CommandRegistry = Object.fromEntries(
@@ -1271,6 +1307,36 @@ export default function App() {
             onClose={() => setFindMode(null)}
           />
         )}
+        {/* Beside the find band and the transcription one, in the region that gives up the
+          space: a panel a module filled, and the line its work draws while it runs. */}
+        {modulePanels.panels.map((panel) => {
+          const contribution = contributions.find(
+            (item) =>
+              item.kind === "panel" && item.module === panel.module && item.id === panel.panelId,
+          );
+          if (contribution === undefined) {
+            return null;
+          }
+          return (
+            <ModulePanel
+              key={`${panel.module}-${panel.panelId}`}
+              panel={panel}
+              title={contribution.label}
+              primary={moduleCommandId(contribution)}
+              actions={contributions
+                .filter(
+                  (item) =>
+                    item.kind === "menuItem" &&
+                    item.module === panel.module &&
+                    item.parent === panel.panelId,
+                )
+                .map(moduleCommandId)}
+              commands={commands}
+              onClose={() => modulePanels.close(panel.module, panel.panelId)}
+            />
+          );
+        })}
+        {moduleWork.running && <ModuleWorkBand work={moduleWork} />}
         {transcribeOpen && (
           <TranscribePanel
             mediaPath={state.path}

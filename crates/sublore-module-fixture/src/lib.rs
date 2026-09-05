@@ -1,10 +1,11 @@
 //! The module the loader is proved against, before any real one exists.
 //!
-//! It is not a paid module and holds nothing of one. It contributes one menu title with one item under
-//! it, which is the smallest contribution that exercises the parent link, and it calls back into
-//! the host from inside `describe` for the two slots the host has filled. Every slot neither side
-//! has filled stays null, which the interface allows on purpose: a slot the other side left empty
-//! is a refusal and never a jump, and both directions check before they call.
+//! It is not a paid module and holds nothing of one. It contributes one menu title with items
+//! under it and one panel, which is what exercises both parent links: an item under a title is a
+//! menu item, and an item under a panel is that panel's secondary row action. It calls back into
+//! the host from inside `describe` and from every one of its own activations. Every slot neither
+//! side has filled stays null, which the interface allows on purpose: a slot the other side left
+//! empty is a refusal and never a jump, and both directions check before they call.
 //!
 //! It stays after the real modules arrive, as the regression fixture for the interface itself.
 //!
@@ -18,10 +19,11 @@ use core::ffi::c_void;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
 use sublore_module_api::{
-    SubloreHost, SubloreInvocation, SubloreItem, SubloreItemFn, SubloreModule, SubloreProposal,
-    SubloreStr, SUBLORE_ABI_VERSION, SUBLORE_ENABLE_ALWAYS, SUBLORE_ERR_BAD_STRING,
+    SubloreCell, SubloreHost, SubloreInvocation, SubloreItem, SubloreItemFn, SubloreModule,
+    SubloreProposal, SubloreStr, SUBLORE_ABI_VERSION, SUBLORE_CELL_NUMBER, SUBLORE_CELL_PERCENT,
+    SUBLORE_CELL_TEXT, SUBLORE_ENABLE_ALWAYS, SUBLORE_ERR_BAD_STRING, SUBLORE_ERR_CANCELLED,
     SUBLORE_ERR_UNSUPPORTED, SUBLORE_FIND_SKIP_TAGS, SUBLORE_ITEM_MENU_ITEM,
-    SUBLORE_ITEM_MENU_TITLE, SUBLORE_LOG_INFO, SUBLORE_MODULE_SIZE, SUBLORE_OK,
+    SUBLORE_ITEM_MENU_TITLE, SUBLORE_ITEM_PANEL, SUBLORE_LOG_INFO, SUBLORE_MODULE_SIZE, SUBLORE_OK,
     SUBLORE_PROPOSAL_SET_CUE_TEXT,
 };
 
@@ -45,6 +47,32 @@ const REFUSED_ID: u32 = 3;
 const STALE_ID: u32 = 4;
 /// Writes a row into this module's own table, which is the only way to see storage from outside.
 const STORE_ID: u32 = 5;
+/// The panel, which is also the id a row's own activation arrives under (section 4.1).
+const PANEL_ID: u32 = 6;
+/// Fills the panel above with the two rows below.
+const FILL_ID: u32 = 7;
+/// A second action on a row. Its parent is the panel, which is what makes it the secondary one,
+/// and it arrives under its own id with the same `row`.
+const ROW_ACTION_ID: u32 = 8;
+/// Long enough work to report a progress, say something, and be stopped part way through.
+const LONG_ID: u32 = 9;
+
+/// The two rows the panel is filled with, as a handle and the three cells beside it.
+///
+/// The second handle is 2^53 plus one. A `u64` that large does not survive JSON's number, so a row
+/// that came back with the handle changed would fail here and nowhere else: this is the fixture for
+/// the decimal string the handle crosses as.
+const ROWS: [(u64, &str, i64, i64); 2] = [
+    (1, "The first row", 11, 25),
+    (9_007_199_254_740_993, "The second row", 22, 75),
+];
+
+/// How many steps the long item takes, and how long it waits between them.
+///
+/// The wait is here and not in a check: a person has to be able to reach the Stop button, and a
+/// spec waits on what it can see rather than on a clock.
+const LONG_STEPS: u64 = 40;
+const LONG_STEP_MS: u64 = 250;
 
 /// This module's own table, under the prefix the host derives from this file's name (section 4.7).
 ///
@@ -190,6 +218,46 @@ unsafe extern "C" fn describe(ctx: *mut c_void, sink: *mut c_void, push: Sublore
             label: SubloreStr::borrowed("Store a note"),
             icon: SubloreStr::borrowed(""),
         },
+        SubloreItem {
+            id: PANEL_ID,
+            kind: SUBLORE_ITEM_PANEL,
+            parent: 0,
+            enable_when: SUBLORE_ENABLE_ALWAYS,
+            // Not a layer. The core draws this panel under the grid, where it never covers the
+            // video, so the bit would be claiming something that is not true of it (section 5.4).
+            flags: 0,
+            label: SubloreStr::borrowed("Fixture rows"),
+            icon: SubloreStr::borrowed(""),
+        },
+        SubloreItem {
+            id: FILL_ID,
+            kind: SUBLORE_ITEM_MENU_ITEM,
+            parent: TITLE_ID,
+            enable_when: SUBLORE_ENABLE_ALWAYS,
+            flags: 0,
+            label: SubloreStr::borrowed("Fill the table"),
+            icon: SubloreStr::borrowed(""),
+        },
+        // The parent is the panel and not the title, which is the whole of what makes this the
+        // secondary row action: it is drawn on every row and never on the menu (section 4.1).
+        SubloreItem {
+            id: ROW_ACTION_ID,
+            kind: SUBLORE_ITEM_MENU_ITEM,
+            parent: PANEL_ID,
+            enable_when: SUBLORE_ENABLE_ALWAYS,
+            flags: 0,
+            label: SubloreStr::borrowed("Mark"),
+            icon: SubloreStr::borrowed(""),
+        },
+        SubloreItem {
+            id: LONG_ID,
+            kind: SUBLORE_ITEM_MENU_ITEM,
+            parent: TITLE_ID,
+            enable_when: SUBLORE_ENABLE_ALWAYS,
+            flags: 0,
+            label: SubloreStr::borrowed("Take a while"),
+            icon: SubloreStr::borrowed(""),
+        },
         // Last, and deliberately wrong: `enable_when` is left at zero, which is the value section
         // 5.2 says a module that forgot to set it sends. The host must refuse this item rather than
         // draw a control enabled when it should not be, and the check counts what reached the menu.
@@ -283,9 +351,119 @@ unsafe extern "C" fn invoke(
         // would be holding. The host has to refuse it and change nothing.
         STALE_ID => unsafe { rewrite_first_cue(at.revision.wrapping_sub(1)) },
         STORE_ID => unsafe { store_a_note() },
+        FILL_ID => unsafe { fill_the_panel() },
+        // A row of the panel was activated. The primary action is the panel's own id, so this is
+        // both `item_id` and `panel_id`, and the handle is the one this module gave that row.
+        PANEL_ID => unsafe { say_row("a row was activated", at.panel_id, at.row) },
+        // The secondary one, under its own id and with the same handle.
+        ROW_ACTION_ID => unsafe { say_row("a row action ran", ROW_ACTION_ID, at.row) },
+        LONG_ID => unsafe { take_a_while() },
         // An id this module never contributed.
         _ => SUBLORE_ERR_UNSUPPORTED,
     }
+}
+
+/// Put the two rows above into the panel, in one run.
+///
+/// # Safety
+/// Called only from inside a host call, with the table `load` was given.
+unsafe fn fill_the_panel() -> i32 {
+    let table = HOST.load(Ordering::Acquire);
+    if table.is_null() {
+        return SUBLORE_ERR_UNSUPPORTED;
+    }
+    let table = unsafe { &*table };
+    let (Some(begin), Some(push), Some(end)) =
+        (table.panel_begin, table.panel_row, table.panel_end)
+    else {
+        return SUBLORE_ERR_UNSUPPORTED;
+    };
+
+    let code = unsafe { begin(table.ctx, PANEL_ID) };
+    if code != SUBLORE_OK {
+        return code;
+    }
+    for (handle, text, number, percent) in ROWS {
+        let cells = [
+            SubloreCell {
+                kind: SUBLORE_CELL_TEXT,
+                text: SubloreStr::borrowed(text),
+                number: 0,
+                r#ref: handle,
+            },
+            SubloreCell {
+                kind: SUBLORE_CELL_NUMBER,
+                text: SubloreStr::borrowed(""),
+                number,
+                r#ref: handle,
+            },
+            SubloreCell {
+                kind: SUBLORE_CELL_PERCENT,
+                text: SubloreStr::borrowed(""),
+                number: percent,
+                r#ref: handle,
+            },
+        ];
+        // Safety: the cells and every string in them outlive this call, which is the whole of what
+        // section 2.1 asks of them.
+        let code = unsafe { push(table.ctx, cells.as_ptr(), cells.len()) };
+        if code != SUBLORE_OK {
+            return code;
+        }
+    }
+    // Closed, which is this module asserting the table is whole. A run left open publishes nothing.
+    unsafe { end(table.ctx) }
+}
+
+/// Log what a row activation carried, which is the evidence from outside that it arrived intact.
+///
+/// # Safety
+/// Called only from inside a host call, with the table `load` was given.
+unsafe fn say_row(what: &str, item: u32, row: u64) -> i32 {
+    let table = HOST.load(Ordering::Acquire);
+    if table.is_null() {
+        return SUBLORE_ERR_UNSUPPORTED;
+    }
+    let table = unsafe { &*table };
+    let Some(log) = table.log else {
+        return SUBLORE_ERR_UNSUPPORTED;
+    };
+    let said = format!("{what}: item {item} and row {row}");
+    unsafe { log(table.ctx, SUBLORE_LOG_INFO, SubloreStr::borrowed(&said)) };
+    SUBLORE_OK
+}
+
+/// Work long enough to be watched and stopped: a progress and a line per step, and a question.
+///
+/// # Safety
+/// Called only from inside a host call, with the table `load` was given.
+unsafe fn take_a_while() -> i32 {
+    let table = HOST.load(Ordering::Acquire);
+    if table.is_null() {
+        return SUBLORE_ERR_UNSUPPORTED;
+    }
+    let table = unsafe { &*table };
+    let (Some(log), Some(status), Some(progress), Some(should_cancel)) =
+        (table.log, table.status, table.progress, table.should_cancel)
+    else {
+        return SUBLORE_ERR_UNSUPPORTED;
+    };
+
+    for step in 1..=LONG_STEPS {
+        // Asked before the step is done, so the step the log names is the one it stopped at.
+        if unsafe { should_cancel(table.ctx) } != 0 {
+            let said = format!("stopped at step {step} of {LONG_STEPS}");
+            unsafe { log(table.ctx, SUBLORE_LOG_INFO, SubloreStr::borrowed(&said)) };
+            return SUBLORE_ERR_CANCELLED;
+        }
+        unsafe { progress(table.ctx, step, LONG_STEPS) };
+        let line = format!("step {step} of {LONG_STEPS}");
+        unsafe { status(table.ctx, SubloreStr::borrowed(&line)) };
+        std::thread::sleep(std::time::Duration::from_millis(LONG_STEP_MS));
+    }
+    let said = format!("finished all {LONG_STEPS} steps");
+    unsafe { log(table.ctx, SUBLORE_LOG_INFO, SubloreStr::borrowed(&said)) };
+    SUBLORE_OK
 }
 
 /// What one row of a counting statement said.

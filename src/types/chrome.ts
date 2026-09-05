@@ -28,6 +28,14 @@ type CommandArea =
 export type CommandId = `${CommandArea}.${string}`;
 
 /**
+ * The module's own handle for a panel row, carried back to it unread.
+ *
+ * A string, because the handle is a `u64` on the interface and one above 2^53 does not survive a
+ * JSON number. Nothing on this side parses it (module-abi.md 5.3).
+ */
+export type RowRef = string;
+
+/**
  * One command of the shell chrome. The menu bar and the toolbar draw the same records, so a command
  * that reaches one route reaches the other by construction. See docs T3.
  */
@@ -42,7 +50,15 @@ export type Command = {
   /** With `checked`, names the radio set this is one option of (interface-spec 2.2). */
   group?: string;
   enabled: boolean;
-  run: () => void;
+  /**
+   * What running it does, given the panel row it was run from.
+   *
+   * The argument is null everywhere but a panel: a menu item, a toolbar button and an accelerator
+   * carry no row. It is a parameter rather than a second kind of command because a row's controls
+   * have to reach the one gate below like everything else, and a gate that took no row would have
+   * forced a second entry point for them (decision 4, H8).
+   */
+  run: (row: RowRef | null) => void;
 };
 
 /**
@@ -71,10 +87,14 @@ export function commandToken(id: CommandId): string {
  * greyed item is refused the same way from a click, a toolbar press and a shortcut. This is
  * `invoke(id)` of interface-spec 2.3, renamed because `invoke` is already Tauri's IPC call.
  */
-export function runCommand(commands: CommandRegistry, id: CommandId): void {
+export function runCommand(
+  commands: CommandRegistry,
+  id: CommandId,
+  row: RowRef | null = null,
+): void {
   const command: Command | undefined = commands[id];
   if (command === undefined || !command.enabled) {
     return;
   }
-  command.run();
+  command.run(row);
 }

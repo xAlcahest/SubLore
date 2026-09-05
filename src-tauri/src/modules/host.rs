@@ -16,7 +16,8 @@
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
 use sublore_edit::diff::CueView;
@@ -25,21 +26,26 @@ use sublore_edit::plan::Edit;
 use sublore_edit::session::EditSession;
 use sublore_formats::SubtitleFormat;
 use sublore_module_api::{
-    SubloreCue, SubloreDocument, SubloreHitFn, SubloreHost, SubloreLine, SubloreLineFn,
-    SubloreProposal, SubloreRowFn, SubloreStr, SubloreValue, SubloreWorkFn, SUBLORE_ABI_MINOR,
-    SUBLORE_ERR_BAD_STRING, SUBLORE_ERR_DENIED, SUBLORE_ERR_NOTHING_OPEN, SUBLORE_ERR_NO_SUCH_CUE,
-    SUBLORE_ERR_PANIC, SUBLORE_ERR_STALE_REVISION, SUBLORE_ERR_STORAGE, SUBLORE_ERR_UNSUPPORTED,
-    SUBLORE_ERR_UNWRITABLE_TEXT, SUBLORE_ERR_WRONG_THREAD, SUBLORE_FIND_OPTIONS,
-    SUBLORE_FORMAT_ASS, SUBLORE_FORMAT_SRT, SUBLORE_FORMAT_VTT, SUBLORE_HOST_SIZE,
-    SUBLORE_LINE_FLAG_FILE_MISSING, SUBLORE_LOG_DEBUG, SUBLORE_LOG_ERROR, SUBLORE_LOG_INFO,
-    SUBLORE_LOG_WARN, SUBLORE_NO_CUE, SUBLORE_OK, SUBLORE_PROPOSAL_SET_CUE_TEXT,
+    SubloreCell, SubloreCue, SubloreDocument, SubloreHitFn, SubloreHost, SubloreLine,
+    SubloreLineFn, SubloreProposal, SubloreRowFn, SubloreStr, SubloreValue, SubloreWorkFn,
+    SUBLORE_ABI_MINOR, SUBLORE_ERR_BAD_STRING, SUBLORE_ERR_DENIED, SUBLORE_ERR_NOTHING_OPEN,
+    SUBLORE_ERR_NO_SUCH_CUE, SUBLORE_ERR_PANIC, SUBLORE_ERR_STALE_REVISION, SUBLORE_ERR_STORAGE,
+    SUBLORE_ERR_UNSUPPORTED, SUBLORE_ERR_UNWRITABLE_TEXT, SUBLORE_ERR_WRONG_THREAD,
+    SUBLORE_FIND_OPTIONS, SUBLORE_FORMAT_ASS, SUBLORE_FORMAT_SRT, SUBLORE_FORMAT_VTT,
+    SUBLORE_HOST_SIZE, SUBLORE_LINE_FLAG_FILE_MISSING, SUBLORE_LOG_DEBUG, SUBLORE_LOG_ERROR,
+    SUBLORE_LOG_INFO, SUBLORE_LOG_WARN, SUBLORE_NO_CUE, SUBLORE_OK, SUBLORE_PROPOSAL_SET_CUE_TEXT,
     SUBLORE_ROLE_SOURCE, SUBLORE_ROLE_TARGET, SUBLORE_VALUE_BLOB, SUBLORE_VALUE_INT,
     SUBLORE_VALUE_NULL, SUBLORE_VALUE_REAL, SUBLORE_VALUE_TEXT,
 };
 use sublore_project::model::FileRole;
 use sublore_project::module_store::{self, Cell, OpenTransaction, StoreRefusal};
 use sublore_project::records::{self, Project};
+use tauri::{AppHandle, Emitter};
 
+use super::{
+    cell_kind, CellDto, ModuleProgress, ModuleStatus, PanelDto, RowDto, EVENT_PROGRESS,
+    EVENT_STATUS,
+};
 use crate::log;
 use crate::subtitle::error::{SubtitleError, SubtitleErrorCode};
 use crate::subtitle::{check_revision, describe, guard_size, CuePatchDto};
@@ -50,6 +56,133 @@ use crate::subtitle::{check_revision, describe, guard_size, CuePatchDto};
 /// of annoyance CONTRIBUTING.md §3 puts a budget on. Cut on a character boundary, so what is
 /// written is still a string.
 const MAX_LOG_BYTES: usize = 4096;
+
+/// The most rows one panel run may push.
+///
+/// A budget, on the same footing as the cap above and for the same reason: the rows are the host's
+/// memory and the window's work, and a module that loops for ever has to cost a refusal rather than
+/// the process. Five times CONTRIBUTING.md §7's two-thousand-line document, so a table with one row
+/// per cue of an episode is nowhere near it.
+const MAX_PANEL_ROWS: usize = 10_000;
+
+/// What `should_cancel` answers. Two meanings only: zero keeps going, anything else stops.
+///
+/// Every code in the frozen list is positive (`sublore-module-api`), so a refusal returned here
+/// would read as "stop" whatever it said. It therefore says stop on purpose, and the one place that
+/// keeps going is the one with no user behind it: `create`, `describe` and `destroy` have no
+/// activation, so nobody has asked for anything.
+const CANCEL_KEEP_GOING: i32 = 0;
+const CANCEL_STOP: i32 = 1;
+
+/// What one activation lends beyond the two locks: the window to speak to while the call runs,
+/// the call's own id, the flag a Stop sets, and the panels this module may fill.
+///
+/// One field on the record rather than four, so "am I inside an activation" is one question, and
+/// its absence is the single refusal that covers `status`, `progress` and the three panel calls
+/// during `create`, `describe` and `destroy`.
+pub struct Activation {
+    window: Window,
+    call: u64,
+    /// Which module this is, by the index the window drew it from. Written onto every panel it
+    /// publishes, because the record is what a panel callback can reach and the module is not.
+    module: usize,
+    cancel: Arc<AtomicBool>,
+    /// The panel ids this module contributed. An id outside it is refused, so a module cannot fill
+    /// a panel it never described, nor one another module did.
+    panels: Vec<u32>,
+}
+
+impl Activation {
+    pub fn new(
+        app: AppHandle,
+        call: u64,
+        module: usize,
+        cancel: Arc<AtomicBool>,
+        panels: Vec<u32>,
+    ) -> Self {
+        Self {
+            window: Window::Live(app),
+            call,
+            module,
+            cancel,
+            panels,
+        }
+    }
+}
+
+/// Where a `status` and a `progress` go.
+///
+/// A named type over the window rather than the handle itself, and that is not indirection for its
+/// own sake: `AppHandle` is `AppHandle<Wry>`, nothing in a unit check can build one, and an
+/// activation that needed one would leave the two panel bodies and `should_cancel` with no check at
+/// all. The second variant exists only in a test build and keeps what was sent.
+enum Window {
+    Live(AppHandle),
+    #[cfg(test)]
+    Collected(Arc<Mutex<Vec<Said>>>),
+}
+
+/// One thing a module said while its work ran, as a check reads it back.
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Said {
+    Status(u64, String),
+    Progress(u64, u64, u64),
+}
+
+impl Window {
+    /// Emitting is best effort on purpose. A window that has gone is not a reason to refuse a
+    /// module's work, and the same `let _ =` is what `asr` does with its own four events.
+    fn status(&self, call: u64, message: String) {
+        match self {
+            Self::Live(app) => {
+                let _ = app.emit(
+                    EVENT_STATUS,
+                    ModuleStatus {
+                        call_id: call,
+                        message,
+                    },
+                );
+            }
+            #[cfg(test)]
+            Self::Collected(said) => {
+                if let Ok(mut held) = said.lock() {
+                    held.push(Said::Status(call, message));
+                }
+            }
+        }
+    }
+
+    fn progress(&self, call: u64, done: u64, total: u64) {
+        match self {
+            Self::Live(app) => {
+                let _ = app.emit(
+                    EVENT_PROGRESS,
+                    ModuleProgress {
+                        call_id: call,
+                        done,
+                        total,
+                    },
+                );
+            }
+            #[cfg(test)]
+            Self::Collected(said) => {
+                if let Ok(mut held) = said.lock() {
+                    held.push(Said::Progress(call, done, total));
+                }
+            }
+        }
+    }
+}
+
+/// The panel run a module has open, between its `panel_begin` and its `panel_end`.
+struct OpenPanel {
+    id: u32,
+    /// Fixed by the first row and held to by every row after it, so a ragged table cannot exist and
+    /// no number had to be picked for how wide one is.
+    width: Option<usize>,
+    rows: Vec<RowDto>,
+}
 
 /// What is true for the duration of one call into a module.
 struct InFlight {
@@ -94,6 +227,16 @@ struct InFlight {
     /// the window has to be told about. They are collected here rather than returned, because
     /// `propose` answers a code and the interface has no way back for a value (§2.2).
     proposed: Vec<CuePatchDto>,
+    /// The activation this call is, or none when the host called for its own reasons.
+    activation: Option<Activation>,
+    /// The panel run open right now. Nothing in it is published until `panel_end` closes it, which
+    /// is what makes a half filled table impossible rather than merely unlikely.
+    panel_open: Option<OpenPanel>,
+    /// The runs this call closed, in the order it closed them.
+    filled: Vec<PanelDto>,
+    /// The last pair `progress` emitted, so an exact repeat carries nothing and is dropped. A
+    /// repeat dropped and not a throttle: there is no clock here.
+    last_progress: Option<(u64, u64)>,
 }
 
 /// The host's own context: the value behind `SubloreHost::ctx`, handed to every module once and
@@ -124,6 +267,7 @@ impl HostCtx {
             session,
             project,
             storage,
+            activation,
         } = lent;
         // Recovered rather than refused: nothing but this assignment runs under this lock, so a
         // poisoning could only come from a panic elsewhere, and refusing for ever afterwards would
@@ -140,6 +284,10 @@ impl HostCtx {
             storage,
             open: None,
             proposed: Vec::new(),
+            activation,
+            panel_open: None,
+            filled: Vec::new(),
+            last_progress: None,
         });
         Entered {
             ctx: self,
@@ -208,6 +356,20 @@ impl HostCtx {
         .flatten()
     }
 
+    /// Read the activation this call is, on the thread it was armed from, or none.
+    ///
+    /// None means two different things to two callers and both are right: `should_cancel` reads it
+    /// as nobody having asked for anything, and the panel calls read it as a refusal, because a
+    /// panel filled outside an activation has no window waiting for it.
+    fn with_activation<R>(&self, read: impl FnOnce(&Activation) -> R) -> Option<R> {
+        self.with(|call| {
+            (call.thread == std::thread::current().id())
+                .then(|| call.activation.as_ref().map(read))
+                .flatten()
+        })
+        .flatten()
+    }
+
     /// Note the transaction now open, or that the one that was is finished.
     fn set_open(&self, open: Option<OpenTransaction>) {
         self.record(|call| call.open = open);
@@ -251,6 +413,7 @@ pub struct Lent<'a> {
     session: Option<&'a mut Option<EditSession>>,
     project: Option<&'a mut Option<Project>>,
     storage: Option<String>,
+    activation: Option<Activation>,
 }
 
 impl<'a> Lent<'a> {
@@ -277,6 +440,15 @@ impl<'a> Lent<'a> {
         self.storage = storage;
         self
     }
+
+    /// The window, the call id, the cancel flag and the panels this module may fill.
+    ///
+    /// Lent only by `ModuleState::invoke`, because it is the only call a user made: `create`,
+    /// `describe` and `destroy` lend none, and every callback that needs one refuses there.
+    pub fn with_activation(mut self, activation: Activation) -> Self {
+        self.activation = Some(activation);
+        self
+    }
 }
 
 /// One armed call. Disarms the context when it goes.
@@ -298,6 +470,30 @@ impl Entered<'_> {
         self.ctx
             .record(|call| std::mem::take(&mut call.proposed))
             .unwrap_or_default()
+    }
+
+    /// The panel runs this call closed, on the same terms and taken at the same moment.
+    ///
+    /// A run closed by `panel_end` publishes whatever `invoke` answers afterwards, which is the
+    /// rule `modules/mod.rs` already applies to the cues a module changed before it refused.
+    pub fn panels(&self) -> Vec<PanelDto> {
+        self.ctx
+            .record(|call| std::mem::take(&mut call.filled))
+            .unwrap_or_default()
+    }
+
+    /// The run the module left open, if it left one, as its id and the rows it had pushed.
+    ///
+    /// Taken rather than read, so the caller has to decide what to say about it and the record
+    /// cannot carry it into anything else.
+    pub fn abandoned_panel(&self) -> Option<(u32, usize)> {
+        self.ctx
+            .record(|call| {
+                call.panel_open
+                    .take()
+                    .map(|open| (open.id, open.rows.len()))
+            })
+            .flatten()
     }
 }
 
@@ -325,8 +521,8 @@ pub fn table(ctx: &HostCtx) -> SubloreHost {
         // ever cast to or from, and both casts are in this file.
         ctx: (ctx as *const HostCtx).cast_mut().cast::<c_void>(),
         log: Some(host_log),
-        should_cancel: None,
-        progress: None,
+        should_cancel: Some(host_should_cancel),
+        progress: Some(host_progress),
         document: Some(host_document),
         cue_at: Some(host_cue_at),
         for_each_line: Some(host_for_each_line),
@@ -334,10 +530,10 @@ pub fn table(ctx: &HostCtx) -> SubloreHost {
         find: Some(host_find),
         db_run: Some(host_db_run),
         db_transaction: Some(host_db_transaction),
-        panel_begin: None,
-        panel_row: None,
-        panel_end: None,
-        status: None,
+        panel_begin: Some(host_panel_begin),
+        panel_row: Some(host_panel_row),
+        panel_end: Some(host_panel_end),
+        status: Some(host_status),
     }
 }
 
@@ -411,6 +607,260 @@ unsafe extern "C" fn host_log(host: *mut c_void, level: u32, message: SubloreStr
         }
         SUBLORE_OK
     });
+}
+
+/// A line a module puts on screen while its own work runs (§4.2).
+///
+/// An event and not a value carried back, for the reason `module_invoke` writes out: the call is
+/// synchronous on a blocking thread with the window waiting for it, so anything returned arrives
+/// after the work it described has finished.
+///
+/// No return value, so like `host_log` a refusal is silent to the module and said on this side.
+///
+/// # Safety
+/// `host` is the context pointer, and `message` points at bytes valid for this call.
+unsafe extern "C" fn host_status(host: *mut c_void, message: SubloreStr) {
+    guarded(|| {
+        let Some(ctx) = (unsafe { ctx_of(host) }) else {
+            log::warn!("modules: a status arrived with no host context and was dropped");
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Some(name) = ctx.name() else {
+            log::warn!("modules: a status arrived outside the call it belonged to");
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Ok(text) = (unsafe { message.as_str() }) else {
+            log::warn!("modules: {name} set a status that is not valid text");
+            return SUBLORE_ERR_BAD_STRING;
+        };
+        // The same cap a log line takes, on a character boundary: this is one line on screen and a
+        // megabyte of it is the same annoyance in a different place.
+        let text = capped(text).to_owned();
+        let said = ctx.with_activation(|active| active.window.status(active.call, text));
+        if said.is_none() {
+            log::warn!("modules: {name} set a status outside an activation, so nothing shows it");
+            return SUBLORE_ERR_DENIED;
+        }
+        SUBLORE_OK
+    });
+}
+
+/// How far a module says its own work has got (§4.2), on the same terms as `status`.
+///
+/// The two numbers are the module's own and are not compared with each other: the core draws what
+/// it was given and knows nothing about the work behind it.
+///
+/// # Safety
+/// `host` is the context pointer.
+unsafe extern "C" fn host_progress(host: *mut c_void, done: u64, total: u64) {
+    guarded(|| {
+        let Some(ctx) = (unsafe { ctx_of(host) }) else {
+            log::warn!("modules: a progress arrived with no host context and was dropped");
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Some(name) = ctx.name() else {
+            log::warn!("modules: a progress arrived outside the call it belonged to");
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        // A pair the last call already sent says nothing new, so nothing is sent. A repeat dropped
+        // rather than a rate limited, which is why this holds no clock.
+        let fresh = ctx
+            .record(|held| {
+                let repeat = held.last_progress == Some((done, total));
+                held.last_progress = Some((done, total));
+                !repeat
+            })
+            .unwrap_or(false);
+        let inside = ctx.with_activation(|active| {
+            if fresh {
+                active.window.progress(active.call, done, total);
+            }
+        });
+        if inside.is_none() {
+            log::warn!("modules: {name} reported progress outside an activation");
+            return SUBLORE_ERR_DENIED;
+        }
+        SUBLORE_OK
+    });
+}
+
+/// Whether the user has asked this activation to stop (§4.2).
+///
+/// **A request and nothing more.** The call is foreign code on a blocking thread: killing that
+/// thread would leave the session lock, the project lock and the armed record behind, and unwinding
+/// out of `extern "C"` aborts the process, which is the ceiling §2.4 already records. So a module
+/// that never asks, or asks and ignores the answer, is not stopped by anything, and that is its own
+/// defect. `ModuleState::invoke` writes one warn line naming it. See docs/module-host-tasks.md H8.
+///
+/// # Safety
+/// `host` is the context pointer.
+unsafe extern "C" fn host_should_cancel(host: *mut c_void) -> i32 {
+    guarded(|| {
+        // Every refusal below answers stop, and so does the `SUBLORE_ERR_PANIC` `guarded` returns
+        // for a panic in this body: a host that cannot answer must not be read as "carry on".
+        let Some(ctx) = (unsafe { ctx_of(host) }) else {
+            return CANCEL_STOP;
+        };
+        if !ctx.mine() {
+            return CANCEL_STOP;
+        }
+        // No activation is `create`, `describe` or `destroy`, where no user has asked for anything.
+        ctx.with_activation(|active| i32::from(active.cancel.load(Ordering::SeqCst)))
+            .unwrap_or(CANCEL_KEEP_GOING)
+    })
+}
+
+/// Open a panel run for `panel_id` (§5.3).
+///
+/// Nothing is published until `panel_end` closes it, so a panel between the two shows what it
+/// showed before, and a module that stops halfway leaves no half table behind.
+///
+/// # Safety
+/// `host` is the context pointer.
+unsafe extern "C" fn host_panel_begin(host: *mut c_void, panel_id: u32) -> i32 {
+    guarded(|| {
+        let Some(ctx) = (unsafe { ctx_of(host) }) else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Some(name) = ctx.name() else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        // A panel filled outside an activation has no window waiting for it, and no gesture behind
+        // it: `describe` pushes items, it does not fill them.
+        let Some(allowed) = ctx.with_activation(|active| active.panels.contains(&panel_id)) else {
+            log::warn!("modules: {name} began a panel outside an activation");
+            return SUBLORE_ERR_DENIED;
+        };
+        // The allowlist is the host's, from what this module described, so a module cannot fill a
+        // panel it never contributed nor one that belongs to another module (H6's id rule).
+        if !allowed {
+            log::warn!("modules: {name} began panel {panel_id}, which it never contributed");
+            return SUBLORE_ERR_DENIED;
+        }
+        ctx.record(|held| {
+            // Refused rather than nested, which is the shape `db_transaction` already refuses in
+            // and for the same reason: a second run is one the host cannot account for.
+            if held.panel_open.is_some() {
+                return SUBLORE_ERR_DENIED;
+            }
+            held.panel_open = Some(OpenPanel {
+                id: panel_id,
+                width: None,
+                rows: Vec::new(),
+            });
+            SUBLORE_OK
+        })
+        .unwrap_or(SUBLORE_ERR_WRONG_THREAD)
+    })
+}
+
+/// One row of the open panel run (§5.3).
+///
+/// Every cell is validated before any of it is kept, so a refused row leaves nothing behind.
+///
+/// # Safety
+/// `host` is the context pointer; `cells` points at `cell_count` readable cells for this call, or
+/// is null when the count is zero, and every string among them points at bytes valid for this call.
+unsafe extern "C" fn host_panel_row(
+    host: *mut c_void,
+    cells: *const SubloreCell,
+    cell_count: usize,
+) -> i32 {
+    guarded(|| {
+        let Some(ctx) = (unsafe { ctx_of(host) }) else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Some(name) = ctx.name() else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        if cells.is_null() {
+            return SUBLORE_ERR_BAD_STRING;
+        }
+        // A row with no cells is a row the table has nothing to draw, and the first row is what
+        // fixes the width, so zero is not a width this can take.
+        if cell_count == 0 {
+            log::warn!("modules: {name} pushed a row with no cells");
+            return SUBLORE_ERR_DENIED;
+        }
+        let given = unsafe { std::slice::from_raw_parts(cells, cell_count) };
+
+        let mut row = Vec::with_capacity(cell_count);
+        for cell in given {
+            let Some(kind) = cell_kind(cell.kind) else {
+                log::warn!(
+                    "modules: {name} pushed a cell of kind {}, which this build has no \
+                            meaning for",
+                    cell.kind
+                );
+                return SUBLORE_ERR_UNSUPPORTED;
+            };
+            let Ok(text) = (unsafe { cell.text.as_str() }) else {
+                log::warn!("modules: {name} pushed a cell whose text is not valid text");
+                return SUBLORE_ERR_BAD_STRING;
+            };
+            row.push(CellDto {
+                kind,
+                text: text.to_owned(),
+                number: cell.number,
+            });
+        }
+        // The handle belongs to the row, so the row's is the first cell's. The core never compares
+        // it with the others, because it never reads a handle for anything but handing it back.
+        let handle = given[0].r#ref.to_string();
+
+        ctx.record(|held| {
+            let Some(open) = held.panel_open.as_mut() else {
+                return SUBLORE_ERR_DENIED;
+            };
+            match open.width {
+                None => open.width = Some(cell_count),
+                // A ragged table cannot exist, and the bound is the first row rather than a number
+                // anybody had to pick.
+                Some(width) if width != cell_count => return SUBLORE_ERR_DENIED,
+                Some(_) => {}
+            }
+            if open.rows.len() >= MAX_PANEL_ROWS {
+                return SUBLORE_ERR_DENIED;
+            }
+            open.rows.push(RowDto { handle, cells: row });
+            SUBLORE_OK
+        })
+        .unwrap_or(SUBLORE_ERR_WRONG_THREAD)
+    })
+}
+
+/// Close the open panel run and publish it (§5.3).
+///
+/// An empty run clears the panel: a module saying it has no rows is a module saying there is
+/// nothing to show, and that is a publish rather than an absence.
+///
+/// # Safety
+/// `host` is the context pointer.
+unsafe extern "C" fn host_panel_end(host: *mut c_void) -> i32 {
+    guarded(|| {
+        let Some(ctx) = (unsafe { ctx_of(host) }) else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Some(name) = ctx.name() else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        ctx.record(|held| {
+            let Some(module) = held.activation.as_ref().map(|active| active.module) else {
+                return SUBLORE_ERR_DENIED;
+            };
+            let Some(open) = held.panel_open.take() else {
+                log::warn!("modules: {name} ended a panel run it had not begun");
+                return SUBLORE_ERR_DENIED;
+            };
+            held.filled.push(PanelDto {
+                module,
+                panel_id: open.id,
+                rows: open.rows,
+            });
+            SUBLORE_OK
+        })
+        .unwrap_or(SUBLORE_ERR_WRONG_THREAD)
+    })
 }
 
 /// The format word for the document a module is reading.
@@ -1120,7 +1570,8 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use sublore_module_api::{
-        SUBLORE_ERR_CANCELLED, SUBLORE_FIND_MATCH_CASE, SUBLORE_FIND_SKIP_TAGS,
+        SUBLORE_CELL_BADGE, SUBLORE_CELL_TEXT, SUBLORE_ERR_CANCELLED, SUBLORE_FIND_MATCH_CASE,
+        SUBLORE_FIND_SKIP_TAGS,
     };
 
     /// The module name every check below arms with.
@@ -2444,5 +2895,407 @@ mod tests {
             SUBLORE_ERR_NOTHING_OPEN
         );
         assert_eq!(lines.pushes, 0);
+    }
+    // -----------------------------------------------------------------------------------------
+    // The panels, the two diagnostics and the cancel flag, H8. None of these needs a window: the
+    // activation carries a collector instead of one, for the reason written on `Window`.
+
+    /// The panel the checks below are allowed to fill, and one they are not.
+    const PANEL: u32 = 7;
+    const NOT_OURS: u32 = 8;
+
+    /// What one activation collected, and the flag a Stop would set.
+    struct Watched {
+        said: Arc<Mutex<Vec<Said>>>,
+        cancel: Arc<AtomicBool>,
+    }
+
+    impl Watched {
+        fn new() -> Self {
+            Self {
+                said: Arc::new(Mutex::new(Vec::new())),
+                cancel: Arc::new(AtomicBool::new(false)),
+            }
+        }
+
+        /// One activation of module 3, allowed to fill [`PANEL`] and nothing else.
+        fn activation(&self) -> Activation {
+            Activation {
+                window: Window::Collected(Arc::clone(&self.said)),
+                call: 42,
+                module: 3,
+                cancel: Arc::clone(&self.cancel),
+                panels: vec![PANEL],
+            }
+        }
+
+        fn said(&self) -> Vec<Said> {
+            self.said
+                .lock()
+                .expect("the collector is not poisoned")
+                .clone()
+        }
+    }
+
+    /// One cell, with the row's handle on it.
+    fn cell(kind: u32, text: &str, number: i64, handle: u64) -> SubloreCell {
+        SubloreCell {
+            kind,
+            text: SubloreStr::borrowed(text),
+            number,
+            r#ref: handle,
+        }
+    }
+
+    /// Push one row of two text cells carrying `handle`.
+    fn push_row(ctx: &HostCtx, handle: u64, first: &str, second: &str) -> i32 {
+        let cells = [
+            cell(SUBLORE_CELL_TEXT, first, 0, handle),
+            cell(SUBLORE_CELL_TEXT, second, 0, handle),
+        ];
+        unsafe { host_panel_row(pointer(ctx), cells.as_ptr(), cells.len()) }
+    }
+
+    #[test]
+    fn a_run_that_is_begun_filled_and_ended_publishes_the_rows_the_module_pushed() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        let entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+
+        assert_eq!(
+            unsafe { host_panel_begin(pointer(&ctx), PANEL) },
+            SUBLORE_OK
+        );
+        // Nothing is published while the run is open, so a panel between the two shows what it
+        // showed before and a half filled table cannot be drawn.
+        assert!(entered.panels().is_empty());
+        assert_eq!(push_row(&ctx, 1, "first", "one"), SUBLORE_OK);
+        // The handle a `u64` above 2^53 has, which is the value the decimal string exists for.
+        assert_eq!(
+            push_row(&ctx, 9_007_199_254_740_993, "second", "two"),
+            SUBLORE_OK
+        );
+        assert!(entered.panels().is_empty(), "still nothing before the end");
+        assert_eq!(unsafe { host_panel_end(pointer(&ctx)) }, SUBLORE_OK);
+
+        let published = entered.panels();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].panel_id, PANEL);
+        assert_eq!(
+            published[0].module, 3,
+            "the module is the host's, not the module's"
+        );
+        assert_eq!(published[0].rows.len(), 2);
+        assert_eq!(published[0].rows[0].handle, "1");
+        // Every digit of it. A number on the wire would come back 9007199254740992.
+        assert_eq!(published[0].rows[1].handle, "9007199254740993");
+        assert_eq!(published[0].rows[1].cells.len(), 2);
+        assert_eq!(published[0].rows[1].cells[0].kind, "text");
+        assert_eq!(published[0].rows[1].cells[0].text, "second");
+        // And taken means taken, as it does for a patch.
+        assert!(entered.panels().is_empty());
+        assert!(entered.abandoned_panel().is_none());
+    }
+
+    #[test]
+    fn a_run_left_open_publishes_nothing_and_is_named_with_the_rows_it_had() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        let entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+
+        assert_eq!(
+            unsafe { host_panel_begin(pointer(&ctx), PANEL) },
+            SUBLORE_OK
+        );
+        assert_eq!(push_row(&ctx, 1, "half", "a table"), SUBLORE_OK);
+
+        // The module returned without ending it. Nothing crosses, and the caller is handed what it
+        // needs to say so rather than the rows.
+        assert!(entered.panels().is_empty());
+        assert_eq!(entered.abandoned_panel(), Some((PANEL, 1)));
+        assert!(entered.abandoned_panel().is_none(), "taken means taken");
+    }
+
+    #[test]
+    fn an_empty_run_publishes_and_is_what_clears_a_panel() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        let entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+
+        assert_eq!(
+            unsafe { host_panel_begin(pointer(&ctx), PANEL) },
+            SUBLORE_OK
+        );
+        assert_eq!(unsafe { host_panel_end(pointer(&ctx)) }, SUBLORE_OK);
+
+        // A publish with no rows, and not an absence: a module saying it has nothing to show is
+        // saying something, and the window clears that panel on it.
+        let published = entered.panels();
+        assert_eq!(published.len(), 1);
+        assert!(published[0].rows.is_empty());
+    }
+
+    #[test]
+    fn a_second_run_while_one_is_open_is_refused_and_the_first_one_survives() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        let entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+
+        assert_eq!(
+            unsafe { host_panel_begin(pointer(&ctx), PANEL) },
+            SUBLORE_OK
+        );
+        assert_eq!(push_row(&ctx, 1, "kept", "row"), SUBLORE_OK);
+        // Refused rather than nested, which is `db_transaction`'s answer in the same shape.
+        assert_eq!(
+            unsafe { host_panel_begin(pointer(&ctx), PANEL) },
+            SUBLORE_ERR_DENIED
+        );
+        assert_eq!(unsafe { host_panel_end(pointer(&ctx)) }, SUBLORE_OK);
+
+        let published = entered.panels();
+        assert_eq!(published.len(), 1);
+        assert_eq!(
+            published[0].rows.len(),
+            1,
+            "the refusal did not reset the run"
+        );
+    }
+
+    #[test]
+    fn a_panel_the_module_did_not_contribute_is_refused() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        let entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+
+        // The allowlist is the host's, from what this module described. Naming another id is a
+        // module reaching for a panel it was never given, which is H6's storage rule again.
+        assert_eq!(
+            unsafe { host_panel_begin(pointer(&ctx), NOT_OURS) },
+            SUBLORE_ERR_DENIED
+        );
+        // And no run was opened by the refusal, so a row now has nothing to go into.
+        assert_eq!(push_row(&ctx, 1, "nowhere", "at all"), SUBLORE_ERR_DENIED);
+        assert!(entered.panels().is_empty());
+        assert!(entered.abandoned_panel().is_none());
+    }
+
+    #[test]
+    fn a_row_or_an_end_with_no_run_open_is_refused() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        let entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+
+        assert_eq!(push_row(&ctx, 1, "before", "the begin"), SUBLORE_ERR_DENIED);
+        assert_eq!(unsafe { host_panel_end(pointer(&ctx)) }, SUBLORE_ERR_DENIED);
+        assert!(entered.panels().is_empty());
+    }
+
+    #[test]
+    fn a_row_of_a_different_width_than_the_first_is_refused() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        let entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+
+        assert_eq!(
+            unsafe { host_panel_begin(pointer(&ctx), PANEL) },
+            SUBLORE_OK
+        );
+        assert_eq!(push_row(&ctx, 1, "two", "cells"), SUBLORE_OK);
+
+        // The first row fixed the width, so a ragged table cannot exist and no number had to be
+        // picked for how wide one is.
+        let narrow = [cell(SUBLORE_CELL_TEXT, "one cell", 0, 2)];
+        assert_eq!(
+            unsafe { host_panel_row(pointer(&ctx), narrow.as_ptr(), narrow.len()) },
+            SUBLORE_ERR_DENIED
+        );
+        // And a row with no cells at all, which is not a width either.
+        assert_eq!(
+            unsafe { host_panel_row(pointer(&ctx), narrow.as_ptr(), 0) },
+            SUBLORE_ERR_DENIED
+        );
+        assert_eq!(unsafe { host_panel_end(pointer(&ctx)) }, SUBLORE_OK);
+        assert_eq!(
+            entered.panels()[0].rows.len(),
+            1,
+            "only the row that fitted"
+        );
+    }
+
+    #[test]
+    fn a_cell_this_build_has_no_kind_for_costs_its_row_and_not_half_of_it() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        let entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+
+        assert_eq!(
+            unsafe { host_panel_begin(pointer(&ctx), PANEL) },
+            SUBLORE_OK
+        );
+        // The next value up from badge. Refused, and the good cell beside it is not kept: a row is
+        // validated whole before any of it is.
+        let mixed = [
+            cell(SUBLORE_CELL_TEXT, "good", 0, 1),
+            cell(SUBLORE_CELL_BADGE + 1, "unknown", 0, 1),
+        ];
+        assert_eq!(
+            unsafe { host_panel_row(pointer(&ctx), mixed.as_ptr(), mixed.len()) },
+            SUBLORE_ERR_UNSUPPORTED
+        );
+        // Text that is not text, refused the same way.
+        let invalid = [0xffu8, 0xfe];
+        let bad = [
+            SubloreCell {
+                kind: SUBLORE_CELL_TEXT,
+                text: SubloreStr {
+                    ptr: invalid.as_ptr(),
+                    len: invalid.len(),
+                },
+                number: 0,
+                r#ref: 1,
+            },
+            cell(SUBLORE_CELL_TEXT, "beside it", 0, 1),
+        ];
+        assert_eq!(
+            unsafe { host_panel_row(pointer(&ctx), bad.as_ptr(), bad.len()) },
+            SUBLORE_ERR_BAD_STRING
+        );
+        // A null pointer, which is a jump this must never make.
+        assert_eq!(
+            unsafe { host_panel_row(pointer(&ctx), std::ptr::null(), 2) },
+            SUBLORE_ERR_BAD_STRING
+        );
+        assert_eq!(unsafe { host_panel_end(pointer(&ctx)) }, SUBLORE_OK);
+        assert!(entered.panels()[0].rows.is_empty());
+    }
+
+    #[test]
+    fn a_panel_call_outside_an_activation_is_refused() {
+        let ctx = HostCtx::new();
+        // What `create`, `describe` and `destroy` lend: no activation, so no panel and no window.
+        let entered = ctx.enter(NAME, Lent::default());
+
+        assert_eq!(
+            unsafe { host_panel_begin(pointer(&ctx), PANEL) },
+            SUBLORE_ERR_DENIED
+        );
+        assert_eq!(push_row(&ctx, 1, "no", "activation"), SUBLORE_ERR_DENIED);
+        assert_eq!(unsafe { host_panel_end(pointer(&ctx)) }, SUBLORE_ERR_DENIED);
+        assert!(entered.panels().is_empty());
+    }
+
+    #[test]
+    fn a_panel_call_from_another_thread_never_reaches_the_record() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        let entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+
+        let elsewhere = std::thread::scope(|scope| {
+            scope
+                .spawn(|| unsafe { host_panel_begin(pointer(&ctx), PANEL) })
+                .join()
+                .expect("the other thread must return rather than block")
+        });
+        assert_eq!(elsewhere, SUBLORE_ERR_WRONG_THREAD);
+        assert!(entered.abandoned_panel().is_none(), "nothing was opened");
+    }
+
+    #[test]
+    fn a_status_reaches_the_window_and_one_outside_an_activation_does_not() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        {
+            let _entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+            unsafe { host_status(pointer(&ctx), SubloreStr::borrowed("reading the file")) };
+            // Not text, so nothing goes out and the module is not told: `status` returns nothing.
+            let invalid = [0xffu8, 0xfe];
+            unsafe {
+                host_status(
+                    pointer(&ctx),
+                    SubloreStr {
+                        ptr: invalid.as_ptr(),
+                        len: invalid.len(),
+                    },
+                )
+            };
+        }
+        {
+            // No activation: nothing is showing a status, so nothing is sent.
+            let _entered = ctx.enter(NAME, Lent::default());
+            unsafe { host_status(pointer(&ctx), SubloreStr::borrowed("from describe")) };
+        }
+        assert_eq!(
+            watched.said(),
+            vec![Said::Status(42, "reading the file".to_owned())]
+        );
+    }
+
+    #[test]
+    fn a_progress_that_repeats_the_pair_it_just_sent_sends_nothing() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        let _entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+
+        unsafe { host_progress(pointer(&ctx), 1, 40) };
+        // The same pair again. A repeat carries nothing new, and dropping it holds no clock: the
+        // pair after it goes out at once.
+        unsafe { host_progress(pointer(&ctx), 1, 40) };
+        unsafe { host_progress(pointer(&ctx), 2, 40) };
+        unsafe { host_progress(pointer(&ctx), 1, 40) };
+
+        assert_eq!(
+            watched.said(),
+            vec![
+                Said::Progress(42, 1, 40),
+                Said::Progress(42, 2, 40),
+                Said::Progress(42, 1, 40),
+            ]
+        );
+    }
+
+    #[test]
+    fn should_cancel_answers_the_flag_and_every_refusal_answers_stop() {
+        let ctx = HostCtx::new();
+        let watched = Watched::new();
+        {
+            let _entered = ctx.enter(NAME, Lent::default().with_activation(watched.activation()));
+            assert_eq!(
+                unsafe { host_should_cancel(pointer(&ctx)) },
+                CANCEL_KEEP_GOING
+            );
+            watched.cancel.store(true, Ordering::SeqCst);
+            assert_eq!(unsafe { host_should_cancel(pointer(&ctx)) }, CANCEL_STOP);
+
+            // From elsewhere, which is a refusal, and a refusal must never read as "carry on".
+            let elsewhere = std::thread::scope(|scope| {
+                scope
+                    .spawn(|| unsafe { host_should_cancel(pointer(&ctx)) })
+                    .join()
+                    .expect("the other thread must return rather than block")
+            });
+            assert_ne!(elsewhere, CANCEL_KEEP_GOING);
+        }
+        // No context at all, and after the call returned: both stop.
+        assert_ne!(
+            unsafe { host_should_cancel(std::ptr::null_mut()) },
+            CANCEL_KEEP_GOING
+        );
+        assert_ne!(
+            unsafe { host_should_cancel(pointer(&ctx)) },
+            CANCEL_KEEP_GOING
+        );
+    }
+
+    #[test]
+    fn a_describe_is_never_told_to_stop_because_nobody_asked_it_to() {
+        let ctx = HostCtx::new();
+        // What `create`, `describe` and `destroy` are entered with. There is no activation, so
+        // there is no user and no Stop, and the answer is to carry on rather than to give up.
+        let _entered = ctx.enter(NAME, Lent::default());
+        assert_eq!(
+            unsafe { host_should_cancel(pointer(&ctx)) },
+            CANCEL_KEEP_GOING
+        );
     }
 }

@@ -13,22 +13,37 @@ mod host;
 
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use sublore_module_api::{
     SubloreHost, SubloreInvocation, SubloreItem, SubloreStr, SUBLORE_ENABLE_ALWAYS,
     SUBLORE_ENABLE_DOCUMENT_OPEN, SUBLORE_ENABLE_PROJECT_OPEN, SUBLORE_ENABLE_SELECTION_NON_EMPTY,
-    SUBLORE_ERR_UNSUPPORTED, SUBLORE_ITEM_FLAG_LAYER, SUBLORE_ITEM_MENU_ITEM,
-    SUBLORE_ITEM_MENU_TITLE, SUBLORE_ITEM_PANEL, SUBLORE_ITEM_SEPARATOR,
+    SUBLORE_ERR_BAD_STRING, SUBLORE_ERR_UNSUPPORTED, SUBLORE_ITEM_FLAG_LAYER,
+    SUBLORE_ITEM_MENU_ITEM, SUBLORE_ITEM_MENU_TITLE, SUBLORE_ITEM_PANEL, SUBLORE_ITEM_SEPARATOR,
     SUBLORE_ITEM_TOOLBAR_BUTTON, SUBLORE_NO_CUE, SUBLORE_OK,
 };
 use sublore_module_host::{scan, Loaded, Refusal};
+use tauri::{AppHandle, Emitter};
 
 use crate::log;
 use crate::project::SharedProject;
 use crate::subtitle::{CuePatchDto, SessionSlot};
-use host::{HostCtx, Lent};
+use host::{Activation, HostCtx, Lent};
+
+/// What the window is told while one activation runs, and when it starts and stops.
+///
+/// Events rather than values carried back, and `progress` could not have been anything else:
+/// `module_invoke` runs the module on `spawn_blocking` and its promise does not resolve until the
+/// module returns, so a progress on `InvokeOutcome` would arrive after the thing it measured had
+/// already stopped. That is a report and not a progress. The app emits from exactly this position
+/// already (`asr/mod.rs`), and `src/hooks/` is the window listening. See docs/module-host-tasks.md
+/// H8.
+const EVENT_BEGAN: &str = "module://began";
+pub(crate) const EVENT_STATUS: &str = "module://status";
+pub(crate) const EVENT_PROGRESS: &str = "module://progress";
+const EVENT_ENDED: &str = "module://ended";
 
 /// Why a file that looked like a module was not used, as the frontend receives it.
 ///
@@ -141,6 +156,101 @@ pub struct InvokeOutcome {
     pub code: i32,
     /// The edits it made before it answered, in the order it made them.
     pub patches: Vec<CuePatchDto>,
+    /// The panels it filled and closed, on the same terms: a run closed by `panel_end` publishes
+    /// whatever the call answers afterwards, and one still open when the call returned is dropped.
+    pub panels: Vec<PanelDto>,
+}
+
+/// One cell of one panel row, as the window receives it.
+///
+/// A kind word from the same allowlist style as [`kind_of`]: a cell kind this build has no meaning
+/// for costs its row, and is never drawn as something it is not.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CellDto {
+    /// "text" | "number" | "percent" | "badge".
+    pub kind: &'static str,
+    pub text: String,
+    pub number: i64,
+}
+
+/// One row of a panel: the module's own handle for it, and the cells it pushed.
+///
+/// **The handle crosses as a decimal string.** `SubloreCell::ref` is a `u64` and a `u64` above 2^53
+/// does not survive JSON's number, so a large handle would come back to the module changed. The
+/// core reads the digits back into the `u64` the interface takes and reads nothing else into them.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowDto {
+    pub handle: String,
+    pub cells: Vec<CellDto>,
+}
+
+/// One panel a module filled and closed, as the window receives it.
+///
+/// An empty `rows` is a publish and not an absence: a module saying it has no rows is a module
+/// saying there is nothing to show, and the window clears that panel.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PanelDto {
+    pub module: usize,
+    pub panel_id: u32,
+    pub rows: Vec<RowDto>,
+}
+
+/// One activation beginning, so the window can draw a working line before the module answers.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModuleBegan {
+    call_id: u64,
+    module: usize,
+    item: u32,
+}
+
+/// A line a module put on screen while its work runs.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModuleStatus {
+    pub call_id: u64,
+    pub message: String,
+}
+
+/// How far a module says it has got. The two numbers are the module's own and are not checked
+/// against each other: the core draws what it was given and knows nothing about the work.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModuleProgress {
+    pub call_id: u64,
+    pub done: u64,
+    pub total: u64,
+}
+
+/// One activation ending, whatever it answered. The band goes on this, and again when the
+/// activation's own promise settles: two independent reasons, neither waiting on the other.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModuleEnded {
+    call_id: u64,
+    code: i32,
+}
+
+/// The activation a Stop can still reach, while there is one.
+///
+/// Its own mutex rather than a field behind the module lock, and that is the whole point: the
+/// cancel path must never take `held`, or Stop would queue behind the call it is trying to stop.
+struct ActiveCall {
+    id: u64,
+    flag: Arc<AtomicBool>,
+}
+
+/// What `module_invoke` lends one activation: the two locks to take, and the window to speak to.
+///
+/// One value rather than three more arguments, which is the shape H5 settled on when
+/// `clippy::too_many_arguments` was right about the eight `module_invoke` used to pass.
+pub struct Lends<'a> {
+    pub session: &'a SessionSlot,
+    pub project: &'a SharedProject,
+    pub app: AppHandle,
 }
 
 /// The kinds a contribution may be, as an allowlist. Anything else costs that item, which is the
@@ -152,6 +262,20 @@ fn kind_of(item: &SubloreItem) -> Option<&'static str> {
         SUBLORE_ITEM_SEPARATOR => Some("separator"),
         SUBLORE_ITEM_TOOLBAR_BUTTON => Some("toolbarButton"),
         SUBLORE_ITEM_PANEL => Some("panel"),
+        _ => None,
+    }
+}
+
+/// The four cell kinds §5.3 fixes, as an allowlist on the same terms.
+///
+/// A fifth value is not a fifth kind, it is a module defect, and it costs the row that carried it
+/// rather than being drawn as one of the four.
+pub(crate) fn cell_kind(kind: u32) -> Option<&'static str> {
+    match kind {
+        sublore_module_api::SUBLORE_CELL_TEXT => Some("text"),
+        sublore_module_api::SUBLORE_CELL_NUMBER => Some("number"),
+        sublore_module_api::SUBLORE_CELL_PERCENT => Some("percent"),
+        sublore_module_api::SUBLORE_CELL_BADGE => Some("badge"),
         _ => None,
     }
 }
@@ -283,6 +407,14 @@ pub struct ModuleState {
     /// The loaded libraries, behind the lock §2.5 requires: the host holds it across every module
     /// call, so two of them never overlap.
     held: Mutex<Held>,
+    /// The activation a Stop can reach, and nothing while none is running.
+    ///
+    /// Behind its own mutex, never behind `held`: `held` is taken for the whole of a module call,
+    /// so a cancel that wanted it would wait for the call it exists to interrupt.
+    active: Mutex<Option<ActiveCall>>,
+    /// One per activation, which is why it is a number on the wire: a counter incremented once per
+    /// user gesture cannot reach 2^53, so nothing here needs the string a row handle needs.
+    next_call: AtomicU64,
 }
 
 impl ModuleState {
@@ -295,6 +427,8 @@ impl ModuleState {
             },
             contributions: Mutex::new(Vec::new()),
             held: Mutex::new(Held::empty()),
+            active: Mutex::new(None),
+            next_call: AtomicU64::new(0),
         }
     }
 
@@ -403,15 +537,15 @@ impl ModuleState {
         &self,
         module: usize,
         item: u32,
+        call: u64,
         at: &SubloreInvocation,
-        session: &SessionSlot,
-        project: &SharedProject,
+        lends: Lends<'_>,
     ) -> InvokeOutcome {
         let Ok(mut held) = self.held.lock() else {
             log::error!("modules: the module lock is poisoned, so nothing can be activated");
             return InvokeOutcome {
                 code: SUBLORE_ERR_UNSUPPORTED,
-                patches: Vec::new(),
+                ..InvokeOutcome::default()
             };
         };
         let held = &mut *held;
@@ -421,7 +555,7 @@ impl ModuleState {
             log::error!("modules: item {item} named module {module}, which is not loaded");
             return InvokeOutcome {
                 code: SUBLORE_ERR_UNSUPPORTED,
-                patches: Vec::new(),
+                ..InvokeOutcome::default()
             };
         };
         let name = file_name(running.module.path());
@@ -429,14 +563,14 @@ impl ModuleState {
             log::warn!("modules: {name} has no way to be activated, so item {item} does nothing");
             return InvokeOutcome {
                 code: SUBLORE_ERR_UNSUPPORTED,
-                patches: Vec::new(),
+                ..InvokeOutcome::default()
             };
         };
 
         // The module's own storage prefix, taken from its file name and never from the module
         // (module-abi.md §4.7 and docs/module-host-tasks.md H6). None costs it its storage.
         let storage = running.module.id().map(str::to_owned);
-        let mut session = match session.lock() {
+        let mut session = match lends.session.lock() {
             Ok(held) => Some(held),
             Err(_) => {
                 log::warn!("modules: the session lock is poisoned, so {name} is lent none");
@@ -445,14 +579,26 @@ impl ModuleState {
         };
         // Locked after the session and released with it. Nothing else in this process takes both,
         // so this order is the only one there is and the pair cannot deadlock.
-        let mut project = match project.lock() {
+        let mut project = match lends.project.lock() {
             Ok(held) => Some(held),
             Err(_) => {
                 log::warn!("modules: the project lock is poisoned, so {name} is lent none");
                 None
             }
         };
-        let mut lent = Lent::default().with_session(session.as_deref_mut());
+        // Armed before the call and cleared after it, so a Stop that arrives late finds another id
+        // or nothing, which is `asr_transcribe_cancel`'s rule in its own words (H8 decision 2).
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.arm(call, &cancel);
+        let mut lent = Lent::default()
+            .with_session(session.as_deref_mut())
+            .with_activation(Activation::new(
+                lends.app,
+                call,
+                module,
+                Arc::clone(&cancel),
+                self.panels_of(module),
+            ));
         if let Some(project) = project.as_deref_mut() {
             lent = lent.with_project(project, storage);
         }
@@ -461,12 +607,93 @@ impl ModuleState {
         // valid for the call, with the session locked for the whole of it.
         let code = unsafe { invoke(running.ctx, item, at) };
         let patches = entered.proposed();
+        let panels = entered.panels();
+        let abandoned = entered.abandoned_panel();
         drop(entered);
+        self.disarm(call);
 
+        if let Some((panel, rows)) = abandoned {
+            // Dropped rather than published: `panel_end` is the module's own assertion that the
+            // table is whole, and a half filled table drawn as a whole one is what to avoid.
+            log::warn!(
+                "modules: {name} left panel {panel} open with {rows} rows pushed, so none of \
+                 them are drawn"
+            );
+        }
+        if cancel.load(Ordering::SeqCst) {
+            // Nothing stops a module that ignores the answer: the call is foreign code on a
+            // blocking thread and killing it is worse. The code says which it did (§2.4).
+            log::warn!("modules: {name} was asked to stop item {item} and returned {code}");
+        }
         if code != SUBLORE_OK {
             log::warn!("modules: {name} refused item {item}, reporting {code}");
         }
-        InvokeOutcome { code, patches }
+        InvokeOutcome {
+            code,
+            patches,
+            panels,
+        }
+    }
+
+    /// Note the activation a Stop may reach.
+    fn arm(&self, call: u64, flag: &Arc<AtomicBool>) {
+        match self.active.lock() {
+            Ok(mut slot) => {
+                *slot = Some(ActiveCall {
+                    id: call,
+                    flag: Arc::clone(flag),
+                });
+            }
+            // The work still runs and still finishes; what is lost is the Stop button's reach, and
+            // saying so is better than a button that does nothing and says nothing.
+            Err(_) => {
+                log::error!(
+                    "modules: the cancel slot is poisoned, so call {call} cannot be stopped"
+                )
+            }
+        }
+    }
+
+    /// Forget it again, if it is still the one recorded.
+    fn disarm(&self, call: u64) {
+        if let Ok(mut slot) = self.active.lock() {
+            if slot.as_ref().is_some_and(|active| active.id == call) {
+                *slot = None;
+            }
+        }
+    }
+
+    /// Ask the activation `call` to stop, if that is still the one running.
+    ///
+    /// **Never takes `held`.** That lock is held for the whole of a module call, so a cancel that
+    /// wanted it would queue behind the call it exists to interrupt. The id check is the other
+    /// half: stopping a call that has just finished is not an error, and stopping an older one must
+    /// never reach into the current one, which is also what keeps one module's Stop off another's
+    /// work.
+    fn cancel(&self, call: u64) {
+        let Ok(slot) = self.active.lock() else {
+            log::error!("modules: the cancel slot is poisoned, so call {call} was not stopped");
+            return;
+        };
+        if let Some(active) = slot.as_ref().filter(|active| active.id == call) {
+            active.flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// The panel ids this module contributed, which is the allowlist `panel_begin` is held to.
+    ///
+    /// Lent by the host and never named by the module, which is H6's storage id rule applied to the
+    /// other id a module could otherwise claim as another module's.
+    fn panels_of(&self, module: usize) -> Vec<u32> {
+        self.contributions
+            .lock()
+            .map(|held| {
+                held.iter()
+                    .filter(|item| item.module == module && item.kind == "panel")
+                    .map(|item| item.id)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn contributions(&self) -> Vec<ContributionDto> {
@@ -507,6 +734,8 @@ pub fn load() -> ModuleState {
                 _host: host,
                 ctx,
             }),
+            active: Mutex::new(None),
+            next_call: AtomicU64::new(0),
         };
     };
 
@@ -562,6 +791,8 @@ pub fn load() -> ModuleState {
             _host: host,
             ctx,
         }),
+        active: Mutex::new(None),
+        next_call: AtomicU64::new(0),
     }
 }
 
@@ -586,13 +817,14 @@ pub fn module_contributions(state: tauri::State<'_, ModuleState>) -> Vec<Contrib
 ///
 /// One argument rather than five, which is also the shape it crosses the boundary in: this is
 /// `SubloreInvocation` with the parts the window owns, and nothing about which item it is.
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InvokeAt {
     pub revision: u64,
     /// The cursor's row, or none when there is no selection.
     pub cue: Option<u64>,
-    pub row: u64,
+    /// The activated row's handle, in decimal, for the reason [`RowDto`] carries it that way.
+    pub row: String,
     pub panel_id: u32,
     pub project_key: i64,
 }
@@ -608,25 +840,90 @@ pub async fn module_invoke(
     item: u32,
     at: InvokeAt,
 ) -> InvokeOutcome {
+    use tauri::Manager;
+
+    // Zero unless a panel row carried one, which is the rule §4.1 gives for reading it at all. The
+    // digits are read back into the `u64` the interface takes; nothing else is read into them.
+    let row = if at.panel_id == 0 {
+        0
+    } else {
+        match at.row.parse::<u64>() {
+            Ok(row) => row,
+            Err(_) => {
+                // The window echoes back a handle this process sent it, so a value that is not one
+                // is a core defect. Refused rather than sent on as a zero the module would misread.
+                log::error!("modules: item {item} arrived with a row handle that is not a number");
+                return InvokeOutcome {
+                    code: SUBLORE_ERR_BAD_STRING,
+                    ..InvokeOutcome::default()
+                };
+            }
+        }
+    };
     let at = SubloreInvocation {
         revision: at.revision,
         // A selection the module can act on, or the sentinel that says there is none.
         cue: at.cue.unwrap_or(SUBLORE_NO_CUE),
-        // Zero unless a panel row carried it, which is the rule §4.1 gives for reading it at all.
-        row: if at.panel_id == 0 { 0 } else { at.row },
+        row,
         panel_id: at.panel_id,
         project_key: at.project_key,
     };
-    tauri::async_runtime::spawn_blocking(move || {
-        use tauri::Manager;
-        let session = app.state::<crate::subtitle::SubtitleState>().slot();
-        let project = app.state::<crate::project::ProjectState>().handle();
-        app.state::<ModuleState>()
-            .invoke(module, item, &at, &session, &project)
+
+    let Some(state) = app.try_state::<ModuleState>() else {
+        log::error!("modules: item {item} was activated before the module state existed");
+        return InvokeOutcome {
+            code: SUBLORE_ERR_UNSUPPORTED,
+            ..InvokeOutcome::default()
+        };
+    };
+    let call = state.next_call.fetch_add(1, Ordering::SeqCst) + 1;
+    // Before the work starts, so the band and its Stop are on screen while the module runs. The
+    // pair to it is emitted after the await below rather than inside the closure, so the panic path
+    // the task carries still ends the band.
+    let _ = app.emit(
+        EVENT_BEGAN,
+        ModuleBegan {
+            call_id: call,
+            module,
+            item,
+        },
+    );
+
+    let ran = app.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let session = ran.state::<crate::subtitle::SubtitleState>().slot();
+        let project = ran.state::<crate::project::ProjectState>().handle();
+        let lends = Lends {
+            session: &session,
+            project: &project,
+            app: ran.clone(),
+        };
+        ran.state::<ModuleState>()
+            .invoke(module, item, call, &at, lends)
     })
     .await
     .unwrap_or_else(|error| {
         log::error!("modules: the activation task failed: {error}");
         InvokeOutcome::default()
-    })
+    });
+
+    let _ = app.emit(
+        EVENT_ENDED,
+        ModuleEnded {
+            call_id: call,
+            code: outcome.code,
+        },
+    );
+    outcome
+}
+
+/// Ask the activation `call_id` to stop.
+///
+/// Not a registry command. The control is the one in the band that carries the status and the
+/// progress, appearing with the work and going with it, which is the shape `TranscribePanel`
+/// already draws and which the 2026-09-03 ruling explicitly leaves outside itself: that ruling is
+/// about commands, not panels.
+#[tauri::command]
+pub fn module_cancel(state: tauri::State<'_, ModuleState>, call_id: u64) {
+    state.inner().cancel(call_id);
 }

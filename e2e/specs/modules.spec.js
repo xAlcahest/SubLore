@@ -46,6 +46,35 @@ const MODULE_ITEM = "Rewrite the first line (2 found)";
 const STALE_ITEM = "Rewrite from a stale revision";
 /** The item that writes into the module's own table, which needs a project to write into. */
 const STORE_ITEM = "Store a note";
+/** The item that fills the module's own panel with its two rows. */
+const FILL_ITEM = "Fill the table";
+/** The item that does long enough work to be watched and stopped. */
+const LONG_ITEM = "Take a while";
+/** The label the module gave the action on every row, which is the secondary one (4.1). */
+const ROW_ACTION = "Mark";
+
+/**
+ * The handles the module gave its two rows.
+ *
+ * The second is 2^53 plus one. A `u64` that large does not survive a JSON number, so a handle that
+ * came back as 9007199254740992 would be one the module never issued. It is the whole reason the
+ * handle crosses as a decimal string, and this is the check that fails without it.
+ */
+const FIRST_HANDLE = "1";
+const SECOND_HANDLE = "9007199254740993";
+
+/** What the module logs when a row is activated: the item it arrived under, and the handle. */
+const ROW_SAID =
+  /module sublore_module_fixture\.so: a row was activated: item (\d+) and row (\d+)/g;
+/** The same for the secondary action, which arrives under its own id with the same handle. */
+const ACTION_SAID =
+  /module sublore_module_fixture\.so: a row action ran: item (\d+) and row (\d+)/g;
+/** What the long item logs when it is stopped, naming the step it got to. */
+const STOPPED = /module sublore_module_fixture\.so: stopped at step (\d+) of (\d+)/g;
+/** The fixture's own id for its panel, which is also the id a row activation arrives under. */
+const PANEL_ID = 6;
+/** The fixture's own id for the action on a row. */
+const ROW_ACTION_ID = 8;
 /**
  * What the module says after it stored one, with the number of rows its own table then held.
  *
@@ -231,11 +260,15 @@ describe("modules beside the executable", () => {
     );
     expect(items.some((item) => item.includes(MODULE_ITEM))).toBe(true);
     expect(items.some((item) => item.includes(STORE_ITEM))).toBe(true);
-    // Exactly three. The fixture pushes a fourth item with a state this build does not know, and
+    // Exactly five. The fixture pushes a sixth item with a state this build does not know, and
     // section 5.2 says that costs the module its item rather than giving the user a control that
-    // is enabled when it should not be.
-    expect(items).toHaveLength(3);
+    // is enabled when it should not be. The panel and the action under it are not here either:
+    // a panel is not a menu item, and an item whose parent is a panel is drawn on its rows.
+    expect(items).toHaveLength(5);
     expect(items.some((item) => item.includes(STALE_ITEM))).toBe(true);
+    expect(items.some((item) => item.includes(FILL_ITEM))).toBe(true);
+    expect(items.some((item) => item.includes(LONG_ITEM))).toBe(true);
+    expect(items.some((item) => item.includes(ROW_ACTION))).toBe(false);
 
     pressKey("Escape");
     await waitFor(async () => ((await present(".menubar__menu")) === false ? true : null), {
@@ -396,5 +429,182 @@ describe("modules beside the executable", () => {
       timeout: 20000,
       message: "the episode to reach the rail of a project a module has written to",
     });
+  });
+
+  it("draws the panel a module filled, with the cells it pushed and no others", async () => {
+    // Criterion 11 of module-abi.md section 9. Nothing draws until the module fills it: a panel
+    // shows what it showed before while a run is open, and this one has never been filled.
+    expect(await present(".modulepanel")).toBe(false);
+
+    await runModuleItem(toplevel, FILL_ITEM);
+    await waitFor(() => present(".modulepanel"), {
+      timeout: 20000,
+      message: "the panel the module filled to be drawn",
+    });
+
+    const rows = await browser.execute(() =>
+      Array.from(document.querySelectorAll(".modulepanel__row")).map((row) =>
+        Array.from(row.querySelectorAll(".modulepanel__cell")).map((cell) => ({
+          kind: (cell.className.match(/modulepanel__cell--(\w+)/) ?? [])[1] ?? "",
+          text: cell.textContent ?? "",
+        })),
+      ),
+    );
+    // Two rows of three cells, exactly as the module pushed them. The core drew a table and never
+    // asked what a row means: the kinds are the module's and so are both the values.
+    expect(rows).toEqual([
+      [
+        { kind: "text", text: "The first row" },
+        { kind: "number", text: "11" },
+        { kind: "percent", text: "25%" },
+      ],
+      [
+        { kind: "text", text: "The second row" },
+        { kind: "number", text: "22" },
+        { kind: "percent", text: "75%" },
+      ],
+    ]);
+  });
+
+  it("carries the panel's own id and the row's handle when a row is activated", async () => {
+    // The panel is the one the check above filled. The primary row action is the panel's own id,
+    // so it arrives in both `item_id` and `panel_id` (module-abi.md 4.1).
+    const before = (appLog(dataHome()).match(ROW_SAID) ?? []).length;
+
+    const rowButtons = await browser.execute(
+      () => document.querySelectorAll(".modulepanel__activate").length,
+    );
+    expect(rowButtons).toBe(2);
+    await clickElement(toplevel, ".modulepanel__row:nth-of-type(2) .modulepanel__activate");
+
+    const said = await waitFor(
+      () => {
+        const all = [...appLog(dataHome()).matchAll(ROW_SAID)];
+        return all.length > before ? all[all.length - 1] : null;
+      },
+      { timeout: 20000, message: "the module to say which row was activated" },
+    );
+    expect(said[1]).toBe(String(PANEL_ID));
+    // Every digit of 2^53 plus one. A number on the wire would arrive here one short.
+    expect(said[2]).toBe(SECOND_HANDLE);
+  });
+
+  it("carries the action's own id and the same handle when the second action is used", async () => {
+    const before = (appLog(dataHome()).match(ACTION_SAID) ?? []).length;
+
+    // Drawn on every row, because its parent is the panel. One per row, so two in all.
+    const actions = await browser.execute(
+      () => document.querySelectorAll(".modulepanel__action").length,
+    );
+    expect(actions).toBe(2);
+    await clickElement(toplevel, ".modulepanel__row:nth-of-type(2) .modulepanel__action");
+
+    const said = await waitFor(
+      () => {
+        const all = [...appLog(dataHome()).matchAll(ACTION_SAID)];
+        return all.length > before ? all[all.length - 1] : null;
+      },
+      { timeout: 20000, message: "the module to say the row action ran" },
+    );
+    // Its own id, not the panel's, and the same row: one gesture shape carries both actions.
+    expect(said[1]).toBe(String(ROW_ACTION_ID));
+    expect(said[2]).toBe(SECOND_HANDLE);
+    // The first row's handle is the other one, so a check that read the wrong row would say so.
+    expect(said[2]).not.toBe(FIRST_HANDLE);
+  });
+
+  it("shows a module's status and progress while it works, and stops it when asked", async () => {
+    const before = (appLog(dataHome()).match(STOPPED) ?? []).length;
+
+    // Not awaited: this item works for as long as it takes to be stopped, and the point of the
+    // band is that it is on screen while that happens.
+    void runModuleItem(toplevel, LONG_ITEM);
+
+    await waitFor(() => present(".modulework"), {
+      timeout: 20000,
+      message: "the band to appear while the module works",
+    });
+    // The module's own line and its own two numbers. The core has no word for either.
+    const status = await waitFor(
+      async () => {
+        const line = await textOf(".modulework__status");
+        return line !== null && /^step \d+ of 40$/.test(line) ? line : null;
+      },
+      { timeout: 20000, message: "the module to say what step it is on" },
+    );
+    expect(status).toMatch(/^step \d+ of 40$/);
+    const reading = await browser.execute(() => {
+      const bar = document.querySelector(".modulework__progress");
+      return bar === null ? null : { value: bar.value, max: bar.max };
+    });
+    expect(reading).not.toBe(null);
+    expect(reading.max).toBe(40);
+    expect(reading.value).toBeGreaterThan(0);
+    expect(reading.value).toBeLessThan(40);
+
+    await clickElement(toplevel, ".modulework__stop");
+    const said = await waitFor(
+      () => {
+        const all = [...appLog(dataHome()).matchAll(STOPPED)];
+        return all.length > before ? all[all.length - 1] : null;
+      },
+      { timeout: 30000, message: "the module to say where it stopped" },
+    );
+    // Below the total, which is what says it stopped rather than finished. The step is the
+    // module's own and no number here predicts which one it reached.
+    expect(Number(said[1])).toBeLessThan(Number(said[2]));
+    expect(said[2]).toBe("40");
+
+    // And the band goes with the work, both when the event lands and when the call settles.
+    await waitFor(async () => ((await present(".modulework")) === false ? true : null), {
+      timeout: 20000,
+      message: "the band to go when the work ends",
+    });
+  });
+
+  it("never reaches a module with a greyed item, and the barrier proves the zero", async () => {
+    // Decision 2.3's rule about `runCommand`, applied to a control the core did not author. With
+    // no project open the storage item is greyed, and a greyed command must not run.
+    await closeAnyOpenProject(toplevel);
+    expect(await storeItemState(toplevel)).toEqual({ drawn: true, enabled: false });
+
+    const before = (appLog(dataHome()).match(STORED) ?? []).length;
+    // Clicked where it is drawn, rather than through the helper above: that one waits for the
+    // dropdown to close behind the item it ran, and a greyed item does not close it.
+    await clickElement(toplevel, ".menubar__title--module-0-1");
+    await waitFor(() => present(".menubar__menu"), {
+      timeout: 15000,
+      message: "the module's own dropdown to open",
+    });
+    const greyed = await browser.execute(
+      (want) =>
+        Array.from(document.querySelectorAll(".menubar__item")).find((item) =>
+          (item.textContent ?? "").includes(want),
+        )?.id ?? null,
+      STORE_ITEM,
+    );
+    if (greyed === null) {
+      throw new Error(`the module drew no item reading ${STORE_ITEM}`);
+    }
+    await clickElement(toplevel, `#${greyed}`);
+    pressKey("Escape");
+    await waitFor(async () => ((await present(".menubar__menu")) === false ? true : null), {
+      timeout: 15000,
+      message: "the dropdown to close again",
+    });
+
+    // A zero on its own says nothing: the click may simply never have landed. So a known good
+    // activation follows it, and the module answering that one is what makes the zero a refusal.
+    // Same barrier `command-registry.spec.js` uses for the core's own greyed commands.
+    const marker = (appLog(dataHome()).match(ROW_SAID) ?? []).length;
+    await runModuleItem(toplevel, FILL_ITEM);
+    await clickElement(toplevel, ".modulepanel__row:nth-of-type(1) .modulepanel__activate");
+    await waitFor(() => [...appLog(dataHome()).matchAll(ROW_SAID)].length > marker, {
+      timeout: 20000,
+      message: "the ungreyed activation to reach the module",
+    });
+
+    // The greyed one never arrived, and the run after it did.
+    expect((appLog(dataHome()).match(STORED) ?? []).length).toBe(before);
   });
 });

@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { en } from "../i18n/en";
 import { fill } from "../i18n/format";
+import { type PublishedPanel } from "./useModulePanels";
+import { type RowRef } from "../types/chrome";
 import {
   isSubtitleError,
   type CuePatch,
@@ -106,7 +108,15 @@ export type SubtitleFile = {
    * given and the patches it sends back are this hook's, and one owner for both is what keeps them
    * from disagreeing. See docs/module-abi.md section 4.5.
    */
-  invokeModule: (module: number, item: number, cue: number | null) => Promise<void>;
+  invokeModule: (
+    module: number,
+    item: number,
+    cue: number | null,
+    /** The panel the gesture came from, and zero when it came from a menu or a toolbar. */
+    panelId: number,
+    /** The activated row's handle, and null when no row carried one. */
+    row: RowRef | null,
+  ) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   save: () => Promise<void>;
@@ -116,15 +126,25 @@ export type SubtitleFile = {
 /** Told after every patch that changed the row count, so the cursor and the selection follow. */
 export type RowsMoved = (at: number, removed: number, inserted: number) => void;
 
+/** Told what an activation published, so the panels go where the panels live. */
+export type PanelSink = (panels: PublishedPanel[]) => void;
+
 /**
  * What one activation of a contributed item did. Mirrors `modules::InvokeOutcome`.
  *
  * The two halves are independent: a module that edited and then refused did both, and the code is
  * the module's own rather than one the core translates.
  */
-type ModuleOutcome = { code: number; patches: CuePatch[] };
+type ModuleOutcome = { code: number; patches: CuePatch[]; panels: PublishedPanel[] };
 
-export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
+/**
+ * @param onPanels What an activation published, handed on to whoever holds the panels.
+ *
+ * Handed in once rather than read here, the way `useTranscription` is handed `adopt`: the panels
+ * are not this hook's state, and the activation that produces them is, because the revision a
+ * module proposes against and the patches it sends back are both this hook's.
+ */
+export function useSubtitleFile(onRowsMoved: RowsMoved, onPanels: PanelSink): SubtitleFile {
   const [summary, setSummary] = useState<SubtitleSummary | null>(null);
   const [cues, setCues] = useState<CueRow[]>([]);
   const [canUndo, setCanUndo] = useState(false);
@@ -288,7 +308,7 @@ export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
    * module may change nothing, one cue, or several before it answers.
    */
   const invokeModule = useCallback(
-    (module: number, item: number, cue: number | null) =>
+    (module: number, item: number, cue: number | null, panelId: number, row: RowRef | null) =>
       serialize(async () => {
         setError(null);
         try {
@@ -298,12 +318,12 @@ export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
             at: {
               revision: revision.current,
               cue,
-              // Both are a panel's, and panels are not built. Section 4.1 says `row` is only
-              // meaningful when `panelId` is not zero, so zero here says there is no row.
-              row: 0,
-              panelId: 0,
-              // Nothing to carry yet: a module keys its own storage on this, storage is not built,
-              // and `ProjectView` has no id to give. See docs/module-host-tasks.md H6.
+              // Section 4.1 says `row` is meaningful only when `panelId` is not zero, so a menu
+              // item sends both empty. A decimal string, because the handle is a `u64`.
+              row: row ?? "0",
+              panelId,
+              // Nothing to carry yet: a module keys its own storage on this, storage keys on the
+              // file it is in, and `ProjectView` has no id to give. See docs H6.
               projectKey: 0,
             },
           });
@@ -312,6 +332,8 @@ export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
           for (const patch of outcome.patches) {
             applyPatch(patch);
           }
+          // On the same terms: a run the module closed is published whatever it answered after.
+          onPanels(outcome.panels);
           if (outcome.code !== 0) {
             // The core does not know what the module was doing, so it has no sentence for this.
             // The Rust side names the module, the item and the code in the log.
@@ -321,7 +343,7 @@ export function useSubtitleFile(onRowsMoved: RowsMoved): SubtitleFile {
           setError(toSubtitleError(failure));
         }
       }),
-    [applyPatch, serialize],
+    [applyPatch, onPanels, serialize],
   );
 
   const setText = useCallback(

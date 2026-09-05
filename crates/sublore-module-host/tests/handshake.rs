@@ -22,7 +22,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use sublore_module_api::{
     SubloreHost, SubloreItem, SUBLORE_ABI_MINOR, SUBLORE_ENABLE_ALWAYS, SUBLORE_HOST_SIZE,
-    SUBLORE_ITEM_MENU_ITEM, SUBLORE_ITEM_MENU_TITLE, SUBLORE_OK,
+    SUBLORE_ITEM_MENU_ITEM, SUBLORE_ITEM_MENU_TITLE, SUBLORE_ITEM_PANEL, SUBLORE_OK,
 };
 use sublore_module_host::{scan, Refusal};
 
@@ -235,15 +235,39 @@ fn the_good_fixture_loads_and_describes_what_it_contributes() {
     };
     assert_eq!(answer, SUBLORE_OK);
 
-    // A title, three items under it, and one the host is meant to refuse. This sink is not the
-    // host and accepts everything, which is what lets it see the last one at all.
-    assert_eq!(items.len(), 5, "a title and four items: {items:?}");
+    // A title, one panel, six items under one or the other, and one the host is meant to refuse.
+    // This sink is not the host and accepts everything, which is what lets it see the last one.
+    assert_eq!(
+        items.len(),
+        9,
+        "a title, a panel and seven items: {items:?}"
+    );
     assert_eq!(items[0].kind, SUBLORE_ITEM_MENU_TITLE);
     assert_eq!(items[0].parent, 0, "the title is top level");
-    for under in &items[1..] {
-        assert_eq!(under.kind, SUBLORE_ITEM_MENU_ITEM);
-        assert_eq!(under.parent, items[0].id, "every item hangs off the title");
+
+    // The panel is the other top-level contribution, and it is what makes the parent link mean two
+    // things: an item under the title is a menu item, one under the panel is its row action.
+    let panel = items
+        .iter()
+        .find(|item| item.kind == SUBLORE_ITEM_PANEL)
+        .expect("the fixture contributes one panel");
+    assert_eq!(panel.parent, 0, "the panel is top level too");
+    for under in items
+        .iter()
+        .filter(|item| item.kind == SUBLORE_ITEM_MENU_ITEM)
+    {
+        assert!(
+            under.parent == items[0].id || under.parent == panel.id,
+            "every item hangs off the title or the panel: {under:?}"
+        );
     }
+    // Exactly one of them hangs off the panel, and that one is the secondary row action (§4.1).
+    assert_eq!(
+        items.iter().filter(|item| item.parent == panel.id).count(),
+        1,
+        "one secondary row action: {items:?}"
+    );
+
     assert_eq!(items[1].enable_when, SUBLORE_ENABLE_ALWAYS);
     // The one that proposes against a stale revision needs a document to propose against, so a
     // refusal there is about the revision and not about there being nothing open.
@@ -259,9 +283,10 @@ fn the_good_fixture_loads_and_describes_what_it_contributes() {
     );
     // The last is the fixture's own trap, and the zero is what makes it one: §5.2 has no value
     // for it, so a host that draws that item has stopped checking.
+    let last = items.last().expect("the list is not empty");
     assert_eq!(
-        items[4].enable_when, 0,
-        "the refusable item must carry a state with no meaning"
+        last.enable_when, 0,
+        "the refusable item must carry a state with no meaning, and must be pushed last"
     );
     // The locale went in through `create` and came back out inside a label, which is the only
     // evidence from this side that the string crossed the boundary intact.
