@@ -278,6 +278,16 @@ fn hold_at_least(
     if !hold {
         return Ok([inner.width, inner.width]);
     }
+    // Told the width it actually has before it is asked for the one it should have. A resize to
+    // the size the toolkit believes it already is can be dropped without reaching the server, and
+    // a window shrunk by anything other than the application is exactly the case where the two
+    // disagree: the check that fails asks for the floor from a window sitting on the floor, and
+    // the one that passes asks from a window the test had just made wide. See N32.
+    if (inner.width - width).abs() > f64::EPSILON {
+        window
+            .set_size(tauri::LogicalSize::new(inner.width, inner.height))
+            .map_err(|error| format!("saying how wide it is was refused: {error}"))?;
+    }
     window
         .set_size(tauri::LogicalSize::new(width, inner.height))
         .map_err(|error| format!("coming up to it was refused: {error}"))?;
