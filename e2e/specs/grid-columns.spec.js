@@ -27,7 +27,7 @@ import { askForWindowSize, clickAt, dragAt, focusWindow, waitForWindowSize } fro
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { interfaceScale } from "../lib/scale.js";
-import { findToplevel, rootTree, windowSize } from "../lib/x11.js";
+import { findToplevel, minimumWidthHint, rootTree } from "../lib/x11.js";
 
 /** Percentage widths and scaled type both land on fractions of a pixel. */
 const SLOP_PX = 1;
@@ -433,6 +433,7 @@ async function settleAt(id, ask, height, took) {
       ratio: window.devicePixelRatio,
       resizes: window.__subloreResizes,
       outer: window.outerWidth,
+      seen: document.querySelector(".shell")?.dataset.floorSeen ?? "",
     }));
     throw new Error(`${refused.message}\nthe page reads ${JSON.stringify(page)}`);
   }
@@ -601,9 +602,18 @@ describe("the grid's style and actor columns", () => {
 
     // And the narrowest window there is at the largest size, with the wider head open in it: the
     // head is not cut off at the window edge and the page has not started scrolling sideways.
+    //
+    // The floor is asserted where it is kept, which is the size the window declares to whatever
+    // places it. A window manager honours that and a person cannot drag the window under it. This
+    // battery has no window manager, so nothing here enforces it and the shell asking for the
+    // width back is a best effort that one toolkit version performs and another drops without a
+    // word. See N32, where four attempts to make that ask land are written down.
     const floor = await derivedFloor();
-    toplevel = await settleAt(toplevel.id, floor - 1, windowHeight, floor);
-    expect(windowSize(toplevel.id)?.width ?? null).toBe(floor);
+    expect({ where: "the declared minimum", width: minimumWidthHint(toplevel.id) }).toEqual({
+      where: "the declared minimum",
+      width: floor,
+    });
+    toplevel = await settleAt(toplevel.id, floor, windowHeight, floor);
     expect(await clippedAtWindowEdge(SLOP_PX)).toEqual([]);
     const across = await browser.execute(() => ({
       document: document.documentElement.scrollWidth,

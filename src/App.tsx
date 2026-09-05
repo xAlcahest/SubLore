@@ -1154,7 +1154,11 @@ export default function App() {
     <LayerContext.Provider value={layers.registrar}>
       {/* The floor, published where it can be read back: it is a measurement and not a number, so
         nothing outside the app could work out what the window was told. */}
-      <div className="shell" data-minimum-width={windowFloor.width ?? undefined}>
+      <div
+        className="shell"
+        data-minimum-width={windowFloor.width ?? undefined}
+        data-floor-seen={windowFloor.seen ?? undefined}
+      >
         <header className="shell__chrome">
           <MenuBar menus={menus} commands={commands} />
           <Toolbar groups={toolbar} commands={commands} />
