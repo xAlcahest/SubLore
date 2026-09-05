@@ -19,6 +19,7 @@ import { useCueSelection } from "./hooks/useCueSelection";
 import { LayerContext, useLayerRegistry } from "./hooks/useLayers";
 import { useAudioTracks } from "./hooks/useAudioTracks";
 import { useLayout } from "./hooks/useLayout";
+import { useWindowFloor } from "./hooks/useWindowFloor";
 import { usePreview } from "./hooks/usePreview";
 import { useContributions, type Contribution } from "./hooks/useContributions";
 import { useModules, refusalLine } from "./hooks/useModules";
@@ -165,6 +166,7 @@ export default function App() {
     toolsHeight: 0,
     lineHeight: 0,
     topWidth: 0,
+    railWidth: 0,
     gridHeight: 0,
   });
   const { state, position, errorCode, open, togglePlayback, seek, playRange, setRegion } =
@@ -204,6 +206,9 @@ export default function App() {
     }
     const line = column.querySelector(".currentline");
     const video = top.querySelector(".shell__video");
+    // The one panel in the block whose width is fixed rather than dragged, and the one the window's
+    // own floor has to leave room for beside the two that are.
+    const rail = top.parentElement?.querySelector(".shell__rail") ?? null;
     // One snapshot, so the pairs a bound is worked out from always describe the same layout: a
     // width read a frame after its neighbour would let a drag walk past its own ceiling.
     const measure = () =>
@@ -213,10 +218,11 @@ export default function App() {
         toolsHeight: column.clientHeight,
         lineHeight: line === null ? 0 : line.clientHeight,
         topWidth: top.clientWidth,
+        railWidth: rail === null ? 0 : rail.getBoundingClientRect().width,
         gridHeight: grid.clientHeight,
       });
     const observer = new ResizeObserver(measure);
-    for (const element of [column, top, grid, line, video]) {
+    for (const element of [column, top, grid, line, video, rail]) {
       if (element !== null) {
         observer.observe(element);
       }
@@ -274,6 +280,18 @@ export default function App() {
   );
   const asFraction = (width: number) =>
     frame.topWidth > 0 ? width / frame.topWidth : (layout?.videoFraction ?? 0);
+
+  // What the block under the chrome asks for, which is one of the widths the window's own floor is
+  // the widest of: the rail, the two panels at their floors, and the edge between them. The gap
+  // between the row and the two panels in it is that edge, read off the row rather than named.
+  // Null until the video panel's floor is known, because a block floor short of it is not one.
+  const minBlockWidth =
+    transportFloor === null
+      ? null
+      : frame.railWidth +
+        transportFloor +
+        Math.max(0, frame.topWidth - frame.videoWidth - frame.toolsWidth) +
+        MIN_TOOLS_WIDTH * scale;
 
   // How far the block may shrink before the column stops shrinking the current line and starts
   // pushing it out: the slack the line has over its own minimum, read off the rendered line.
@@ -1050,6 +1068,15 @@ export default function App() {
     ["edit.undo", "edit.redo"],
   ];
 
+  // How narrow the window may be made, measured off the shell and carried to the window (S1). The
+  // titles are what a module can add to, and the only part of either bar whose width is not the
+  // same in every state: a greyed command is drawn, so nothing else here comes or goes.
+  const windowFloor = useWindowFloor(
+    scale,
+    menus.map((menu) => menu.title).join("\n"),
+    minBlockWidth,
+  );
+
   // Read by the accelerator listener, which is registered once and outlives every render.
   const latest = useRef(commands);
   useEffect(() => {
@@ -1079,7 +1106,9 @@ export default function App() {
 
   return (
     <LayerContext.Provider value={layers.registrar}>
-      <div className="shell">
+      {/* The floor, published where it can be read back: it is a measurement and not a number, so
+        nothing outside the app could work out what the window was told. */}
+      <div className="shell" data-minimum-width={windowFloor.width ?? undefined}>
         <header className="shell__chrome">
           <MenuBar menus={menus} commands={commands} />
           <Toolbar groups={toolbar} commands={commands} />
@@ -1261,7 +1290,7 @@ export default function App() {
           videoErrorCode={errorCode}
           projectDeleted={project.deleted}
           projectError={project.error}
-          chromeError={quitError}
+          chromeError={quitError ?? (windowFloor.failed ? en.shell.errors.windowFloor : null)}
           waveformFailed={peaks.error !== null}
           previewFailed={preview.failed}
           moduleRefusals={modules.refused.map((refused) => refusalLine(refused, en.modules))}

@@ -56,6 +56,12 @@ const MIN_TOP_HEIGHT: f64 = 92.0;
 
 const MAX_TOP_HEIGHT: f64 = 1200.0;
 
+/// A ceiling on the width the shell may ask the window to be held at, for the same reason every
+/// other ceiling here exists: a number arriving from outside cannot be allowed to hold the window
+/// at a width no screen has. It is a guard and not a measurement: the widest row the shell can ask
+/// for is a fraction of it at every interface size the View menu offers.
+const MAX_MINIMUM_WIDTH: f64 = 4096.0;
+
 /// The root font-size multiplier the interface opens at. S1 moves this off 1.0, today's size, to
 /// 1.1 (110%): the controls it scales read small for a tool used for hours.
 const DEFAULT_INTERFACE_SCALE: f64 = 1.1;
@@ -200,6 +206,63 @@ pub fn layout_write(app: AppHandle, layout: Layout) {
     if let Err(error) = write_to(&path, layout.sane()) {
         log::warn!("layout: where the sashes were left could not be stored: {error}");
     }
+}
+
+/// The window's height floor, which is the one declared in `tauri.conf.json` and is not measured:
+/// nothing in the shell's vertical chain is a row that cannot shrink, and the grid gives up its
+/// height before anything is pushed out. Zero when the file declares none, which is what the window
+/// already had.
+fn configured_min_height(window: &tauri::WebviewWindow) -> f64 {
+    use tauri::Manager;
+
+    window
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|declared| declared.label == window.label())
+        .and_then(|declared| declared.min_height)
+        .unwrap_or(0.0)
+}
+
+/// How narrow the window may be made, in CSS pixels, measured off the rows the shell cannot draw
+/// narrower than their contents. Sent when that measurement changes, which is when the interface
+/// size changes and when the fonts settle.
+///
+/// Nothing here is stored: the number is a fact about the type this machine has, and one written
+/// into a file would outlive the fonts it was read against. The height stays what the configuration
+/// declared, for the reason on `configured_min_height`.
+#[tauri::command]
+pub fn layout_set_minimum_width(window: tauri::WebviewWindow, width: f64) -> Result<(), String> {
+    hold_at_least(&window, width).inspect_err(|reason| {
+        log::warn!("layout: the window could not be held at {width} css pixels wide: {reason}");
+    })
+}
+
+fn hold_at_least(window: &tauri::WebviewWindow, width: f64) -> Result<(), String> {
+    if !width.is_finite() || width <= 0.0 || width > MAX_MINIMUM_WIDTH {
+        return Err(format!("{width} is not a width a window can be held at"));
+    }
+    let height = configured_min_height(window);
+    window
+        .set_min_size(Some(tauri::LogicalSize::new(width, height)))
+        .map_err(|error| format!("the smallest size was refused: {error}"))?;
+
+    // A floor the window is already under is not a floor: a minimum does not resize a window that
+    // is smaller than it, so the difference is asked for once, here.
+    let scale = window
+        .scale_factor()
+        .map_err(|error| format!("no scale factor to read a width against: {error}"))?;
+    let inner: tauri::LogicalSize<f64> = window
+        .inner_size()
+        .map_err(|error| format!("the window would not say how wide it is: {error}"))?
+        .to_logical(scale);
+    if inner.width < width {
+        window
+            .set_size(tauri::LogicalSize::new(width, inner.height))
+            .map_err(|error| format!("coming up to it was refused: {error}"))?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -144,6 +144,10 @@ export const en = {
   shell: {
     videoSash: "Video panel width",
     gridSash: "Top block height",
+    errors: {
+      windowFloor:
+        "Sublore could not stop the window being made too narrow for its controls. Widen the window if part of a bar is cut off.",
+    },
   },
 
   video: {

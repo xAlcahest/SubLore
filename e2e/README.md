@@ -173,6 +173,12 @@ a root window that small the fixture never reaches the ready state, so the size 
 here and in CI. The app starts at 1024x700 and `lib/input.js`'s `resizeWindow` can grow it, so the
 screen is 1920x1080: the largest window a check can ask for and still measure all of.
 
+A check can no longer assume the window took the size it asked for. The shell measures the narrowest
+width it can be drawn at and the window is held there, so at 150 per cent a request for 1024 comes
+back wider under the runner's fonts. `askForWindowSize` sends the request and `waitForWindowSize`
+waits for the width the caller says the window will settle at; `resizeWindow` is still the two
+together for a width that will be granted.
+
 Prerequisites, all of them dev tools rather than repo dependencies:
 
 - `tauri-driver` — `cargo install tauri-driver --version 2.0.6 --locked`
@@ -331,6 +337,14 @@ more.
 
 `.bar__button`, `.stage__surface`, `.stage__empty`, `.controls`, `.controls__button`,
 `.controls__slider`, `.subbar__open`, `.subbar__save-copy`
+
+S1's window floor adds one attribute and freezes three rows. `.shell` carries `data-minimum-width`,
+the narrowest the shell says the window may be, which `interface-scale.spec.js` reads because there
+is no number it could be compared against. The rows that floor is the widest of are `.menubar`,
+`.toolbar` and `.cuelist__head`, listed in `src/hooks/useWindowFloor.ts`. Rename one in the markup
+without renaming it there and the shell says so in the status bar, in the same line it uses when the
+window refuses the floor: a row it was told to measure and could not find is a bar about to be cut
+off, not a row of width zero.
 
 `.controls` and `.controls__slider` carry more than their names here. The video panel's floor is not
 a number any more: it is what that row asks for on one line, so `dividers.spec.js` and

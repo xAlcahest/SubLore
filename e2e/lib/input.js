@@ -109,7 +109,21 @@ export function focusWindow(id, timeoutMs = 5000) {
  * measures the old geometry. The layout a resize is asked for is never the point of the resize.
  */
 export function resizeWindow(id, width, height, timeoutMs = 5000) {
+  askForWindowSize(id, width, height);
+  waitForWindowSize(id, width, height, timeoutMs);
+}
+
+/** The request on its own, for a caller that expects the window to settle at another size. */
+export function askForWindowSize(id, width, height) {
   xdotool(["windowsize", id, String(width), String(height)]);
+}
+
+/**
+ * Wait until X reports the size the caller says the window will take, which is not always the size
+ * it was asked for: a window with a smallest size of its own puts itself back, and a caller that
+ * waited for the width it asked for would time out on a window doing exactly what it should.
+ */
+export function waitForWindowSize(id, width, height, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const size = windowSize(id);

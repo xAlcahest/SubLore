@@ -189,6 +189,7 @@ pub fn run() -> tauri::Result<()> {
             audio::audio_switch_track,
             chooser::choose_path,
             layout::layout_read,
+            layout::layout_set_minimum_width,
             layout::layout_write,
             preview::preview_set_shown,
             project::project_add_episode,

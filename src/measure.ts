@@ -11,6 +11,9 @@
 /** One reading a row can show, applied to a copy of it before that copy is measured. */
 export type RowReading = (row: HTMLElement) => void;
 
+/** A row that shows one thing only is measured showing it, rather than measuring nothing at all. */
+const AS_DRAWN: readonly RowReading[] = [() => {}];
+
 /**
  * The widest a row is on one row, across the readings it can show. Null only when the row is not in
  * the page, in which case there is no row to keep on one line either.
@@ -36,7 +39,7 @@ export function widestRow(row: HTMLElement, readings: readonly RowReading[]): nu
   host.append(copy);
   try {
     let widest = 0;
-    for (const reading of readings) {
+    for (const reading of readings.length === 0 ? AS_DRAWN : readings) {
       reading(copy);
       widest = Math.max(widest, unwrappedWidth(copy));
     }

@@ -10,6 +10,13 @@
  * the size and never redrew would satisfy every one of those readings, so the size is asserted as
  * the thing the complaint was about: how tall the type and the controls come out. The video edge is
  * asserted at its floor while the button is still down, for the reason `pressAndTravel` exists.
+ *
+ * The one number this file does read off the shell is the smallest width the window may be, because
+ * there is no number it could be compared against: it is measured off the rows the shell cannot
+ * draw narrower than their contents, and those are a tenth wider under the runner's fonts than
+ * under the ones this interface was drawn against. S1's criterion was written as 1024x700 and at
+ * 150 per cent the window can no longer be that narrow, so it is asserted here at the narrowest
+ * window there is, and the floor is proved to be one by asking for a pixel under it.
  */
 import { rmSync } from "node:fs";
 import path from "node:path";
@@ -20,17 +27,18 @@ import { browser, expect } from "@wdio/globals";
 import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clippedAtWindowEdge } from "../lib/clipping.js";
 import {
+  askForWindowSize,
   clickAt,
   dragAt,
   focusWindow,
   pressAndTravel,
   releaseButton,
-  resizeWindow,
+  waitForWindowSize,
 } from "../lib/input.js";
 import { repoRoot, requireWaveformFixture, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { interfaceScale } from "../lib/scale.js";
-import { findToplevel, rootTree } from "../lib/x11.js";
+import { findToplevel, rootTree, windowSize } from "../lib/x11.js";
 
 const VIDEO_SASH = ".sash--video";
 const GRID_SASH = ".sash--grid";
@@ -252,17 +260,49 @@ async function pickSize(toplevel, percent) {
 }
 
 /** Resize the app window and wait until the page has been laid out at the new width. */
-async function resizeTo(id, width, height) {
-  resizeWindow(id, width, height);
+function resizeTo(id, width, height) {
+  return settleAt(id, width, height, width);
+}
+
+/**
+ * Ask X for one width and wait for the window to settle at another. The two are the same for every
+ * width the shell can be drawn at; a request under the shell's own floor is the case they differ
+ * in, and the window coming back to the floor is what a smallest window width means.
+ */
+async function settleAt(id, ask, height, took) {
+  askForWindowSize(id, ask, height);
+  waitForWindowSize(id, took, height);
   await waitFor(
-    async () => ((await browser.execute(() => window.innerWidth)) === width ? 1 : null),
-    { timeout: 15000, message: `the page to be laid out ${width} CSS pixels wide` },
+    async () => ((await browser.execute(() => window.innerWidth)) === took ? 1 : null),
+    {
+      timeout: 15000,
+      message: `the page to be laid out ${took} CSS pixels wide`,
+    },
   );
-  const toplevel = findToplevel({ width, height });
+  const toplevel = findToplevel({ width: took, height });
   if (toplevel === null) {
-    throw new Error(`no ${width}x${height} "Sublore" toplevel after the resize.\n${rootTree()}`);
+    throw new Error(`no ${took}x${height} "Sublore" toplevel after the resize.\n${rootTree()}`);
   }
   return toplevel;
+}
+
+/**
+ * The narrowest the shell says the window may be. There is no number here to check it against: it
+ * is measured off the rows that cannot be drawn narrower than what is in them, and every width in
+ * those is a width the machine's fonts decide.
+ */
+async function derivedFloor() {
+  const said = await browser.execute(
+    () => document.querySelector(".shell")?.dataset.minimumWidth ?? null,
+  );
+  const floor = Number(said);
+  if (!Number.isInteger(floor) || floor <= 0) {
+    throw new Error(
+      `the shell says its smallest width is ${JSON.stringify(said)}, which is not a width. ` +
+        "Nothing measured a floor, so there is nothing the window could have been held at.",
+    );
+  }
+  return floor;
 }
 
 async function attachToApp() {
@@ -337,11 +377,17 @@ describe("the interface size", () => {
     expect(opened.menuTitle.height).toBeGreaterThan(at100.menuTitle.height);
   });
 
-  it("keeps the whole interface inside the window at both ends of the range, at both window sizes", async () => {
+  it("keeps the whole interface inside the window at both ends of the range, at the narrowest window it may be and at the wide one", async () => {
     for (const percent of [90, 150]) {
       await pickSize(toplevel, percent);
+      // S1 states its criterion at 1024x700, and at 150 per cent the window may no longer be that
+      // narrow: the toolbar's own row is wider than 1024 under the runner's fonts. So the criterion
+      // is asserted at the narrowest window that exists at this size, which is the width S1 named
+      // whenever the shell still fits in it.
+      const floor = await derivedFloor();
+      const narrow = Math.max(windowWidth, floor);
       for (const size of [
-        { width: windowWidth, height: windowHeight },
+        { width: narrow, height: windowHeight },
         { width: WIDE_WIDTH, height: WIDE_HEIGHT },
       ]) {
         toplevel = await resizeTo(toplevel.id, size.width, size.height);
@@ -355,7 +401,16 @@ describe("the interface size", () => {
         const sideways = across.document > across.client || across.body > across.client;
         expect({ at, sideways }).toEqual({ at, sideways: false });
       }
-      toplevel = await resizeTo(toplevel.id, windowWidth, windowHeight);
+
+      // And the floor is a floor. Asked for one pixel under it, the window comes back to the floor
+      // and to no other width, which is also what says the width above was not just a wide enough
+      // guess. A pixel, so the ask is derived from the shell's own number and from nothing else.
+      const at = `at ${percent} per cent, asked for ${floor - 1}`;
+      toplevel = await settleAt(toplevel.id, floor - 1, windowHeight, floor);
+      expect({ at, took: windowSize(toplevel.id)?.width ?? null }).toEqual({ at, took: floor });
+      expect({ at, clipped: await clippedAtWindowEdge(SLOP_PX) }).toEqual({ at, clipped: [] });
+
+      toplevel = await resizeTo(toplevel.id, narrow, windowHeight);
     }
   });
 
