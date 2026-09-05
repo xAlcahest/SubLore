@@ -55,7 +55,23 @@ function parseWindowLines(text) {
 
 /** The whole tree, for assertion messages that have to be readable at 3am in CI. */
 export function rootTree() {
-  return xwininfo(["-root", "-tree"]);
+  // Read again when a window goes away underneath the walk. `xwininfo -root -tree` lists the
+  // children and then asks about each, so a window destroyed between the two makes X answer
+  // `BadWindow` and the whole walk ends in "Can't query window tree". That is the same fact
+  // `describeOrNull` already forgives one window at a time, and the check it cost a CI run on
+  // 2026-09-05 is `shutdown`, whose whole subject is windows going away. Bounded: a tree that will
+  // not settle in three reads is a display nobody can describe, and that still throws.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return xwininfo(["-root", "-tree"]);
+    } catch (error) {
+      const said = `${error.stderr ?? ""}`;
+      const raced = said.includes("Can't query window tree") || said.includes("BadWindow");
+      if (!raced || attempt === 3) {
+        throw error;
+      }
+    }
+  }
 }
 
 /** Every window on the display, toplevels and descendants alike. */
