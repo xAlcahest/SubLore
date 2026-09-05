@@ -277,6 +277,20 @@ describe("the Audio menu and the track that is drawn", () => {
     // W8's own figure of 200 ms is a number about one machine, which M2.3 already found to be the
     // wrong axis for this kind of claim; `editor.spec.js` carries the reasoning and STATE.md carries
     // the owner's machine's figures. What is asserted here is the part that holds on any machine.
+    // Put the app on the first track before either reading, rather than inheriting whatever the
+    // check above left. It leaves the second track drawn, so timing a switch to the second track
+    // from there times a click on the track that is already playing: the host refuses a second job
+    // for a stream it has already read, nothing is drawn again, and the wait has nothing to see.
+    await audioItems(toplevel);
+    await chooseTrack(toplevel, 1);
+    await waitFor(
+      async () => {
+        const now = await reach();
+        return now !== null && now > 0.8 ? true : null;
+      },
+      { timeout: 30000, message: "the first track to be drawn before either switch is timed" },
+    );
+
     const cold = await timeSwitch(toplevel, 2, { low: 0.05, high: 0.5 });
     const warm = await timeSwitch(toplevel, 1, { low: 0.8, high: 1.01 });
     console.log(
