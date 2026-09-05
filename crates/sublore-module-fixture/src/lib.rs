@@ -87,10 +87,16 @@ const COUNT_NOTES: &str = "SELECT count(*) FROM m_fixture_notes";
 /// anything the core or the user could have put there.
 const WROTE: &str = "The module wrote this line.";
 
-/// What the fixture's own state is. Nothing yet beyond proving `create` and `destroy` pair up.
+/// What the fixture's own state is.
 struct Fixture {
     /// The locale the host handed over, kept so a test can see the string survived the boundary.
     locale: String,
+    /// The key the last `project_opened` carried.
+    ///
+    /// Kept because `project_closing` is handed none: the interface separates the two slots, so a
+    /// module that wants to say which project is going has to remember which one arrived. Zero
+    /// until one has, which is the same value the host carries for "no project is open".
+    project_key: i64,
 }
 
 /// What the exported handshake answers. The export itself lives in the example beside this crate.
@@ -118,8 +124,8 @@ pub unsafe fn load(host: *const SubloreHost, out: *mut SubloreModule) -> i32 {
         create: Some(create),
         destroy: Some(destroy),
         describe: Some(describe),
-        project_opened: None,
-        project_closing: None,
+        project_opened: Some(project_opened),
+        project_closing: Some(project_closing),
         schema_version: None,
         schema_upgrade: None,
         invoke: Some(invoke),
@@ -143,6 +149,7 @@ unsafe extern "C" fn create(
     };
     let fixture = Box::new(Fixture {
         locale: locale.to_owned(),
+        project_key: 0,
     });
     unsafe { ctx_out.write(Box::into_raw(fixture).cast()) };
     SUBLORE_OK
@@ -344,6 +351,14 @@ unsafe extern "C" fn invoke(
         return SUBLORE_ERR_BAD_STRING;
     }
     let at = unsafe { &*where_ };
+    // Every activation, whichever item it is: the key the host filled is what a check reads back,
+    // and an item enabled with nothing open has to be able to say it was handed zero.
+    unsafe {
+        say(&format!(
+            "invoked item {item_id} with key {}",
+            at.project_key
+        ))
+    };
     match item_id {
         // The revision the gesture carried, which is the session's own.
         ITEM_ID => unsafe { rewrite_first_cue(at.revision) },
@@ -361,6 +376,52 @@ unsafe extern "C" fn invoke(
         // An id this module never contributed.
         _ => SUBLORE_ERR_UNSUPPORTED,
     }
+}
+
+/// The project in the slot has appeared. Say which one, so a check can see the module's side.
+///
+/// # Safety
+/// `ctx` is what `create` wrote, and the call is the host's own.
+unsafe extern "C" fn project_opened(ctx: *mut c_void, project_key: i64) -> i32 {
+    if ctx.is_null() {
+        return SUBLORE_ERR_BAD_STRING;
+    }
+    let fixture = unsafe { &mut *ctx.cast::<Fixture>() };
+    fixture.project_key = project_key;
+    unsafe { say(&format!("a project opened, key {project_key}")) }
+}
+
+/// The project in the slot is about to go, and it is still there while this runs.
+///
+/// The key is this module's own memory of the open edge, because the slot is handed none.
+///
+/// # Safety
+/// `ctx` is what `create` wrote, and the call is the host's own.
+unsafe extern "C" fn project_closing(ctx: *mut c_void) -> i32 {
+    if ctx.is_null() {
+        return SUBLORE_ERR_BAD_STRING;
+    }
+    let fixture = unsafe { &mut *ctx.cast::<Fixture>() };
+    let key = fixture.project_key;
+    fixture.project_key = 0;
+    unsafe { say(&format!("a project is closing, key {key}")) }
+}
+
+/// Put one line in the host's log, which is the only thing a check outside this process can read.
+///
+/// # Safety
+/// Called only from inside a host call, with the table `load` was given.
+unsafe fn say(line: &str) -> i32 {
+    let table = HOST.load(Ordering::Acquire);
+    if table.is_null() {
+        return SUBLORE_ERR_UNSUPPORTED;
+    }
+    let table = unsafe { &*table };
+    let Some(log) = table.log else {
+        return SUBLORE_ERR_UNSUPPORTED;
+    };
+    unsafe { log(table.ctx, SUBLORE_LOG_INFO, SubloreStr::borrowed(line)) };
+    SUBLORE_OK
 }
 
 /// Put the two rows above into the panel, in one run.
@@ -420,17 +481,7 @@ unsafe fn fill_the_panel() -> i32 {
 /// # Safety
 /// Called only from inside a host call, with the table `load` was given.
 unsafe fn say_row(what: &str, item: u32, row: u64) -> i32 {
-    let table = HOST.load(Ordering::Acquire);
-    if table.is_null() {
-        return SUBLORE_ERR_UNSUPPORTED;
-    }
-    let table = unsafe { &*table };
-    let Some(log) = table.log else {
-        return SUBLORE_ERR_UNSUPPORTED;
-    };
-    let said = format!("{what}: item {item} and row {row}");
-    unsafe { log(table.ctx, SUBLORE_LOG_INFO, SubloreStr::borrowed(&said)) };
-    SUBLORE_OK
+    unsafe { say(&format!("{what}: item {item} and row {row}")) }
 }
 
 /// Work long enough to be watched and stopped: a progress and a line per step, and a question.

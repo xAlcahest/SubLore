@@ -105,7 +105,7 @@ pub async fn project_create(
 ) -> Result<ProjectView, ProjectError> {
     let slot = state.handle();
     blocking("create", move || {
-        let view = create(&slot, &folder)?;
+        let view = across_edges(&app, &slot, || create(&slot, &folder))?;
         session::opened(&app, Path::new(&view.folder));
         log::info!("project: created {}", view.folder);
         Ok(view)
@@ -121,7 +121,7 @@ pub async fn project_open(
 ) -> Result<ProjectView, ProjectError> {
     let slot = state.handle();
     blocking("open", move || {
-        let view = open(&slot, &folder)?;
+        let view = across_edges(&app, &slot, || open(&slot, &folder))?;
         session::opened(&app, Path::new(&view.folder));
         log::info!("project: opened {}", view.folder);
         Ok(view)
@@ -138,7 +138,7 @@ pub async fn project_close(
 ) -> Result<(), ProjectError> {
     let slot = state.handle();
     blocking("close", move || {
-        close(&slot)?;
+        across_edges(&app, &slot, || close(&slot))?;
         session::closed(&app);
         log::info!("project: closed");
         Ok(())
@@ -224,7 +224,7 @@ pub async fn project_delete(
 ) -> Result<ProjectDeletedView, ProjectError> {
     let slot = state.handle();
     blocking("delete", move || {
-        let deleted = delete(&slot)?;
+        let deleted = across_edges(&app, &slot, || delete(&slot))?;
         session::forgotten(&app, Path::new(&deleted.folder));
         log::info!("project: deleted {}", deleted.folder);
         Ok(deleted)
@@ -298,6 +298,27 @@ pub async fn project_locate_file(
         Ok(view)
     })
     .await
+}
+
+/// Run a project command with every loaded module told the edges around it.
+///
+/// The four commands that change which project is open go through here and no others: an episode
+/// is not a project, so selecting, adding, renaming or attaching to one is not an edge. Quit is,
+/// through `shutdown_project`. See docs/module-lifecycle-tasks.md §2.
+///
+/// A build with no module state, which is every unit check of this module, changes the project and
+/// tells nobody. The work is the same either way.
+pub(crate) fn across_edges<T>(
+    app: &AppHandle,
+    slot: &SharedProject,
+    work: impl FnOnce() -> T,
+) -> T {
+    use tauri::Manager;
+
+    match app.try_state::<crate::modules::ModuleState>() {
+        Some(modules) => modules.across_a_project_edge(slot, work),
+        None => work(),
+    }
 }
 
 /// Every command's body runs here: SQLite calls and native dialogs both block, so neither ever

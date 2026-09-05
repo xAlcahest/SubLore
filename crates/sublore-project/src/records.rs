@@ -13,22 +13,30 @@ use rusqlite::{params, OptionalExtension, Row};
 
 use crate::db::Database;
 use crate::error::{ProjectError, ProjectErrorKind};
+use crate::identity;
 use crate::model::{Episode, EpisodeFile, FileRole, ProjectSummary};
 
-/// An open project: the connection, and the summary the UI shows beside it.
+/// An open project: the connection, the summary the UI shows beside it, and the number a module
+/// tells this project from another one by.
 #[derive(Debug)]
 pub struct Project {
     database: Database,
     summary: ProjectSummary,
+    key: i64,
 }
 
 impl Project {
     pub fn create(folder: &Path, title: &str, now: SystemTime) -> Result<Self, ProjectError> {
-        Self::from_database(Database::create(folder, title, now)?)
+        Self::from_database(Database::create(folder, title, now)?, now)
     }
 
     pub fn open(folder: &Path) -> Result<Self, ProjectError> {
-        Self::from_database(Database::open(folder)?)
+        Self::from_database(Database::open(folder)?, SystemTime::now())
+    }
+
+    /// This project's own key, never zero. See `identity.rs` and BACKLOG.md N33.
+    pub fn key(&self) -> i64 {
+        self.key
     }
 
     pub fn close(self) -> Result<(), ProjectError> {
@@ -61,9 +69,18 @@ impl Project {
 
     /// The first query a freshly opened database runs, and so the one that reports a file that is
     /// damaged rather than merely unfamiliar.
-    fn from_database(database: Database) -> Result<Self, ProjectError> {
+    ///
+    /// The key is settled here, on both paths, so a project created by this build and one migrated
+    /// up to it reach the rest of the app the same way.
+    fn from_database(mut database: Database, now: SystemTime) -> Result<Self, ProjectError> {
         let summary = read_summary(&database)?;
-        Ok(Self { database, summary })
+        let path = database.database_path().to_path_buf();
+        let key = identity::ensure(database.conn_mut(), &path, now)?;
+        Ok(Self {
+            database,
+            summary,
+            key,
+        })
     }
 }
 

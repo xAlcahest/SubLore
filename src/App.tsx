@@ -209,6 +209,16 @@ export default function App() {
   const subtitle = useSubtitleFile(onRowsMoved, modulePanels.publish);
   const preview = usePreview();
   const project = useProject();
+  // Every module panel goes whenever the open project changes, including to nothing and from
+  // nothing. One derivation rather than two call sites, because the swap has no close in it from
+  // this side: `useProject.open` replaces the project view and never passes through `close`, so a
+  // rule written as "clear on close and also on open" is a rule the next project command forgets.
+  // See docs/module-lifecycle-tasks.md §5.
+  const openProjectFolder = project.project?.folder ?? null;
+  const clearModulePanels = modulePanels.clear;
+  useEffect(() => {
+    clearModulePanels();
+  }, [openProjectFolder, clearModulePanels]);
   // A finished transcription becomes the open document, and the backend asks about unsaved work on
   // the way there. See BACKLOG.md M3.5.
   const transcription = useTranscription((runId) => void adoptTranscription(runId));

@@ -322,9 +322,6 @@ export function useSubtitleFile(onRowsMoved: RowsMoved, onPanels: PanelSink): Su
               // item sends both empty. A decimal string, because the handle is a `u64`.
               row: row ?? "0",
               panelId,
-              // Nothing to carry yet: a module keys its own storage on this, storage keys on the
-              // file it is in, and `ProjectView` has no id to give. See docs H6.
-              projectKey: 0,
             },
           });
           // Applied before the code is looked at. A module that changed rows and then refused

@@ -10,6 +10,7 @@
 pub mod db;
 pub mod delete;
 pub mod error;
+pub mod identity;
 pub mod layout;
 pub mod migrate;
 pub mod model;
@@ -19,6 +20,7 @@ pub mod records;
 
 pub use db::Database;
 pub use error::{ProjectError, ProjectErrorKind};
+pub use identity::NO_PROJECT_KEY;
 pub use layout::{database_path, APPLICATION_ID, CURRENT_VERSION, DATABASE_NAME, OWNED_FILES};
 pub use migrate::{migrate, migrate_to};
 pub use model::{Episode, EpisodeFile, FileRole, ProjectSummary};
