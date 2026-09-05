@@ -305,6 +305,28 @@ async function derivedFloor() {
   return floor;
 }
 
+/**
+ * Every button on the waveform's strip that does not answer where it is drawn: the element under
+ * its own centre, when that element is not the button. A strip taller than the panel scrolls
+ * inside it, and a button on a row the panel is not showing is under the current line instead.
+ */
+function stripOutOfReach() {
+  return browser.execute(() => {
+    const buttons = Array.from(document.querySelectorAll(".wavebar__button"));
+    const out = buttons
+      .filter((button) => {
+        const rect = button.getBoundingClientRect();
+        const under = document.elementFromPoint(
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+        );
+        return under === null || !(under === button || button.contains(under));
+      })
+      .map((button) => button.className.replace("wavebar__button ", ""));
+    return { buttons: buttons.length, outOfReach: out };
+  });
+}
+
 async function attachToApp() {
   const toplevel = await waitFor(findToplevel, {
     timeout: 30000,
@@ -410,6 +432,36 @@ describe("the interface size", () => {
       expect({ at, took: windowSize(toplevel.id)?.width ?? null }).toEqual({ at, took: floor });
       expect({ at, clipped: await clippedAtWindowEdge(SLOP_PX) }).toEqual({ at, clipped: [] });
 
+      toplevel = await resizeTo(toplevel.id, narrow, windowHeight);
+    }
+  });
+
+  /**
+   * The half of S1 the window-edge sweep has no arm for: a box cut by a panel's own edge is inside
+   * the window, so the sweep is right to pass it and something else has to ask. The strip is the
+   * one row in the shell that cannot always fit, because it is fourteen words where the reference
+   * is fourteen icons.
+   *
+   * Asserted at the two sizes whose panel can hold every row. At 150 per cent in a window under
+   * about 1090 px the three rows want 122 px inside a 128 px panel and no arrangement holds them,
+   * so the last rows scroll there; that limit is written beside the rule in `src/styles/tools.css`
+   * and it is why 150 is not swept here.
+   */
+  it("answers a click on every button of the waveform's strip, at the sizes the panel holds it", async () => {
+    for (const percent of [90, DEFAULT_PERCENT]) {
+      await pickSize(toplevel, percent);
+      const floor = await derivedFloor();
+      const narrow = Math.max(windowWidth, floor);
+      for (const size of [
+        { width: floor, height: windowHeight },
+        { width: narrow, height: windowHeight },
+        { width: WIDE_WIDTH, height: WIDE_HEIGHT },
+      ]) {
+        toplevel = await resizeTo(toplevel.id, size.width, size.height);
+        const at = `at ${percent} per cent in ${size.width}x${size.height}`;
+        // The count too: a sweep over a strip that drew nothing would pass with nothing to say.
+        expect({ at, ...(await stripOutOfReach()) }).toEqual({ at, buttons: 14, outOfReach: [] });
+      }
       toplevel = await resizeTo(toplevel.id, narrow, windowHeight);
     }
   });

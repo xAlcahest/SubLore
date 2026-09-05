@@ -84,13 +84,29 @@
  * The waveform, above the current line (M2.4 W5). It is absent until a job produces its first
  * chunk: a panel with no provider takes no space, and an empty one is the placeholder the layout
  * document refuses.
+ *
+ * A column: the ruler's band, then the wave, then the panel's own strip. `overflow: hidden` is the
+ * guard that nothing inside it can ever spill past the edge the sash drags.
  */
 .waveform {
   display: flex;
   flex: none;
+  flex-direction: column;
   height: 128px;
+  overflow: hidden;
   border-bottom: 1px solid var(--line);
   background: var(--bg-media);
+}
+
+/* The ruler's own band, above the body. It is a canvas of its own so that the body's height stays
+   the wave's: everything the wave is drawn against is measured from the middle of that box. Its
+   height is written inline, from the type it actually draws (interface-spec 5.3). */
+.waveform__ruler {
+  display: block;
+  flex: none;
+  width: 100%;
+  cursor: ew-resize;
+  font-size: 0.6875rem;
 }
 
 /* Where the panel would be when the media carries no audio (decision 24 E3). A line of prose, in
@@ -107,6 +123,68 @@
    changes the backing store rather than stretching what was already drawn. */
 .waveform__canvas {
   display: block;
+  flex: 1 1 0;
+  /* The strip's rows come before the wave's height, the way the reference's sizer gives its toolbar
+     what it asks for and its display the rest (`src/audio_box.cpp:104-107`). The floor is what is
+     left of the wave when the panel is that short, in the interface's own units. */
+  min-height: 1rem;
   width: 100%;
-  height: 100%;
+  font-size: 0.6875rem;
+}
+
+/*
+ * The panel's own strip of controls, under the wave and inside the panel, which is where the
+ * reference puts it (`src/audio_box.cpp:104-107`). Wraps rather than clips: fourteen text buttons
+ * are wider than the tools column at 1024x700, the way the transport and the current line's times
+ * already are, and a row that scrolled sideways would hold its last buttons past the window edge.
+ *
+ * The panel holds every row at 90 per cent at any width, and at 110 down to the narrowest window
+ * there is. At 150 per cent under about 1090 px the three rows want 122 px in a 128 px panel, so
+ * the last rows scroll: fourteen words need the room the reference's fourteen icons do not.
+ */
+.wavebar {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  /* Rows the panel is too short to hold scroll rather than being cut by its edge: the panel clips
+     what it cannot fit, and a button cut in half is a button lost. */
+  min-height: 0;
+  padding: 0.3rem 0.5rem;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  background: var(--bg-panel);
+  scrollbar-width: thin;
+}
+
+/* Shrinkable, so a column dragged narrower than one button clips that button's own word rather
+   than hanging it over the window edge. */
+.wavebar__button {
+  min-width: 0;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-sunken);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wavebar__button:disabled {
+  color: var(--ink-faint);
+}
+
+/* A toggle drawn as a pressed button, exactly as the main toolbar draws one (interface-spec 4). */
+.wavebar__button[aria-pressed="true"] {
+  background: var(--accent-bg);
+}
+
+.wavebar__divider {
+  width: 1px;
+  height: 0.9rem;
+  background: var(--line-strong);
 }

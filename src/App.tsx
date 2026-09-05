@@ -12,7 +12,8 @@ import ProjectRail from "./components/ProjectRail";
 import Sash from "./components/Sash";
 import StatusBar from "./components/StatusBar";
 import Toolbar from "./components/Toolbar";
-import Waveform from "./components/Waveform";
+import WaveBar, { type WaveBarButton } from "./components/WaveBar";
+import Waveform, { type LiveTimes } from "./components/Waveform";
 import TranscribePanel from "./components/TranscribePanel";
 import VideoControls, { transportReadings } from "./components/VideoControls";
 import VideoStage from "./components/VideoStage";
@@ -153,6 +154,11 @@ const MIN_GRID_HEAD = 25;
  */
 const NEW_CUE_MS = 2000;
 
+/** How far lead-in pulls a start back and lead-out pushes an end on. The reference's own numbers
+ * (`src/audio_timing_dialogue.cpp:551-561`), which are what a translator's ear is used to. */
+const LEAD_IN_MS = 100;
+const LEAD_OUT_MS = 350;
+
 export default function App() {
   // Every HTML layer registers here while it is open, and the video surface hides for as long as
   // the set is not empty (decision 1, T8).
@@ -177,6 +183,10 @@ export default function App() {
   // Decision 24 A4: View arrives with the first panel worth hiding. The choice lasts the session;
   // only the height outlives it (W6).
   const [waveformShown, setWaveformShown] = useState(true);
+  // The audio region: the panel, its strip and the edge under them, drawn only when there are peaks
+  // to draw and View has not turned them off. A panel with no provider takes no space. Declared
+  // here because the effect that resolves the column's bounds is keyed on it.
+  const audioPanelShown = waveformShown && peaks.filled > 0;
   const toolsRef = useRef<HTMLElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLElement>(null);
@@ -192,6 +202,10 @@ export default function App() {
     railWidth: 0,
     gridHeight: 0,
   });
+  /** The panel's own centring, filled in by the panel: only it knows where its window is. */
+  const centreOnCue = useRef<() => void>(() => {});
+  /** The pair a hand is holding on the panel, so playing the selection plays where it is now. */
+  const liveTimes = useRef<LiveTimes>(null);
   const { state, position, errorCode, open, togglePlayback, seek, playRange, setRegion } =
     useVideoPlayer(layers.covered);
   const audio = useAudioTracks(state.path, state.status === "ready");
@@ -626,7 +640,7 @@ export default function App() {
    * Play a stretch of the cursor's cue. mpv has no primitive for this, so the player holds a stop
    * target and the event thread pauses at it. See docs/play-range-tasks.md.
    */
-  async function playCue(what: "line" | "before" | "after" | "to-end") {
+  async function playCue(what: "line" | "before" | "after" | "first" | "last" | "to-end") {
     const at = selection.active;
     const cue = at === null ? null : (subtitle.cues[at] ?? null);
     if (cue === null) {
@@ -641,9 +655,28 @@ export default function App() {
       line: [start, end],
       before: [start - context, start],
       after: [end, end + context],
+      // A line shorter than half a second is played whole rather than clipped to a window it does
+      // not fill, which is what the reference does (`src/command/audio.cpp:306-320`).
+      first: [start, Math.min(end, start + context)],
+      last: [Math.max(start, end - context), end],
       "to-end": [start, state.duration ?? end],
     }[what];
     await playRange(range[0], range[1]);
+  }
+
+  /**
+   * Play the selection, which is the current line's range as the panel has it right now: a boundary
+   * a hand is dragging is played where the hand has put it, and Play line plays what the document
+   * still holds. That difference is the whole reason the reference keeps both (interface-spec 5.9).
+   */
+  async function playSelection() {
+    const at = selection.active;
+    const cue = at === null ? null : (subtitle.cues[at] ?? null);
+    if (cue === null) {
+      return;
+    }
+    const live = liveTimes.current;
+    await playRange((live?.startMs ?? cue.startMs) / 1000, (live?.endMs ?? cue.endMs) / 1000);
   }
 
   /** The step the boundaries move by. One size, no larger variant under Shift (owner ruling 23). */
@@ -715,6 +748,9 @@ export default function App() {
 
   const dirty = subtitle.dirty || editorOpen || lineEdited;
   const blocked = subtitle.blockedPath !== null;
+  // Whatever the stored layout says, and following until it says otherwise: the panel is decoration
+  // on any file longer than its own window if it does not follow the line.
+  const waveAutoscroll = layout?.waveAutoscroll ?? true;
 
   // S1: the View menu's five interface sizes, matching the Rust bounds in layout.rs.
   const interfaceScales = [
@@ -871,10 +907,35 @@ export default function App() {
       run: () => void nudge("end", NUDGE_MS),
     },
     {
+      id: "time.prev-cue",
+      label: en.menu.timing.prevCue,
+      enabled: selection.active !== null && selection.active > 0,
+      run: () => selection.move((selection.active ?? 0) - 1, "plain"),
+    },
+    {
+      id: "time.next-cue",
+      label: en.menu.timing.nextCue,
+      enabled: selection.active !== null && selection.active < subtitle.cues.length - 1,
+      run: () => selection.move((selection.active ?? 0) + 1, "plain"),
+    },
+    {
+      id: "wave.play-selection",
+      label: en.menu.timing.playSelection,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void playSelection(),
+    },
+    {
       id: "time.play-line",
       label: en.menu.timing.playLine,
       enabled: subtitle.summary !== null && selection.active !== null && ready,
       run: () => void playCue("line"),
+    },
+    {
+      id: "wave.stop",
+      label: en.menu.timing.stop,
+      // Greyed unless something is playing, which is what the reference greys it on.
+      enabled: ready && !state.paused,
+      run: () => void togglePlayback(),
     },
     {
       id: "time.play-before",
@@ -889,10 +950,34 @@ export default function App() {
       run: () => void playCue("after"),
     },
     {
+      id: "wave.play-first",
+      label: en.menu.timing.playFirst,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void playCue("first"),
+    },
+    {
+      id: "wave.play-last",
+      label: en.menu.timing.playLast,
+      enabled: subtitle.summary !== null && selection.active !== null && ready,
+      run: () => void playCue("last"),
+    },
+    {
       id: "time.play-to-end",
       label: en.menu.timing.playToEnd,
       enabled: subtitle.summary !== null && selection.active !== null && ready,
       run: () => void playCue("to-end"),
+    },
+    {
+      id: "time.lead-in",
+      label: en.menu.timing.leadIn,
+      enabled: subtitle.summary !== null && selection.active !== null,
+      run: () => void nudge("start", -LEAD_IN_MS),
+    },
+    {
+      id: "time.lead-out",
+      label: en.menu.timing.leadOut,
+      enabled: subtitle.summary !== null && selection.active !== null,
+      run: () => void nudge("end", LEAD_OUT_MS),
     },
     {
       // No cursor needed: finding the cue at the playhead is what gives it one.
@@ -951,6 +1036,22 @@ export default function App() {
       // absent tells the user the command is gone rather than that the panel has nothing to show.
       enabled: true,
       run: () => setWaveformShown((shown) => !shown),
+    },
+    {
+      id: "wave.center-on-cue",
+      label: en.menu.view.centreOnCue,
+      // There is nothing to centre until the panel is on screen with a line drawn on it.
+      enabled: audioPanelShown && activeCue !== null,
+      run: () => centreOnCue.current(),
+    },
+    {
+      id: "wave.toggle-autoscroll",
+      label: en.menu.view.followCue,
+      checked: waveAutoscroll,
+      // Enabled with no audio too, for the reason the waveform's own toggle is: a command that
+      // greys itself when there is nothing to show reads as a command that is gone.
+      enabled: true,
+      run: () => storeLayout({ waveAutoscroll: !waveAutoscroll }),
     },
     // Radio items, drawn the way the Audio menu draws its track list.
     ...interfaceScales.map(({ percent, scale }): Command => ({
@@ -1061,16 +1162,26 @@ export default function App() {
     {
       id: "timing",
       title: en.menu.timing.title,
+      // The order the panel's own strip runs in, so a translator who learns one has learned the
+      // other (owner ruling 2026-09-05). The four nudges keep the end, where they have always been.
       items: [
+        "time.prev-cue",
+        "time.next-cue",
         "time.start-to-playhead",
         "time.end-to-playhead",
         "video.to-cue-start",
         "video.to-cue-end",
         "edit.select-at-playhead",
+        "wave.play-selection",
         "time.play-line",
+        "wave.stop",
         "time.play-before",
         "time.play-after",
+        "wave.play-first",
+        "wave.play-last",
         "time.play-to-end",
+        "time.lead-in",
+        "time.lead-out",
         "time.start-earlier",
         "time.start-later",
         "time.end-earlier",
@@ -1083,6 +1194,8 @@ export default function App() {
       items: [
         "video.toggle-subtitle-overlay",
         "view.waveform-panel",
+        "wave.center-on-cue",
+        "wave.toggle-autoscroll",
         ...interfaceScales.map(({ percent }): CommandId => `view.interface-scale-${percent}`),
       ],
     },
@@ -1112,6 +1225,34 @@ export default function App() {
   const toolbar: CommandId[][] = [
     ["file.open-subtitle", "video.open", "file.save", "file.save-copy", "file.discard"],
     ["edit.undo", "edit.redo"],
+  ];
+
+  /*
+   * The waveform panel's own strip, left to right, with a divider between each group: the order the
+   * reference draws it in, minus the positions §1's non-goals and decision 3 take out. Every entry
+   * is a registry id, so a button here greys with the record the menu bar draws (T3 C1).
+   */
+  const waveBar: WaveBarButton[][] = [
+    [
+      { id: "time.prev-cue", short: en.wavebar.prevCue },
+      { id: "time.next-cue", short: en.wavebar.nextCue },
+      { id: "wave.play-selection", short: en.wavebar.playSelection },
+      { id: "time.play-line", short: en.wavebar.playLine },
+      { id: "wave.stop", short: en.wavebar.stop },
+    ],
+    [
+      { id: "time.play-before", short: en.wavebar.playBefore },
+      { id: "time.play-after", short: en.wavebar.playAfter },
+      { id: "wave.play-first", short: en.wavebar.playFirst },
+      { id: "wave.play-last", short: en.wavebar.playLast },
+      { id: "time.play-to-end", short: en.wavebar.playToEnd },
+    ],
+    [
+      { id: "time.lead-in", short: en.wavebar.leadIn },
+      { id: "time.lead-out", short: en.wavebar.leadOut },
+    ],
+    [{ id: "wave.center-on-cue", short: en.wavebar.centreOnCue }],
+    [{ id: "wave.toggle-autoscroll", short: en.wavebar.followCue }],
   ];
 
   // How narrow the window may be made, measured off the shell and carried to the window (S1). The
@@ -1218,18 +1359,29 @@ export default function App() {
               {waveformShown && peaks.silent && (
                 <p className="tools__silent">{en.waveform.noAudio}</p>
               )}
-              {waveformShown && peaks.filled > 0 && (
+              {audioPanelShown && (
                 <>
                   <Waveform
                     peaks={peaks}
                     positionMs={Math.round(position * 1000)}
                     durationMs={Math.round((state.duration ?? 0) * 1000)}
                     height={layout?.waveformHeight}
+                    scale={scale}
                     paused={state.paused}
                     cueIndex={selection.active}
                     cue={activeCue}
+                    cues={subtitle.cues}
+                    selected={selection.selected}
+                    autoscroll={waveAutoscroll}
+                    centreRef={centreOnCue}
+                    liveRef={liveTimes}
                     onDragTimes={(cue, startMs, endMs) => void dragTimes(cue, startMs, endMs)}
-                  />
+                    onSeek={(target) => void seek(target)}
+                  >
+                    {/* Inside the panel, under the wave: the stored height is the whole panel's,
+                      the way the reference's is, so the strip moves with the edge. */}
+                    <WaveBar groups={waveBar} commands={commands} />
+                  </Waveform>
                   {layout !== null && (
                     <Sash
                       axis="y"

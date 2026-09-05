@@ -9,6 +9,8 @@ export type Layout = {
   topHeight: number;
   /** A multiplier on the root font size, not a panel bound: see `layout.rs`. */
   interfaceScale: number;
+  /** Whether the waveform brings the cursor's line into view whenever its range changes. */
+  waveAutoscroll: boolean;
 };
 
 /**
