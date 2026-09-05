@@ -79,6 +79,8 @@ async function clickElement(toplevel, selector) {
 }
 
 async function seekTo(seconds) {
+  // The column the head is drawn in now, so the wait below can tell a repaint from a stale canvas.
+  const wasAt = await playheadColumn();
   await browser.execute((target) => {
     const slider = document.querySelector(".controls__slider");
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
@@ -86,14 +88,19 @@ async function seekTo(seconds) {
     slider.dispatchEvent(new Event("input", { bubbles: true }));
     slider.dispatchEvent(new Event("change", { bubbles: true }));
   }, seconds);
-  // The app's own state rather than a stopwatch. The slider is drawn from the position the seek
-  // set, so a slider reading the target is the render the canvas was painted in. The 200 ms this
-  // replaces passed alone and failed twice under a full battery, which is what a calibrated wait
-  // does on a machine that is busier than the one it was calibrated on.
   await waitFor(async () => (Math.round(await position()) === Math.round(seconds) ? true : null), {
     timeout: 15000,
     message: `the transport to read ${seconds}s after the seek`,
   });
+  // The slider and the canvas are painted by different effects, so a slider reading the target does
+  // not mean the head has been redrawn. Every seek in this file crosses many columns, so the head
+  // landing in a different column is the repaint itself. See N28.
+  if (wasAt >= 0) {
+    await waitFor(async () => ((await playheadColumn()) !== wasAt ? true : null), {
+      timeout: 15000,
+      message: `the playhead to be redrawn away from column ${wasAt} after the seek to ${seconds}s`,
+    });
+  }
 }
 
 /** Two seeks while stopped give the window's left edge and its scale, in milliseconds per column. */

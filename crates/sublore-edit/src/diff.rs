@@ -1,6 +1,6 @@
 //! The cue list the UI sees, and the smallest patch between two of them. See BACKLOG.md M2.1.
 
-use sublore_formats::{AssEventKind, CueDetail, SubtitleDocument};
+use sublore_formats::{AssEvent, AssEventKind, CueDetail, Span, SubtitleDocument};
 
 /// A cue as the UI sees it: no spans, text normalized.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -12,6 +12,12 @@ pub struct CueView {
     pub comment: bool,
     /// The cue's own number, when the file wrote one (SRT index line). Never renumbered.
     pub number: Option<u32>,
+    /// The ASS style the event names, display-trimmed. Empty for every other format, and for an
+    /// events section whose `Format:` line declares no style.
+    pub style: String,
+    /// The ASS `Name` (or `Actor`) field, under the same rule. Called actor because that is the
+    /// word on the column. See grid-columns-tasks.md G2.
+    pub actor: String,
 }
 
 /// One contiguous run of cues replaced by another. Every mutation, undo and redo produces one,
@@ -41,6 +47,21 @@ pub fn normalize(text: &str) -> String {
     out
 }
 
+/// One declared ASS field as a column is given it: the file's own bytes with the surrounding
+/// spaces, tabs and carriage return dropped, which is what `timecode_of` does to a timing field.
+/// Display only, and the file is never touched.
+fn named_field(document: &SubtitleDocument, event: &AssEvent, index: Option<usize>) -> String {
+    let field: Option<Span> = index.and_then(|at| event.fields.get(at).copied());
+    match field {
+        Some(span) => document
+            .slice(span)
+            .trim_start_matches([' ', '\t'])
+            .trim_end_matches([' ', '\t', '\r'])
+            .to_owned(),
+        None => String::new(),
+    }
+}
+
 /// The whole list, in `cues()` order: ASS `Comment:` events included.
 pub fn views(document: &SubtitleDocument) -> Vec<CueView> {
     document
@@ -53,6 +74,14 @@ pub fn views(document: &SubtitleDocument) -> Vec<CueView> {
             number: match &cue.detail {
                 CueDetail::Srt(srt) => srt.number,
                 CueDetail::Vtt(_) | CueDetail::Ass(_) => None,
+            },
+            style: match &cue.detail {
+                CueDetail::Ass(event) => named_field(document, event, event.style_field),
+                CueDetail::Srt(_) | CueDetail::Vtt(_) => String::new(),
+            },
+            actor: match &cue.detail {
+                CueDetail::Ass(event) => named_field(document, event, event.name_field),
+                CueDetail::Srt(_) | CueDetail::Vtt(_) => String::new(),
             },
         })
         .collect()
@@ -87,7 +116,20 @@ pub fn patch(before: &[CueView], after: &[CueView]) -> CuePatch {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize, patch, CuePatch, CueView};
+    use super::{normalize, patch, views, CuePatch, CueView};
+    use sublore_formats::{SubtitleDocument, SubtitleFormat};
+
+    fn ass(body: &str) -> SubtitleDocument {
+        sublore_formats::parse(SubtitleFormat::Ass, body.as_bytes()).expect("the fixture parses")
+    }
+
+    /// Every row's style and actor, which is what the two columns are drawn from.
+    fn named(document: &SubtitleDocument) -> Vec<(String, String)> {
+        views(document)
+            .into_iter()
+            .map(|view| (view.style, view.actor))
+            .collect()
+    }
 
     fn view(text: &str) -> CueView {
         CueView {
@@ -96,6 +138,8 @@ mod tests {
             text: text.to_owned(),
             comment: false,
             number: None,
+            style: String::new(),
+            actor: String::new(),
         }
     }
 
@@ -179,5 +223,66 @@ mod tests {
         assert_eq!(patch.removed, 0);
         assert_eq!(patch.cues.len(), 1);
         assert!(patch.from <= before.len());
+    }
+
+    #[test]
+    fn an_ass_row_carries_the_style_and_the_speaker_its_own_format_line_declares() {
+        let document = ass(concat!(
+            "[Events]\n",
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n",
+            "Dialogue: 0,0:00:01.00,0:00:02.00,Sign,,0,0,0,,A shop front\n",
+            "Dialogue: 0,0:00:02.00,0:00:04.00,Default,Ingrid,0,0,0,,A line of dialogue\n",
+        ));
+        assert_eq!(
+            named(&document),
+            vec![
+                ("Sign".to_owned(), String::new()),
+                ("Default".to_owned(), "Ingrid".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_hand_spaced_field_reaches_the_column_without_its_spaces() {
+        // Display trimming only: the file still holds every byte it did, asserted on the same
+        // document. See grid-columns-tasks.md G1.
+        let body = concat!(
+            "[Events]\n",
+            "Format: Layer, Start, End, Style, Name, Text\n",
+            "Dialogue: 0, 0:00:01.34, 0:00:03.98, Default, Ingrid, Spaced out\n",
+        );
+        let document = ass(body);
+        assert_eq!(
+            named(&document),
+            vec![("Default".to_owned(), "Ingrid".to_owned())]
+        );
+        assert_eq!(document.to_bytes(), body.as_bytes());
+    }
+
+    #[test]
+    fn a_row_of_a_format_with_no_such_field_carries_two_empty_strings() {
+        let document = ass(concat!(
+            "[Events]\n",
+            "Format: Layer, Start, End, Text\n",
+            "Dialogue: 0,0:00:01.00,0:00:02.00,Nothing named here\n",
+        ));
+        assert_eq!(named(&document), vec![(String::new(), String::new())]);
+    }
+
+    #[test]
+    fn a_patch_that_changes_only_a_style_is_a_patch() {
+        // What makes the two fields part of the comparison rather than decoration on it.
+        let mut before = vec![view("one"), view("two")];
+        let mut after = before.clone();
+        before[1].style = "Default".to_owned();
+        after[1].style = "Sign".to_owned();
+        assert_eq!(
+            patch(&before, &after),
+            CuePatch {
+                from: 1,
+                removed: 1,
+                cues: vec![after[1].clone()],
+            }
+        );
     }
 }

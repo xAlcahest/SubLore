@@ -9,9 +9,13 @@ import { widestRow } from "../measure";
  *
  * `.menubar` and `.toolbar` are one line of controls each, every one of them drawn whether or not
  * it can run and none of them shrinking or wrapping (CLAUDE.md, owner ruling 2026-09-03), and
- * `.cuelist__head` is the grid's column skeleton, whose cells are `flex: 0 0` widths. The rows that
- * are not here are the rows that wrap: the status bar, the find band and the transcription panel
- * all set `flex-wrap: wrap` and give up a line rather than a pixel of width.
+ * `.cuelist__head` is the grid's column skeleton. Its timing and counter cells are `flex: 0 0`
+ * widths and ask for those; Text and, on an ASS, Style and Actor take the row's slack and declare
+ * no width, so `widestRow` counts them at zero and what an open document adds to this reading is
+ * two column gaps. That is the mechanism behind the rule that opening a file may not resize the
+ * user's window (grid-columns-tasks.md G3). The rows that are not here are the rows that wrap: the
+ * status bar, the find band and the transcription panel all set `flex-wrap: wrap` and give up a
+ * line rather than a pixel of width.
  */
 const UNSHRINKABLE_ROWS = [".menubar", ".toolbar", ".cuelist__head"];
 

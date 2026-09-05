@@ -13,7 +13,7 @@ use sublore_formats::{
 const FORMAT: SubtitleFormat = SubtitleFormat::Ass;
 
 /// Guards against a green suite that tests nothing: deleting fixtures must turn CI red.
-const MIN_CLEAN: usize = 12;
+const MIN_CLEAN: usize = 17;
 const MIN_MALFORMED: usize = 7;
 
 /// `.ssa` is the legacy spelling of the same grammar and lives in the same tree.
@@ -42,6 +42,19 @@ fn round_trip(path: &Path, bytes: &[u8]) -> SubtitleDocument {
             Some(cue.text),
             "{name}: segment {index} must take its text from the field it declares"
         );
+        // A named field at or past the text would be pointing inside the dialogue, and the column
+        // reads it through `slice`, which is a `debug_assert!` and an empty string in release.
+        for (what, at) in [("style", event.style_field), ("name", event.name_field)] {
+            let Some(at) = at else {
+                continue;
+            };
+            assert!(
+                at < event.text_field,
+                "{name}: segment {index} names its {what} at field {at}, at or past the text \
+                 field {}",
+                event.text_field
+            );
+        }
         for span in std::iter::once(event.descriptor).chain(event.fields.iter().copied()) {
             assert!(
                 span.start >= segment.span.start && span.end <= segment.span.end,

@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -42,9 +43,10 @@ type CueListProps = {
 };
 
 /**
- * The cue list: index, the file's own number, start, end and text, with inline editing. Only the
- * rows in view are rendered, over a spacer as tall as the whole file, because a 2,000-row list
- * rendered whole spends the open budget on its own.
+ * The cue list: index, the file's own number, start, end, reading rate, the style and the speaker
+ * where the file names them, and the text, with inline editing. Only the rows in view are rendered,
+ * over a spacer as tall as the whole file, because a 2,000-row list rendered whole spends the open
+ * budget on its own.
  */
 export default function CueList({
   cues,
@@ -66,6 +68,15 @@ export default function CueList({
 
   const count = cues.length;
   const { active, selected, move, toggle, selectAll, collapse } = selection;
+  // A column empty for every cue in the list takes no width and is not drawn, which is the rule the
+  // spec gives Layer and the margins: one pass over the list, memoised on it.
+  const columns = useMemo(
+    () => ({
+      style: cues.some((cue) => cue.style !== ""),
+      actor: cues.some((cue) => cue.actor !== ""),
+    }),
+    [cues],
+  );
 
   useEffect(() => {
     const list = listRef.current;
@@ -284,7 +295,19 @@ export default function CueList({
         </span>
         <span className="cuelist__headcell cuelist__headcell--time">{en.subtitle.cueList.end}</span>
         <span className="cuelist__headcell cuelist__headcell--cps">{en.subtitle.cueList.cps}</span>
-        <span className="cuelist__headcell">{en.subtitle.cueList.text}</span>
+        {columns.style && (
+          <span className="cuelist__headcell cuelist__headcell--style">
+            {en.subtitle.cueList.style}
+          </span>
+        )}
+        {columns.actor && (
+          <span className="cuelist__headcell cuelist__headcell--actor">
+            {en.subtitle.cueList.actor}
+          </span>
+        )}
+        <span className="cuelist__headcell cuelist__headcell--text">
+          {en.subtitle.cueList.text}
+        </span>
       </div>
       <div
         className="cuelist"
@@ -336,6 +359,8 @@ export default function CueList({
                 <span className={cpsClasses.join(" ")}>
                   {rate === null ? "" : Math.round(rate)}
                 </span>
+                {columns.style && <span className="cuelist__style">{cue.style}</span>}
+                {columns.actor && <span className="cuelist__actor">{cue.actor}</span>}
                 {editing === index ? (
                   <textarea
                     className="cuelist__editor"

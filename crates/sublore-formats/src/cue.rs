@@ -56,4 +56,8 @@ pub struct AssEvent {
     pub fields: Vec<Span>,
     /// Index into `fields` of the text field.
     pub text_field: usize,
+    /// Index into `fields` of the declared `Style`, when the section declared one before the text.
+    pub style_field: Option<usize>,
+    /// Index into `fields` of the declared `Name` (or `Actor`), under the same rule.
+    pub name_field: Option<usize>,
 }
