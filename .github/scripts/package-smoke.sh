@@ -36,7 +36,22 @@ fi
 installed=/usr/bin/sublore
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
+
+# Only the index is retried, and only for the one failure that is not ours: a mirror caught halfway
+# through a sync answers a Packages.gz one byte off the size it advertised, which took the whole
+# check red on 2026-09-05. Nothing below this is retried, because every failure below it is the
+# thing this check exists to find.
+for attempt in 1 2 3; do
+  if apt-get update; then
+    break
+  fi
+  if [ "$attempt" = 3 ]; then
+    echo "packaging smoke: the package index would not read after three attempts" >&2
+    exit 1
+  fi
+  echo "packaging smoke: the package index would not read, attempt $attempt of 3" >&2
+  sleep 15
+done
 # xvfb and x11-utils give the app a display and let the check read the window off it; nodejs runs
 # the check; libopengl0 is the one library linuxdeploy leaves to the host, and a bare image has no
 # host to leave it to. --no-install-recommends keeps the image bare, which is the point of using one.

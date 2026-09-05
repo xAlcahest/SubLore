@@ -46,7 +46,16 @@ function Get-Imports($binary) {
 function Test-Binary($binary) {
   Write-Host "`n=== $(Split-Path $binary -Leaf) ==="
   $named = $false
-  foreach ($entry in (Get-Imports $binary).GetEnumerator()) {
+  $imports = Get-Imports $binary
+  # Every DLL it imports, named first, including the ones nothing below can ask about. A DLL whose
+  # imports are all by ordinal was skipped in silence, and "an ordinal import" is one of the two
+  # answers this script's own closing sentence leaves open: it has to at least say which DLL.
+  $byOrdinal = @($imports.GetEnumerator() | Where-Object { $_.Value.Count -eq 0 } | ForEach-Object { $_.Key })
+  Write-Host "  imports $($imports.Count) DLLs: $(($imports.Keys) -join ', ')"
+  if ($byOrdinal.Count -gt 0) {
+    Write-Host "  by ordinal only, so nothing below asks about them: $($byOrdinal -join ', ')"
+  }
+  foreach ($entry in $imports.GetEnumerator()) {
     $dll = $entry.Key
     $names = $entry.Value
     if ($names.Count -eq 0) { continue }
@@ -71,22 +80,31 @@ function Test-Binary($binary) {
   return $named
 }
 
+# Every test binary, not two named ones. On 2026-09-05 `sublore_lib-<hash>.exe` was the binary that
+# would not load and this script never looked at it: it inspected `video_playback` and libmpv, found
+# a `comctl32!TaskDialogIndirect` that every manifest-less binary here reports, and said nothing
+# about the one that had failed. A diagnostic that cannot name the binary that died is the defect
+# BACKLOG.md N26 is about, one platform over.
+#
 # Counted, not assumed. This step runs only when the tests already failed, and a build that failed
-# to link leaves neither binary on disk, which is exactly when the sentence below used to be printed
-# after inspecting nothing.
+# to link leaves nothing on disk, which is exactly when the sentence below used to be printed after
+# inspecting nothing.
 $named = $false
 $inspected = @()
-$exe = Get-ChildItem target\debug\deps\video_playback-*.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($exe) { $inspected += $exe.FullName; if (Test-Binary $exe.FullName) { $named = $true } }
+foreach ($exe in Get-ChildItem target\debug\deps\*.exe -ErrorAction SilentlyContinue) {
+  $inspected += $exe.FullName
+  if (Test-Binary $exe.FullName) { $named = $true }
+}
 $mpv = "target\debug\deps\libmpv-2.dll"
 if (Test-Path $mpv) { $inspected += $mpv; if (Test-Binary (Resolve-Path $mpv).Path) { $named = $true } }
 
 if ($inspected.Count -eq 0) {
-  Write-Host "`nNothing was inspected: neither target\debug\deps\video_playback-*.exe nor"
-  Write-Host "target\debug\deps\libmpv-2.dll is on disk. The run failed before it linked them, so"
-  Write-Host "this says nothing about any entry point."
+  Write-Host "`nNothing was inspected: there is no .exe under target\debug\deps and no"
+  Write-Host "target\debug\deps\libmpv-2.dll. The run failed before it linked them, so this says"
+  Write-Host "nothing about any entry point."
 } elseif (-not $named) {
-  $what = ($inspected | ForEach-Object { Split-Path $_ -Leaf }) -join " and "
-  Write-Host "`nEvery named import of $what resolves through the loader. The missing entry point is"
-  Write-Host "reached some other way: an ordinal import, or a DLL further down the graph."
+  Write-Host "`nEvery named import of all $($inspected.Count) of them resolves through the loader."
+  Write-Host "The missing entry point is reached some other way: an ordinal import, or a DLL further"
+  Write-Host "down the graph."
 }
+Write-Host "`nInspected $($inspected.Count): $(($inspected | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')" 

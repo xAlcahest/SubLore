@@ -98,24 +98,33 @@ function present(selector) {
   return browser.execute((css) => document.querySelector(css) !== null, selector);
 }
 
-/** Every item of the Audio menu, with whether it is marked and whether it can be chosen. */
+/** Whether the Audio title can be opened, which is how the bar says it has tracks to list. */
+function audioTitleOpens() {
+  return browser.execute(() => {
+    const title = document.querySelector(".menubar__title--audio");
+    return title !== null && !title.disabled;
+  });
+}
+
+/** Every item of the Audio menu, with its role, whether it is marked and whether it can be chosen. */
 async function audioItems(toplevel) {
-  // Waited for: the title appears when the track list comes back from the backend, which is a
-  // separate answer from the one the panel waits on, and on a slower machine it lands after it.
-  await waitFor(() => present(".menubar__title--audio"), {
+  // Waited for: the title is on the bar from startup and greyed, and it un-greys when the track
+  // list comes back from the backend, which is a separate answer from the one the panel waits on.
+  await waitFor(audioTitleOpens, {
     timeout: 30000,
-    message: "the Audio title to appear, which needs the track list to have arrived",
+    message: "the Audio title to stop being greyed, which needs the track list to have arrived",
   });
   await clickElement(toplevel, ".menubar__title--audio");
+  // Every item the dropdown draws, not the ones carrying one chosen role: an item whose role went
+  // wrong then fails on the role it reports instead of dropping out of the count.
   return browser.execute(() =>
-    Array.from(document.querySelectorAll(".menubar__menu [role='menuitemcheckbox']")).map(
-      (node) => ({
-        label: node.querySelector(".menubar__label")?.textContent ?? "",
-        checked: node.getAttribute("aria-checked") === "true",
-        enabled: !node.disabled,
-        id: node.id,
-      }),
-    ),
+    Array.from(document.querySelectorAll(".menubar__menu .menubar__item")).map((node) => ({
+      label: node.querySelector(".menubar__label")?.textContent ?? "",
+      role: node.getAttribute("role"),
+      checked: node.getAttribute("aria-checked") === "true",
+      enabled: !node.disabled,
+      id: node.id,
+    })),
   );
 }
 
@@ -187,7 +196,7 @@ async function chooseTrack(toplevel, id) {
 }
 
 async function openVideo(toplevel, fixture) {
-  await clickElement(toplevel, ".toolbar__open-video");
+  await clickElement(toplevel, ".toolbar__video-open");
   const chooser = await waitForChooser("Choose a video");
   await answerChooser(chooser, fixture, "video");
   focusWindow(toplevel.id);
@@ -205,7 +214,7 @@ describe("the Audio menu and the track that is drawn", () => {
     });
     focusWindow(toplevel.id);
     await waitFor(
-      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      () => browser.execute(() => document.querySelector(".toolbar__video-open") !== null),
       { timeout: 30000, message: "the app UI to render" },
     );
     await openVideo(toplevel, tracksFixture);
@@ -224,6 +233,8 @@ describe("the Audio menu and the track that is drawn", () => {
     expect(items).toHaveLength(2);
     expect(items.map((item) => item.label)).toEqual(["Japanese original", "English dub"]);
     expect(items.map((item) => item.checked)).toEqual([true, false]);
+    // One track of a set, so each is a radio option and not a toggle of its own.
+    expect(items.map((item) => item.role)).toEqual(["menuitemradio", "menuitemradio"]);
   });
 
   it("draws the quarter-scale track after switching to it, and the full one on the way back", async () => {
@@ -247,7 +258,12 @@ describe("the Audio menu and the track that is drawn", () => {
 
     const items = await audioItems(toplevel);
     await closeMenu();
-    expect(items.map((item) => item.checked)).toEqual([false, true]);
+    // The label as well as the flag: `checked` on its own cannot tell a mark left on the old track
+    // from a list that came back in the other order.
+    expect(items.map((item) => ({ label: item.label, checked: item.checked }))).toEqual([
+      { label: "Japanese original", checked: false },
+      { label: "English dub", checked: true },
+    ]);
   });
 
   it("switches back to a track already peaked without reading the media again", async () => {
@@ -261,6 +277,20 @@ describe("the Audio menu and the track that is drawn", () => {
     // W8's own figure of 200 ms is a number about one machine, which M2.3 already found to be the
     // wrong axis for this kind of claim; `editor.spec.js` carries the reasoning and STATE.md carries
     // the owner's machine's figures. What is asserted here is the part that holds on any machine.
+    // Put the app on the first track before either reading, rather than inheriting whatever the
+    // check above left. It leaves the second track drawn, so timing a switch to the second track
+    // from there times a click on the track that is already playing: the host refuses a second job
+    // for a stream it has already read, nothing is drawn again, and the wait has nothing to see.
+    await audioItems(toplevel);
+    await chooseTrack(toplevel, 1);
+    await waitFor(
+      async () => {
+        const now = await reach();
+        return now !== null && now > 0.8 ? true : null;
+      },
+      { timeout: 30000, message: "the first track to be drawn before either switch is timed" },
+    );
+
     const cold = await timeSwitch(toplevel, 2, { low: 0.05, high: 0.5 });
     const warm = await timeSwitch(toplevel, 1, { low: 0.8, high: 1.01 });
     console.log(

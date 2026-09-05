@@ -337,9 +337,46 @@ fn ffmpeg_binary() -> PathBuf {
     ffmpeg_from(std::env::var_os(sublore_asr::tools::FFMPEG_BIN_ENV).as_deref())
 }
 
-/// The audio tracks of the open media, as mpv sees them, with the playing one marked. mpv is the
-/// authority on which track that is (decision 24 E2), so nothing else is asked and no second
-/// dependency is added to answer it.
+/// The open media's audio tracks and which one the panel is drawing.
+///
+/// One answer to both questions on purpose. The waveform followed the track that was asked for and
+/// the menu's mark followed mpv's `selected`, computed apart in the page, so on a machine where mpv
+/// marks nothing the panel drew one track while the menu ticked another. See BACKLOG.md N14.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioTrackList {
+    pub tracks: Vec<AudioTrack>,
+    /// mpv's `aid` of the track being drawn, absent when the media carries no audio.
+    pub current_id: Option<i64>,
+}
+
+impl AudioTrackList {
+    /// The list as the open path answers it: `video_open` peaks whatever `track_to_peak` chose, so
+    /// that is the track the menu marks.
+    fn as_opened(tracks: Vec<AudioTrack>) -> Self {
+        let current_id = track_to_peak(&tracks).map(|track| track.id);
+        Self { tracks, current_id }
+    }
+
+    /// The list as a switch answers it: the track that was asked for, which is the one `start_job`
+    /// is about to draw, whatever mpv has got round to marking. See BACKLOG.md N14.
+    fn as_switched(tracks: Vec<AudioTrack>, id: i64) -> Self {
+        Self {
+            tracks,
+            current_id: Some(id),
+        }
+    }
+}
+
+/// What mpv reported for every track, for a log line that has to say why a mark looks wrong.
+fn listed_tracks(tracks: &[AudioTrack]) -> String {
+    tracks
+        .iter()
+        .map(|track| format!("stream {} selected={}", track.ff_index, track.playing))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Play a different audio track, and draw it.
 ///
 /// The two go together on purpose: a panel still showing the track that stopped playing is a panel
@@ -350,7 +387,7 @@ pub async fn audio_switch_track(
     app: AppHandle,
     video: State<'_, VideoState>,
     id: i64,
-) -> Result<Vec<AudioTrack>, AudioError> {
+) -> Result<AudioTrackList, AudioError> {
     let player = video.player();
     blocking(move || {
         player.set_audio_track(id)?;
@@ -361,22 +398,50 @@ pub async fn audio_switch_track(
                 format!("mpv has no audio track {id} to switch to"),
             ));
         };
+        let (ff_index, marked) = (track.ff_index, track.playing);
         let media = player
             .loaded_path()
             .ok_or_else(|| AudioError::new(AudioErrorCode::CommandFailed, "no media is open"))?;
+        if !marked {
+            // The one line that shows mpv did not mark the track it was just told to play; without
+            // it a wrong-looking menu leaves nothing in the log. See BACKLOG.md N14.
+            log::info!(
+                "waveform: mpv has not marked audio track {id} of {media} as playing after switching to it; it listed {}",
+                listed_tracks(&tracks)
+            );
+        }
         // The job in flight for the old track is superseded by this one, which is what the slot
         // already does for any other media or stream.
-        start_job(&app, PathBuf::from(media), track.ff_index)?;
-        Ok(tracks)
+        if let Err(error) = start_job(&app, PathBuf::from(media), ff_index) {
+            // Said out loud, because it is the one refusal a user sees as nothing happening: the
+            // slot frees itself after the job's own last line, so a switch back to the track that
+            // just finished lands in that window and is refused. See BACKLOG.md N27.
+            log::warn!(
+                "waveform: the switch to audio track {id} started no job: {}",
+                error.detail
+            );
+            return Err(error);
+        }
+        Ok(AudioTrackList::as_switched(tracks, id))
     })
     .await
 }
 
+/// The audio tracks of the open media, as mpv sees them, with the playing one marked. mpv is the
+/// authority on that flag (decision 24 E2), so nothing else is asked and no second dependency is
+/// added to answer it; which track the panel draws is `track_to_peak`'s answer and is carried
+/// beside the list rather than folded into it.
 #[tauri::command]
-pub async fn audio_tracks(video: State<'_, VideoState>) -> Result<Vec<AudioTrack>, AudioError> {
+pub async fn audio_tracks(video: State<'_, VideoState>) -> Result<AudioTrackList, AudioError> {
     let player = video.player();
     // A loop of mpv property reads, so it goes off the poll thread like every other heavy call.
-    blocking(move || player.audio_tracks().map_err(AudioError::from)).await
+    blocking(move || {
+        player
+            .audio_tracks()
+            .map(AudioTrackList::as_opened)
+            .map_err(AudioError::from)
+    })
+    .await
 }
 
 /// Start peaking `ff_index` of the open media and return the job's id. The peaks arrive as
@@ -453,14 +518,10 @@ pub fn start_for_playing_track(app: &AppHandle, player: &Player, media: &str) {
     if !track.playing {
         // Said out loud rather than passed over: the panel is right either way, and this is the one
         // line that shows mpv had not marked a track yet. See BACKLOG.md N14.
-        let listed = tracks
-            .iter()
-            .map(|other| format!("stream {} selected={}", other.ff_index, other.playing))
-            .collect::<Vec<_>>()
-            .join(", ");
         log::info!(
-            "waveform: mpv has marked no audio track of {media} as playing, so stream {} is peaked; it listed {listed}",
-            track.ff_index
+            "waveform: mpv has marked no audio track of {media} as playing, so stream {} is peaked; it listed {}",
+            track.ff_index,
+            listed_tracks(&tracks)
         );
     }
     if let Err(error) = start_job(app, PathBuf::from(&media), track.ff_index) {
@@ -613,7 +674,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{chunk, ffmpeg_from, track_to_peak, AudioState, JobTarget};
+    use super::{
+        chunk, ffmpeg_from, listed_tracks, track_to_peak, AudioState, AudioTrackList, JobTarget,
+    };
     use crate::audio::error::AudioErrorCode;
     use crate::video::player::AudioTrack;
     use std::ffi::OsStr;
@@ -799,5 +862,30 @@ mod tests {
     fn a_file_that_carries_no_audio_peaks_nothing_at_all() {
         // Decision 24 E3, which the fallback above must not swallow.
         assert!(track_to_peak(&[]).is_none());
+    }
+
+    #[test]
+    fn an_opened_media_marks_the_track_it_draws_and_marks_nothing_when_it_has_none() {
+        let tracks = vec![track(1, false), track(2, true)];
+        assert_eq!(AudioTrackList::as_opened(tracks).current_id, Some(2));
+        assert_eq!(AudioTrackList::as_opened(Vec::new()).current_id, None);
+    }
+
+    #[test]
+    fn a_switch_marks_the_track_it_was_asked_for_whatever_mpv_has_marked() {
+        // The two readings that both used to leave the mark on the first track: mpv still marking
+        // the old one, and mpv marking none at all. See BACKLOG.md N14.
+        let stale = vec![track(1, true), track(2, false)];
+        assert_eq!(AudioTrackList::as_switched(stale, 2).current_id, Some(2));
+        let unmarked = vec![track(1, false), track(2, false)];
+        assert_eq!(AudioTrackList::as_switched(unmarked, 2).current_id, Some(2));
+    }
+
+    #[test]
+    fn the_log_line_names_every_stream_and_what_mpv_said_about_it() {
+        assert_eq!(
+            listed_tracks(&[track(1, false), track(2, true)]),
+            "stream 1 selected=false, stream 2 selected=true"
+        );
     }
 }

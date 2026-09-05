@@ -56,7 +56,7 @@ async function clickElement(toplevel, selector) {
 }
 
 async function openVideo(toplevel, fixture) {
-  await clickElement(toplevel, ".toolbar__open-video");
+  await clickElement(toplevel, ".toolbar__video-open");
   const chooser = await waitForChooser("Choose a video");
   await answerChooser(chooser, fixture, "video");
   focusWindow(toplevel.id);
@@ -74,7 +74,7 @@ describe("a media with no audio", () => {
     });
     focusWindow(toplevel.id);
     await waitFor(
-      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      () => browser.execute(() => document.querySelector(".toolbar__video-open") !== null),
       { timeout: 30000, message: "the app UI to render" },
     );
   });
@@ -93,7 +93,8 @@ describe("a media with no audio", () => {
     expect(duration).toBeGreaterThan(0);
 
     expect(await present(".waveform")).toBe(false);
-    expect(await present(".sash")).toBe(false);
+    // Named, not a bare `.sash`: D1 gave the shell two more edges and both are on screen here.
+    expect(await present(".sash--waveform")).toBe(false);
     expect(await textOf(".tools__silent")).toBe(
       "This video has no audio, so there is no waveform to draw.",
     );

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sublore_edit::diff::{CuePatch, CueView};
 use sublore_edit::history::Run;
 use sublore_edit::plan::{self, Edit};
@@ -123,64 +123,130 @@ pub struct SubtitleSaved {
     pub dirty: bool,
 }
 
+/// The bytes the open document would write, and what they are. What the video preview draws from,
+/// and the only reader of the document that is not a save (decision 7).
+pub struct DocumentBytes {
+    /// "srt" | "vtt" | "ass", which is also the shadow copy's extension.
+    pub format: &'static str,
+    /// Cues a player would draw. None of them means there is nothing to put on a frame.
+    pub cues: usize,
+    /// Byte for byte what a save would put on disk.
+    pub bytes: Vec<u8>,
+}
+
+/// Read the open document. `None` when none is open, and when the lock is held by a command that
+/// panicked: a preview is not the place to recover a session.
+pub fn open_document(slot: &SessionSlot) -> Option<DocumentBytes> {
+    let guard = lock(slot).ok()?;
+    let session = guard.as_ref()?;
+    Some(DocumentBytes {
+        format: session.document().format().as_str(),
+        cues: session.document().displayed_cue_count(),
+        bytes: session.to_bytes(),
+    })
+}
+
 // -------------------------------------------------------------------------------------------
 // Commands
 // -------------------------------------------------------------------------------------------
 
 #[tauri::command]
 pub async fn subtitle_open(
+    app: AppHandle,
     state: State<'_, SubtitleState>,
     path: String,
 ) -> Result<SubtitleOpened, SubtitleError> {
     let slot = state.slot();
-    blocking(move || open_session(&slot, &path)).await
+    let opened = blocking(move || open_session(&slot, &path)).await;
+    // Whatever the open did, the frame follows it: a refused open leaves the old document drawn,
+    // and one that failed after clearing the session leaves nothing (decision 7).
+    crate::preview::refresh(&app).await;
+    opened
 }
 
 #[tauri::command]
 pub async fn subtitle_close(
+    app: AppHandle,
     state: State<'_, SubtitleState>,
     discard: bool,
 ) -> Result<(), SubtitleError> {
     let slot = state.slot();
-    blocking(move || close_session(&slot, discard)).await
+    let closed = blocking(move || close_session(&slot, discard)).await;
+    crate::preview::refresh(&app).await;
+    closed
+}
+
+/// One mutation, and then the frame follows it. Every mutating command goes through here, so none
+/// of them can forget the preview (decision 7).
+///
+/// The refresh runs outside the session lock and takes it again itself, so the bytes it writes are
+/// the ones the document holds then, never the ones this call happened to leave.
+async fn edited(
+    app: &AppHandle,
+    slot: Arc<SessionSlot>,
+    revision: u64,
+    edit: Edit,
+) -> Result<CuePatchDto, SubtitleError> {
+    let patch = blocking(move || apply_edit(&slot, revision, edit)).await;
+    crate::preview::refresh(app).await;
+    patch
 }
 
 #[tauri::command]
 pub async fn subtitle_set_text(
+    app: AppHandle,
     state: State<'_, SubtitleState>,
     revision: u64,
     cue: usize,
     text: String,
 ) -> Result<CuePatchDto, SubtitleError> {
-    let slot = state.slot();
-    blocking(move || apply_edit(&slot, revision, Edit::SetText { cue, text })).await
+    edited(&app, state.slot(), revision, Edit::SetText { cue, text }).await
+}
+
+/// One cue's new text. A list of these is one replace, and it lands as one undo step (F1).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CueTextDto {
+    pub cue: usize,
+    pub text: String,
+}
+
+#[tauri::command]
+pub async fn subtitle_set_texts(
+    app: AppHandle,
+    state: State<'_, SubtitleState>,
+    revision: u64,
+    edits: Vec<CueTextDto>,
+) -> Result<CuePatchDto, SubtitleError> {
+    let edits = edits.into_iter().map(|one| (one.cue, one.text)).collect();
+    edited(&app, state.slot(), revision, Edit::SetTexts { edits }).await
 }
 
 #[tauri::command]
 pub async fn subtitle_set_times(
+    app: AppHandle,
     state: State<'_, SubtitleState>,
     revision: u64,
     cue: usize,
     start_ms: u32,
     end_ms: u32,
 ) -> Result<CuePatchDto, SubtitleError> {
-    let slot = state.slot();
-    blocking(move || {
-        apply_edit(
-            &slot,
-            revision,
-            Edit::SetTimes {
-                cue,
-                start_ms,
-                end_ms,
-            },
-        )
-    })
+    edited(
+        &app,
+        state.slot(),
+        revision,
+        Edit::SetTimes {
+            cue,
+            start_ms,
+            end_ms,
+        },
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn subtitle_insert(
+    app: AppHandle,
     state: State<'_, SubtitleState>,
     revision: u64,
     before: usize,
@@ -188,81 +254,84 @@ pub async fn subtitle_insert(
     end_ms: u32,
     text: String,
 ) -> Result<CuePatchDto, SubtitleError> {
-    let slot = state.slot();
-    blocking(move || {
-        apply_edit(
-            &slot,
-            revision,
-            Edit::Insert {
-                before,
-                start_ms,
-                end_ms,
-                text,
-            },
-        )
-    })
+    edited(
+        &app,
+        state.slot(),
+        revision,
+        Edit::Insert {
+            before,
+            start_ms,
+            end_ms,
+            text,
+        },
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn subtitle_delete(
+    app: AppHandle,
     state: State<'_, SubtitleState>,
     revision: u64,
     cue: usize,
 ) -> Result<CuePatchDto, SubtitleError> {
-    let slot = state.slot();
-    blocking(move || apply_edit(&slot, revision, Edit::Delete { cue })).await
+    edited(&app, state.slot(), revision, Edit::Delete { cue }).await
 }
 
 #[tauri::command]
 pub async fn subtitle_split(
+    app: AppHandle,
     state: State<'_, SubtitleState>,
     revision: u64,
     cue: usize,
     text_offset: usize,
     at_ms: u32,
 ) -> Result<CuePatchDto, SubtitleError> {
-    let slot = state.slot();
-    blocking(move || {
-        apply_edit(
-            &slot,
-            revision,
-            Edit::Split {
-                cue,
-                text_offset,
-                at_ms,
-            },
-        )
-    })
+    edited(
+        &app,
+        state.slot(),
+        revision,
+        Edit::Split {
+            cue,
+            text_offset,
+            at_ms,
+        },
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn subtitle_merge(
+    app: AppHandle,
     state: State<'_, SubtitleState>,
     revision: u64,
     cue: usize,
 ) -> Result<CuePatchDto, SubtitleError> {
-    let slot = state.slot();
-    blocking(move || apply_edit(&slot, revision, Edit::Merge { cue })).await
+    edited(&app, state.slot(), revision, Edit::Merge { cue }).await
 }
 
 #[tauri::command]
 pub async fn subtitle_undo(
+    app: AppHandle,
     state: State<'_, SubtitleState>,
     revision: u64,
 ) -> Result<CuePatchDto, SubtitleError> {
     let slot = state.slot();
-    blocking(move || undo(&slot, revision)).await
+    let patch = blocking(move || undo(&slot, revision)).await;
+    crate::preview::refresh(&app).await;
+    patch
 }
 
 #[tauri::command]
 pub async fn subtitle_redo(
+    app: AppHandle,
     state: State<'_, SubtitleState>,
     revision: u64,
 ) -> Result<CuePatchDto, SubtitleError> {
     let slot = state.slot();
-    blocking(move || redo(&slot, revision)).await
+    let patch = blocking(move || redo(&slot, revision)).await;
+    crate::preview::refresh(&app).await;
+    patch
 }
 
 #[tauri::command]
@@ -310,7 +379,22 @@ pub async fn subtitle_adopt_transcription(
     })?;
     let slot = state.slot();
     let backups = backup_root(&app)?;
+    let label = window.label().to_owned();
 
+    let adopted = adopt_through_dialogs(&app, &label, slot, srt, backups).await;
+    // Replaced, saved, or left exactly as it was: the frame follows whichever of the three.
+    crate::preview::refresh(&app).await;
+    adopted
+}
+
+/// The body of [`subtitle_adopt_transcription`], so the refresh above covers every way out of it.
+async fn adopt_through_dialogs(
+    app: &AppHandle,
+    label: &str,
+    slot: Arc<SessionSlot>,
+    srt: Vec<u8>,
+    backups: PathBuf,
+) -> Result<Option<SubtitleOpened>, SubtitleError> {
     let adopted = {
         let (slot, srt) = (Arc::clone(&slot), srt.clone());
         blocking(move || adopt_if_clean(&slot, &srt)).await?
@@ -321,7 +405,7 @@ pub async fn subtitle_adopt_transcription(
 
     // Unsaved work is in the way, so the user is asked the same three answers the close gate asks
     // before anything replaces it (decision 24, B1).
-    let answer = ask_about_unsaved(&app, window.label()).await?;
+    let answer = ask_about_unsaved(app, label).await?;
     let answered = {
         let (slot, srt, backups) = (Arc::clone(&slot), srt.clone(), backups.clone());
         blocking(move || adopt_answered(&slot, &srt, answer, backups)).await
@@ -330,7 +414,7 @@ pub async fn subtitle_adopt_transcription(
         // Save on a document that has never had a file asks where it goes, as the toolbar's Save
         // and the close gate's already do (decision 24 B2, BACKLOG.md M3.6).
         Err(error) if error.code == SubtitleErrorCode::NoPath => {
-            let Some(destination) = ask_first_save_path(&app).await? else {
+            let Some(destination) = ask_first_save_path(app).await? else {
                 // Cancelled: nothing is written, nothing is replaced, the cues stay.
                 return Ok(None);
             };
@@ -549,9 +633,10 @@ pub fn apply_edit(
     // not: a length is enough to tell a real edit from a field committed unchanged, and a subtitle
     // line is the user's own writing.
     crate::log::info!(
-        "subtitle: edit committed, revision {}, {}, cue {} now {} chars",
+        "subtitle: edit committed, revision {}, {}, {} cues, cue {} now {} chars",
         session.revision(),
         if session.dirty() { "dirty" } else { "clean" },
+        patch.cues.len(),
         patch.from,
         patch.cues.first().map_or(0, |cue| cue.text.chars().count())
     );
@@ -823,7 +908,7 @@ fn current<'a>(
 
 /// The caller's cue indices describe the list at its revision. If the session has moved on, the
 /// safe answer is a refusal and a refetch, never an edit at a guessed index.
-fn check_revision(session: &EditSession, revision: u64) -> Result<(), SubtitleError> {
+pub(crate) fn check_revision(session: &EditSession, revision: u64) -> Result<(), SubtitleError> {
     if session.revision() == revision {
         return Ok(());
     }
@@ -838,7 +923,7 @@ fn check_revision(session: &EditSession, revision: u64) -> Result<(), SubtitleEr
 
 /// An edit that would grow the file past what Sublore re-opens is refused before it is applied:
 /// a document that cannot be opened again must not be creatable.
-fn guard_size(session: &EditSession, edit: &Edit) -> Result<(), SubtitleError> {
+pub(crate) fn guard_size(session: &EditSession, edit: &Edit) -> Result<(), SubtitleError> {
     let planned = plan::plan(session.document(), edit).map_err(SubtitleError::from_edit)?;
     let grown = session
         .document()
@@ -876,7 +961,7 @@ fn opened_payload(session: &EditSession, summary: SubtitleSummary) -> SubtitleOp
     }
 }
 
-fn describe(session: &EditSession, patch: CuePatch) -> CuePatchDto {
+pub(crate) fn describe(session: &EditSession, patch: CuePatch) -> CuePatchDto {
     CuePatchDto {
         revision: session.revision(),
         from: patch.from,
@@ -914,7 +999,7 @@ fn saved(outcome: sublore_io::atomic::SaveOutcome, dirty: bool) -> SubtitleSaved
     }
 }
 
-fn read_document(path: &Path) -> Result<SubtitleDocument, SubtitleError> {
+pub(crate) fn read_document(path: &Path) -> Result<SubtitleDocument, SubtitleError> {
     if path.as_os_str().is_empty() {
         return Err(SubtitleError::new(
             SubtitleErrorCode::InvalidPath,

@@ -109,7 +109,21 @@ export function focusWindow(id, timeoutMs = 5000) {
  * measures the old geometry. The layout a resize is asked for is never the point of the resize.
  */
 export function resizeWindow(id, width, height, timeoutMs = 5000) {
+  askForWindowSize(id, width, height);
+  waitForWindowSize(id, width, height, timeoutMs);
+}
+
+/** The request on its own, for a caller that expects the window to settle at another size. */
+export function askForWindowSize(id, width, height) {
   xdotool(["windowsize", id, String(width), String(height)]);
+}
+
+/**
+ * Wait until X reports the size the caller says the window will take, which is not always the size
+ * it was asked for: a window with a smallest size of its own puts itself back, and a caller that
+ * waited for the width it asked for would time out on a window doing exactly what it should.
+ */
+export function waitForWindowSize(id, width, height, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const size = windowSize(id);
@@ -200,21 +214,39 @@ export function doubleClickAt(x, y) {
  * step skips the move when the pointer is already there, for the `--sync` reason `clickAt` gives.
  */
 export function dragAt(fromX, fromY, toX, toY, steps = 8) {
+  try {
+    pressAndTravel(fromX, fromY, toX, toY, steps);
+  } finally {
+    // A button left down lands on whatever the next check clicks, in a run nobody is watching.
+    releaseButton();
+  }
+}
+
+/**
+ * The first half of a drag: press and travel, with the button still down.
+ *
+ * **The caller must call `releaseButton` from a `finally`.** It exists so a check can read the
+ * layout while the gesture is still happening, which `dragAt` cannot see: everything asserted after
+ * a release is equally true of a panel that ignores the pointer and only jumps when it is let go.
+ * A mutation that emptied the live resize left every divider assertion green, which is what this
+ * was added for.
+ */
+export function pressAndTravel(fromX, fromY, toX, toY, steps = 8) {
   const start = { x: Math.round(fromX), y: Math.round(fromY) };
   const end = { x: Math.round(toX), y: Math.round(toY) };
   moveTo(start);
   xdotool(["mousedown", "1"]);
-  try {
-    for (let step = 1; step <= steps; step += 1) {
-      moveTo({
-        x: Math.round(start.x + ((end.x - start.x) * step) / steps),
-        y: Math.round(start.y + ((end.y - start.y) * step) / steps),
-      });
-    }
-  } finally {
-    // A button left down lands on whatever the next check clicks, in a run nobody is watching.
-    xdotool(["mouseup", "1"]);
+  for (let step = 1; step <= steps; step += 1) {
+    moveTo({
+      x: Math.round(start.x + ((end.x - start.x) * step) / steps),
+      y: Math.round(start.y + ((end.y - start.y) * step) / steps),
+    });
   }
+}
+
+/** The second half. Harmless when nothing is pressed, so a `finally` can always call it. */
+export function releaseButton() {
+  xdotool(["mouseup", "1"]);
 }
 
 /** Move the pointer, unless it is already there. See the `--sync` note in `clickAt`. */
@@ -229,7 +261,56 @@ export function typeText(text) {
   xdotool(["type", "--delay", "5", text]);
 }
 
-/** A named key, e.g. Return or Escape. */
+/** The function keys, which are the only ones that cannot be pressed by name. See [`pressKey`]. */
+const FUNCTION_KEY = /^F([1-9]|1[0-2])$/;
+
+/** Asked of the server once per key per run: the map does not change under a run. */
+const keycodes = new Map();
+
+/**
+ * The keycode a keysym sits on, asked of the X server through python-xlib.
+ *
+ * python-xlib rather than `xmodmap`, because the harness already declares it and uses it in
+ * `e2e/tools/close-window.py`, and `xmodmap` would be a package to add to CI for one lookup.
+ */
+function keycodeFor(name) {
+  const known = keycodes.get(name);
+  if (known !== undefined) {
+    return known;
+  }
+  const found = execFileSync(
+    "python3",
+    [
+      "-c",
+      "import sys\nfrom Xlib import display, XK\n" +
+        "print(display.Display().keysym_to_keycode(XK.string_to_keysym(sys.argv[1])))",
+      name,
+    ],
+    { encoding: "utf8", timeout: 30000 },
+  ).trim();
+  if (!/^[1-9][0-9]*$/.test(found)) {
+    throw new Error(`the X server has no keycode for ${name}, so the harness cannot press it`);
+  }
+  keycodes.set(name, found);
+  return found;
+}
+
+/**
+ * A named key, e.g. Return or Escape.
+ *
+ * **A function key goes by keycode and every other key by name, and that is measured rather than
+ * chosen.** On 2026-09-04, under Xvfb on this machine, `xdotool key F3` pressed Alt before the key
+ * and the webview was told `altKey` was true, so the shell refused it: `commandFor` drops every
+ * press carrying Alt. `--clearmodifiers` made no difference and F5 behaved the same. The keymap has
+ * `keycode 69 = F3 F3 F3 F3 F3 F3 XF86Switch_VT_3`, and xdotool resolving the keysym picks a level
+ * that carries Alt. Pressing the keycode delivers the key alone. A real keyboard sends the keycode,
+ * so this is the instrument being made to match the hardware, not the app being bent to the
+ * instrument.
+ */
 export function pressKey(key) {
-  xdotool(["key", key]);
+  if (!FUNCTION_KEY.test(key)) {
+    xdotool(["key", key]);
+    return;
+  }
+  xdotool(["key", "--clearmodifiers", keycodeFor(key)]);
 }

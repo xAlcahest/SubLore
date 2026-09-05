@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 
 /**
@@ -47,6 +48,39 @@ export async function waitForLog(dataHome, pattern, options = {}) {
     }
     await sleep(100);
   }
+}
+
+/**
+ * The `XDG_DATA_HOME` this run was launched with.
+ *
+ * One place rather than a copy in every spec that reads the log: the value is the harness's own and
+ * `wdio.conf.js` is the only thing that sets it.
+ */
+export function dataHome() {
+  const home = process.env.SUBLORE_E2E_DATA_HOME;
+  if (typeof home !== "string" || home === "") {
+    throw new Error("SUBLORE_E2E_DATA_HOME is not set; e2e/wdio.conf.js sets it for every run.");
+  }
+  return home;
+}
+
+/** The first line each launch writes, and the only mark that separates one app's log from the next. */
+const STARTED = /Sublore \S+ starting on \S+/g;
+
+/**
+ * The log from the last launch onward.
+ *
+ * Every spec in a run shares one log file, so a line matched across the whole of it may belong to
+ * an app that has already exited. `chooser.spec.js` counts its own matches for the same reason;
+ * this is the other way of scoping, and the one to use when the question is about now.
+ */
+export function appLogSinceStart(home) {
+  const log = appLog(home);
+  let last = -1;
+  for (const match of log.matchAll(STARTED)) {
+    last = match.index;
+  }
+  return last === -1 ? log : log.slice(last);
 }
 
 /** The line `subtitle::open_session` writes once a document is the one on screen. */

@@ -755,3 +755,100 @@ fn a_document_with_no_file_keeps_the_path_its_first_save_gave_it() {
     assert!(session.dirty());
     assert_eq!(session.path(), Some(Path::new("/tmp/episode-01.srt")));
 }
+
+// F1 at the session level: what a replace over many cues costs the undo stack. One step, whatever
+// the count, because a replace the user has to press through cue by cue is not undone.
+
+#[test]
+fn one_undo_puts_back_every_cue_a_many_cue_edit_rewrote() {
+    let original = fixture_bytes("srt/clean/basic-lf.srt");
+    let mut session = session("srt/clean/basic-lf.srt");
+    let now = Instant::now();
+
+    session
+        .apply(
+            &Edit::SetTexts {
+                edits: vec![
+                    (0, "one".to_owned()),
+                    (1, "two".to_owned()),
+                    (2, "three".to_owned()),
+                ],
+            },
+            Run::New,
+            now,
+        )
+        .expect("three cues at once");
+    assert!(session.dirty());
+    assert!(session.can_undo());
+
+    let patch = session
+        .undo()
+        .expect("the replay lands")
+        .expect("there is a step to take");
+    // The patch covers the whole run, so the grid redraws all three rather than one of them.
+    assert_eq!(patch.from, 0);
+    assert_eq!(patch.removed, 3);
+    assert_eq!(session.to_bytes(), original);
+    // One step, not three: a second undo has nothing left to take.
+    assert!(!session.can_undo());
+}
+
+#[test]
+fn a_many_cue_edit_that_writes_the_text_already_there_leaves_the_stack_alone() {
+    let original = fixture_bytes("srt/clean/basic-lf.srt");
+    let mut session = session("srt/clean/basic-lf.srt");
+    let already: Vec<_> = session
+        .views()
+        .iter()
+        .enumerate()
+        .map(|(cue, view)| (cue, view.text.clone()))
+        .collect();
+
+    let patch = session
+        .apply(&Edit::SetTexts { edits: already }, Run::New, Instant::now())
+        .expect("writing what is already there is not a failure");
+
+    // A replace whose matches all render back to the same bytes changed nothing, and a step the
+    // user would press through for no reason is worse than no step.
+    assert_eq!(patch.removed, 0);
+    assert!(patch.cues.is_empty());
+    assert!(!session.dirty());
+    assert!(!session.can_undo());
+    assert_eq!(session.to_bytes(), original);
+}
+
+#[test]
+fn a_many_cue_edit_never_merges_into_the_keystroke_before_it() {
+    let mut session = session("srt/clean/basic-lf.srt");
+    let now = Instant::now();
+
+    session
+        .apply(
+            &Edit::SetText {
+                cue: 0,
+                text: "typed".to_owned(),
+            },
+            Run::New,
+            now,
+        )
+        .expect("a first edit");
+    session
+        .apply(
+            &Edit::SetTexts {
+                edits: vec![(0, "replaced".to_owned())],
+            },
+            // Inside the coalesce window and on the same cue: everything the history looks at to
+            // merge, except the label, which is what keeps the two apart.
+            Run::Continues,
+            now + KEYSTROKE,
+        )
+        .expect("a replace over the same cue");
+
+    session.undo().expect("the replay lands").expect("a step");
+    let views = session.views();
+    assert_eq!(
+        views.first().map(|view| view.text.as_str()),
+        Some("typed"),
+        "one undo must take back the replace and leave the typing under it"
+    );
+}

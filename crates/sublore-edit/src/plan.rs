@@ -31,6 +31,11 @@ pub enum Edit {
         cue: usize,
         text: String,
     },
+    /// The same edit over several cues, as one undo step. Pairs are `(cue, text)`, strictly
+    /// ascending by cue, each cue named once. See docs/find-replace-tasks.md F1.
+    SetTexts {
+        edits: Vec<(usize, String)>,
+    },
     SetTimes {
         cue: usize,
         start_ms: u32,
@@ -103,6 +108,7 @@ pub struct Edited {
 pub fn plan(document: &SubtitleDocument, edit: &Edit) -> Result<Planned, EditError> {
     match edit {
         Edit::SetText { cue, text } => plan_set_text(document, *cue, text),
+        Edit::SetTexts { edits } => plan_set_texts(document, edits),
         Edit::SetTimes {
             cue,
             start_ms,
@@ -651,19 +657,29 @@ fn ass_line(
 // The mutations
 // ---------------------------------------------------------------------------------------------
 
-fn plan_set_text(
+/// What one cue's text edit replaces and what it writes there.
+///
+/// The one implementation both the single-cue plan and the many-cue plan use, so the two cannot
+/// spell a cue differently. `written` is what the re-parse must read back, which is not always what
+/// lands in the body: text written into an empty SRT span takes a line terminator in front of it.
+struct TextWrite {
+    range: Span,
+    inserted: String,
+    written: String,
+}
+
+fn plan_text_write(
     document: &SubtitleDocument,
-    index: usize,
+    located: &Located<'_>,
     text: &str,
-) -> Result<Planned, EditError> {
-    let located = locate(document, index)?;
+) -> Result<TextWrite, EditError> {
     let format = document.format();
     let text = diff::normalize(text);
     validate_text(format, &text)?;
 
     let body = document.source().body();
     let span = located.cue.text;
-    let newline = text_newline(document, &located);
+    let newline = text_newline(document, located);
     let written = render_text(&text, newline);
 
     // An SRT or VTT cue with no text parks an empty span at the end of its timing line: writing
@@ -689,8 +705,27 @@ fn plan_set_text(
         },
     };
 
+    Ok(TextWrite {
+        range,
+        inserted,
+        written,
+    })
+}
+
+fn plan_set_text(
+    document: &SubtitleDocument,
+    index: usize,
+    text: &str,
+) -> Result<Planned, EditError> {
+    let located = locate(document, index)?;
+    let write = plan_text_write(document, &located, text)?;
+
     Ok(Planned {
-        splice: Splice::new(range.start, document.slice(range).to_owned(), inserted),
+        splice: Splice::new(
+            write.range.start,
+            document.slice(write.range).to_owned(),
+            write.inserted,
+        ),
         label: EditLabel {
             kind: EditKind::SetText,
             cue: index,
@@ -699,13 +734,158 @@ fn plan_set_text(
             from: index,
             removed: 1,
             cues: vec![ExpectedCue {
-                text_raw: written,
+                text_raw: write.written,
                 start_ms: located.cue.start.millis(),
                 end_ms: located.cue.end.millis(),
             }],
             segments_from: located.segment_index,
             segments_removed: 1,
             segments_inserted: 1,
+        },
+    })
+}
+
+/// Every cue from `from` to `to` inclusive, with the segment each sits in, in one pass.
+///
+/// `locate` answers for one cue, and a many-cue plan calling it per cue would walk the document
+/// once per cue. Errors with `NoSuchCue` when the run does not fit, exactly as `locate` does.
+fn locate_run<'a>(
+    document: &'a SubtitleDocument,
+    from: usize,
+    to: usize,
+) -> Result<Vec<Located<'a>>, EditError> {
+    let wanted = to.saturating_sub(from).saturating_add(1);
+    let mut found = Vec::with_capacity(wanted);
+    let mut seen = 0usize;
+    for (segment_index, segment) in document.segments().iter().enumerate() {
+        let SegmentKind::Cue(cue) = &segment.kind else {
+            continue;
+        };
+        if seen >= from && seen <= to {
+            found.push(Located {
+                segment_index,
+                segment,
+                cue,
+            });
+        }
+        seen += 1;
+        if seen > to {
+            break;
+        }
+    }
+    if found.len() != wanted {
+        return Err(EditError::new(
+            EditErrorKind::NoSuchCue,
+            format!("cues {from}..={to}: the document holds {seen}"),
+        ));
+    }
+    Ok(found)
+}
+
+/// Rewrite the text of several cues as one splice, from the first byte any of them changes to the
+/// last. The bytes between them ride along unchanged, which is what makes this one undo step
+/// instead of one per cue; the history can only merge edits that rewrite each other's bytes, and
+/// forty cues at forty offsets are not that. See docs/find-replace-tasks.md F1.
+fn plan_set_texts(
+    document: &SubtitleDocument,
+    edits: &[(usize, String)],
+) -> Result<Planned, EditError> {
+    let (Some((first, _)), Some((last, _))) = (edits.first(), edits.last()) else {
+        return Err(EditError::new(
+            EditErrorKind::NotApplicable,
+            "a text edit naming no cues",
+        ));
+    };
+    // Strictly ascending: a repeated cue would put two writes over one range, and an unordered list
+    // would build the span out of order. Both are caller bugs, so neither is repaired here.
+    if edits.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+        return Err(EditError::new(
+            EditErrorKind::NotApplicable,
+            "the cues must be given in file order, each one named once",
+        ));
+    }
+
+    let run = locate_run(document, *first, *last)?;
+    let (Some(head), Some(tail)) = (run.first(), run.last()) else {
+        return Err(EditError::new(
+            EditErrorKind::NotApplicable,
+            "a text edit naming no cues",
+        ));
+    };
+    let segments_from = head.segment_index;
+    let segments_run = tail
+        .segment_index
+        .saturating_sub(segments_from)
+        .saturating_add(1);
+
+    let mut writes = Vec::with_capacity(edits.len());
+    let mut cues = Vec::with_capacity(run.len());
+    let mut pending = edits.iter().peekable();
+    for (offset, located) in run.iter().enumerate() {
+        let index = first.saturating_add(offset);
+        let start_ms = located.cue.start.millis();
+        let end_ms = located.cue.end.millis();
+        match pending.next_if(|(at, _)| *at == index) {
+            Some((_, text)) => {
+                let write = plan_text_write(document, located, text)?;
+                cues.push(ExpectedCue {
+                    text_raw: write.written.clone(),
+                    start_ms,
+                    end_ms,
+                });
+                writes.push(write);
+            }
+            // Untouched, and named in the expectation anyway: the splice replaces the bytes it sits
+            // in, so "it did not move" is something the verification has to prove rather than skip.
+            None => cues.push(ExpectedCue {
+                text_raw: document.slice(located.cue.text).to_owned(),
+                start_ms,
+                end_ms,
+            }),
+        }
+    }
+
+    let (Some(opening), Some(closing)) = (writes.first(), writes.last()) else {
+        return Err(EditError::new(
+            EditErrorKind::NotApplicable,
+            "a text edit naming no cues",
+        ));
+    };
+    let span = Span::new(opening.range.start, closing.range.end);
+
+    let body = document.source().body();
+    let mut inserted = String::new();
+    let mut cursor = span.start;
+    for write in &writes {
+        // Two writes over one range would drop bytes between them. Ascending indices make it
+        // unreachable through a cue's own text span; a format whose spans overlap would reach it.
+        let Some(between) = body.get(cursor..write.range.start) else {
+            return Err(EditError::new(
+                EditErrorKind::BadRange,
+                format!(
+                    "the write at {} does not follow the one ending at {cursor}",
+                    write.range.start
+                ),
+            ));
+        };
+        inserted.push_str(between);
+        inserted.push_str(&write.inserted);
+        cursor = write.range.end;
+    }
+
+    Ok(Planned {
+        splice: Splice::new(span.start, document.slice(span).to_owned(), inserted),
+        label: EditLabel {
+            kind: EditKind::SetTexts,
+            cue: *first,
+        },
+        expect: Expectation {
+            from: *first,
+            removed: run.len(),
+            cues,
+            segments_from,
+            segments_removed: segments_run,
+            segments_inserted: segments_run,
         },
     })
 }

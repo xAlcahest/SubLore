@@ -12,7 +12,7 @@ use sublore_formats::{
 const FORMAT: SubtitleFormat = SubtitleFormat::Srt;
 
 /// Fixture-count guards: deleting a fixture must turn the suite red, not quietly shrink it.
-const MIN_CLEAN: usize = 18;
+const MIN_CLEAN: usize = 20;
 const MIN_MALFORMED: usize = 9;
 
 #[test]
@@ -70,6 +70,28 @@ fn reads_the_baseline_file() {
     );
     assert!(!document.source().has_bom());
     assert_eq!(document.source().newline(), Newline::Lf);
+}
+
+/// The two fixtures a preview needs: a first cue that already covers the frame a paused player
+/// shows at zero, so what is on the frame can be asserted without seeking first.
+#[test]
+fn the_preview_fixtures_open_on_a_cue_that_covers_the_first_frame() {
+    let long = clean("starts-at-zero.srt");
+    assert_eq!(long.cues().count(), 3);
+    assert_eq!(long.displayed_cue_count(), 3);
+    assert_eq!(
+        times(&long),
+        [(0, 8_000), (8_400, 12_600), (13_000, 16_200)]
+    );
+    assert_eq!(
+        long.slice(cues(&long)[0].text),
+        "The ferry runs at six, not before."
+    );
+
+    let short = clean("starts-at-zero-short.srt");
+    assert_eq!(short.cues().count(), 2);
+    assert_eq!(times(&short), [(0, 9_000), (9_500, 14_000)]);
+    assert_eq!(short.slice(cues(&short)[0].text), "Bring the nets in.");
 }
 
 #[test]

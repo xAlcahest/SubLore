@@ -54,6 +54,9 @@ pub struct EditLabel {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EditKind {
     SetText,
+    /// Its own kind, not `SetText` over more rows: the history coalesces only same-label edits, and
+    /// a replace that rewrote forty cues must never merge into the keystroke before it.
+    SetTexts,
     SetTimes,
     Insert,
     Delete,

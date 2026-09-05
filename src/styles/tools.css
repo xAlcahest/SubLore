@@ -40,6 +40,22 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Start and end are typed (M2.7 E1). Duration and CPS are derived from them, so they stay text. */
+.currentline__time {
+  width: 8.5em;
+  padding: 0.05rem 0.25rem;
+  border: 1px solid var(--line);
+  background: var(--bg-sunken);
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Not a time, so nothing was sent. The field says so where the value is, not across the bottom. */
+.currentline__time--invalid {
+  border-color: var(--ink-error);
+}
+
 /* Over the 21 cps of decision 24 A8, in the ink the grid uses for the same number. */
 .currentline__cps--over {
   color: var(--ink-warn);
@@ -85,21 +101,6 @@
   padding: 0.4rem 0.75rem;
   border-bottom: 1px solid var(--line);
   color: var(--ink-dim);
-}
-
-/* The waveform's bottom edge, and the one draggable thing in v1 (decision 24 A5). It draws no line
-   of its own: the panel above already has one, and this is the hit area over it. */
-.sash {
-  flex: none;
-  height: 4px;
-  cursor: row-resize;
-}
-
-.sash:hover,
-.sash--dragging,
-.sash:focus-visible {
-  background: var(--accent);
-  outline: none;
 }
 
 /* Sized by the box, drawn in device pixels: the element carries no width of its own, so a resize

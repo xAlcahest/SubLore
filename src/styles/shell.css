@@ -9,12 +9,18 @@
  *   ──────────────────────────────────────────────────────
  *   status bar
  *
- * Nothing here is resizable (decision 24 A5): the rail's width and the top-block/grid split are
- * fixed. The waveform's draggable edge arrives with M2.4.
+ * Three of the edges between them are draggable (D1): the video's right side, the waveform's
+ * bottom and the top block's bottom. The rail's width is the one split that stays fixed.
  */
 
 * {
   box-sizing: border-box;
+}
+
+/* The one root declaration everything in rem answers to (S1). 100% keeps the browser's own default
+   in the multiplication, so a rem is still 16px at scale 1 rather than a value this rule invents. */
+html {
+  font-size: calc(var(--interface-scale) * 100%);
 }
 
 body {
@@ -42,8 +48,9 @@ body {
   background: var(--bg-panel);
 }
 
-/* The top block: the rail beside the video and the tools column, and nothing else. Fixed height,
-   so the grid below it is the panel that grows with the window. */
+/* The top block: the rail beside the video and the tools column, and nothing else. The height here
+   is what it opens at before a layout is read; the sash below it writes an inline one over the top.
+   `flex: none` either way, so the grid below is the panel that grows with the window. */
 .shell__body {
   display: flex;
   flex: none;
@@ -70,7 +77,8 @@ body {
 }
 
 /* Never scrolls, it resizes: the native surface is placed from this panel's DOM coordinates and
-   detaches from its frame if the panel scrolls under it. See M0.2. */
+   detaches from its frame if the panel scrolls under it. See M0.2. The width, like the block's
+   height, is what it opens at until the sash beside it writes an inline share over the top. */
 .shell__video {
   display: flex;
   flex: none;
@@ -96,6 +104,29 @@ body {
   flex-direction: column;
   min-height: 0;
   border-top: 1px solid var(--line);
+}
+
+/* The three draggable edges (D1). None draws a line of its own: the panel on one side of each
+   already has one, and the strip is the hit area over it. */
+.sash {
+  flex: none;
+}
+
+.sash--y {
+  height: 4px;
+  cursor: row-resize;
+}
+
+.sash--x {
+  width: 4px;
+  cursor: col-resize;
+}
+
+.sash:hover,
+.sash--dragging,
+.sash:focus-visible {
+  background: var(--accent);
+  outline: none;
 }
 
 /* Outside the five regions and never a layer, so it never hides the video surface (decision 24 A1).
@@ -143,6 +174,7 @@ body {
   overflow-wrap: anywhere;
 }
 
-.statusbar__waveform-error {
+.statusbar__waveform-error,
+.statusbar__preview-error {
   color: var(--ink-error);
 }

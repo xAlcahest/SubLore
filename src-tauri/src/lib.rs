@@ -7,6 +7,8 @@ pub mod chooser;
 pub mod crash;
 pub mod dialog;
 pub mod layout;
+mod modules;
+pub mod preview;
 pub mod project;
 pub mod strings;
 pub mod subtitle;
@@ -41,6 +43,9 @@ pub struct StartupFiles {
 struct StartupArgs {
     files: StartupFiles,
     ignored: Vec<String>,
+    /// `--no-modules` was on the command line. Support asks for it when a module is suspected, and
+    /// it is the difference between a diagnosis and a reinstall (module-abi.md 3.4).
+    no_modules: bool,
 }
 
 /// Sublore accepts paths as arguments: `sublore file.mkv file.srt`, in any order. Sorted by
@@ -54,6 +59,7 @@ struct StartupArgs {
 fn startup_files(args: impl Iterator<Item = OsString>) -> StartupArgs {
     let mut files = StartupFiles::default();
     let mut ignored = Vec::new();
+    let mut no_modules = false;
     for arg in args.skip(1) {
         // The IPC payload cannot carry a name that is not UTF-8 either, so it costs that argument
         // and is named in the log, never the launch.
@@ -65,6 +71,12 @@ fn startup_files(args: impl Iterator<Item = OsString>) -> StartupArgs {
         // pass their own arguments through, and treating a stray value as a path made the app try
         // to open one at startup: every E2E spec that opens a file then failed.
         if !std::path::Path::new(arg).is_file() {
+            // The one switch this app answers to. Compared exactly: a near miss is a typo, and a
+            // typo that quietly turned modules off would be a support call about a missing feature.
+            if arg == "--no-modules" {
+                no_modules = true;
+                continue;
+            }
             // A switch is not a file and never was; anything else was meant to be one, so it is
             // named rather than dropped in silence.
             if !arg.starts_with('-') {
@@ -89,7 +101,11 @@ fn startup_files(args: impl Iterator<Item = OsString>) -> StartupArgs {
             None => *slot = Some(arg.to_owned()),
         }
     }
-    StartupArgs { files, ignored }
+    StartupArgs {
+        files,
+        ignored,
+        no_modules,
+    }
 }
 
 #[tauri::command]
@@ -107,11 +123,46 @@ fn quit(app: AppHandle) {
     app.exit(0);
 }
 
+/// Start every loaded module and collect what it contributes.
+///
+/// A configuration directory of the module's own, which is where a licence file would live and
+/// which the core names without knowing what goes in it. The locale is the app's only one today:
+/// `src/i18n/en.ts` is the whole of it, and this is where a real one arrives when there is a second.
+fn start_modules(app: &tauri::App) {
+    let state = app.state::<modules::ModuleState>();
+    let directory = match app.path().app_config_dir() {
+        Ok(base) => base.join("modules"),
+        Err(error) => {
+            log::warn!("modules: no configuration directory for them ({error}), using none");
+            std::path::PathBuf::new()
+        }
+    };
+    // Best effort: a module that needs it and does not find it says so itself, and a directory the
+    // app could not make is not a reason to refuse to start.
+    if !directory.as_os_str().is_empty() {
+        if let Err(error) = std::fs::create_dir_all(&directory) {
+            log::warn!(
+                "modules: {} could not be created ({error})",
+                directory.display()
+            );
+        }
+    }
+    state.start(
+        &directory,
+        "en",
+        &app.state::<subtitle::SubtitleState>().slot(),
+    );
+}
+
 /// Build and run the app. Startup errors propagate to `main` so a failed launch is reported.
 pub fn run() -> tauri::Result<()> {
     crash::install();
 
-    let StartupArgs { files, ignored } = startup_files(std::env::args_os());
+    let StartupArgs {
+        files,
+        ignored,
+        no_modules,
+    } = startup_files(std::env::args_os());
     let taken = files.clone();
 
     let app = tauri::Builder::default()
@@ -119,6 +170,12 @@ pub fn run() -> tauri::Result<()> {
         .plugin(log_plugin())
         .plugin(tauri_plugin_dialog::init())
         .manage(project::ProjectState::default())
+        // Before the window exists, so the report is ready the first time it is asked for.
+        .manage(if no_modules {
+            modules::ModuleState::skipped()
+        } else {
+            modules::load()
+        })
         .manage(files)
         .invoke_handler(tauri::generate_handler![
             asr::asr_models,
@@ -132,7 +189,9 @@ pub fn run() -> tauri::Result<()> {
             audio::audio_switch_track,
             chooser::choose_path,
             layout::layout_read,
+            layout::layout_set_minimum_width,
             layout::layout_write,
+            preview::preview_set_shown,
             project::project_add_episode,
             project::project_attach_file,
             project::project_close,
@@ -148,6 +207,7 @@ pub fn run() -> tauri::Result<()> {
             subtitle::subtitle_open,
             subtitle::subtitle_close,
             subtitle::subtitle_set_text,
+            subtitle::subtitle_set_texts,
             subtitle::subtitle_set_times,
             subtitle::subtitle_insert,
             subtitle::subtitle_delete,
@@ -162,14 +222,24 @@ pub fn run() -> tauri::Result<()> {
             video::video_play,
             video::video_pause,
             video::video_seek,
+            video::video_play_range,
             video::video_set_region,
             video::video_set_layers,
+            modules::module_cancel,
+            modules::module_contributions,
+            modules::module_invoke,
+            modules::module_report,
             startup_files_command,
             quit
         ])
         .setup(move |app| {
             crash::attach(app);
+            // After the app exists, because the directory a module is given comes from it, and
+            // before the window asks: the scan itself ran before either (module-abi.md 4.1).
+            // The session is managed first: a module is lent it for the whole of every call the
+            // host makes, so it has to exist before the first one (module-abi.md §2.5).
             app.manage(subtitle::SubtitleState::default());
+            start_modules(app);
             log::info!(
                 "Sublore {} starting on {}",
                 env!("CARGO_PKG_VERSION"),
@@ -195,6 +265,9 @@ pub fn run() -> tauri::Result<()> {
                 log::error!("video setup failed: {error}");
                 return Err(error.into());
             }
+            // After the player, whose mpv core it draws the open document into (decision 7).
+            let player = app.state::<video::VideoState>().player();
+            app.manage(preview::PreviewState::new(app.handle(), player));
             Ok(())
         })
         .build(tauri::generate_context!())?;

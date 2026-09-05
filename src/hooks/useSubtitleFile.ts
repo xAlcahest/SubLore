@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { en } from "../i18n/en";
 import { fill } from "../i18n/format";
+import { type PublishedPanel } from "./useModulePanels";
+import { type RowRef } from "../types/chrome";
 import {
   isSubtitleError,
   type CuePatch,
@@ -89,13 +91,60 @@ export type SubtitleFile = {
   discardAndOpen: () => Promise<void>;
   adoptTranscription: (runId: number) => Promise<void>;
   setText: (cue: number, text: string) => Promise<void>;
+  /** Many cues in one call, and so one undo step whatever the count. See find-replace-tasks F1. */
+  setTexts: (edits: { cue: number; text: string }[]) => Promise<void>;
+  setTimes: (cue: number, startMs: number, endMs: number) => Promise<void>;
+  /** `before === cues.length` appends; the four below carry the backend's own argument names. */
+  insertCue: (before: number, startMs: number, endMs: number, text: string) => Promise<void>;
+  deleteCue: (cue: number) => Promise<void>;
+  /** `textOffset` counts UTF-8 bytes into the cue's text, which is what the backend splits on. */
+  splitCue: (cue: number, textOffset: number, atMs: number) => Promise<void>;
+  /** Joins `cue` with the one after it, so the last row has nothing to merge with. */
+  mergeCue: (cue: number) => Promise<void>;
+  /**
+   * A contributed item was activated, in the module that contributed it.
+   *
+   * Here rather than beside the other module calls because a module may edit: the revision it is
+   * given and the patches it sends back are this hook's, and one owner for both is what keeps them
+   * from disagreeing. See docs/module-abi.md section 4.5.
+   */
+  invokeModule: (
+    module: number,
+    item: number,
+    cue: number | null,
+    /** The panel the gesture came from, and zero when it came from a menu or a toolbar. */
+    panelId: number,
+    /** The activated row's handle, and null when no row carried one. */
+    row: RowRef | null,
+  ) => Promise<void>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   save: () => Promise<void>;
   saveAs: (destination: string) => Promise<void>;
 };
 
-export function useSubtitleFile(): SubtitleFile {
+/** Told after every patch that changed the row count, so the cursor and the selection follow. */
+export type RowsMoved = (at: number, removed: number, inserted: number) => void;
+
+/** Told what an activation published, so the panels go where the panels live. */
+export type PanelSink = (panels: PublishedPanel[]) => void;
+
+/**
+ * What one activation of a contributed item did. Mirrors `modules::InvokeOutcome`.
+ *
+ * The two halves are independent: a module that edited and then refused did both, and the code is
+ * the module's own rather than one the core translates.
+ */
+type ModuleOutcome = { code: number; patches: CuePatch[]; panels: PublishedPanel[] };
+
+/**
+ * @param onPanels What an activation published, handed on to whoever holds the panels.
+ *
+ * Handed in once rather than read here, the way `useTranscription` is handed `adopt`: the panels
+ * are not this hook's state, and the activation that produces them is, because the revision a
+ * module proposes against and the patches it sends back are both this hook's.
+ */
+export function useSubtitleFile(onRowsMoved: RowsMoved, onPanels: PanelSink): SubtitleFile {
   const [summary, setSummary] = useState<SubtitleSummary | null>(null);
   const [cues, setCues] = useState<CueRow[]>([]);
   const [canUndo, setCanUndo] = useState(false);
@@ -125,19 +174,25 @@ export function useSubtitleFile(): SubtitleFile {
     return next;
   }, []);
 
-  const applyPatch = useCallback((patch: CuePatch) => {
-    revision.current = patch.revision;
-    setCues((current) => [
-      ...current.slice(0, patch.from),
-      ...patch.cues,
-      ...current.slice(patch.from + patch.removed),
-    ]);
-    setSummary((current) => (current === null ? null : { ...current, cueCount: patch.cueCount }));
-    setCanUndo(patch.canUndo);
-    setCanRedo(patch.canRedo);
-    setDirty(patch.dirty);
-    setTruncated(patch.truncated);
-  }, []);
+  const applyPatch = useCallback(
+    (patch: CuePatch) => {
+      revision.current = patch.revision;
+      // Before the rows change, so whoever indexes by row is told once per patch and cannot be
+      // forgotten by a caller: every command that changes the count comes through here.
+      onRowsMoved(patch.from, patch.removed, patch.cues.length);
+      setCues((current) => [
+        ...current.slice(0, patch.from),
+        ...patch.cues,
+        ...current.slice(patch.from + patch.removed),
+      ]);
+      setSummary((current) => (current === null ? null : { ...current, cueCount: patch.cueCount }));
+      setCanUndo(patch.canUndo);
+      setCanRedo(patch.canRedo);
+      setDirty(patch.dirty);
+      setTruncated(patch.truncated);
+    },
+    [onRowsMoved],
+  );
 
   /** Take a document the backend has just made the open one, whichever route opened it. */
   const applyOpened = useCallback((opened: SubtitleOpened) => {
@@ -246,10 +301,82 @@ export function useSubtitleFile(): SubtitleFile {
     [applyPatch, serialize],
   );
 
+  /**
+   * Carry an activation into a module, and take back whatever it changed.
+   *
+   * Not `command`: that one applies exactly one patch and treats anything else as a failure, and a
+   * module may change nothing, one cue, or several before it answers.
+   */
+  const invokeModule = useCallback(
+    (module: number, item: number, cue: number | null, panelId: number, row: RowRef | null) =>
+      serialize(async () => {
+        setError(null);
+        try {
+          const outcome = await invoke<ModuleOutcome>("module_invoke", {
+            module,
+            item,
+            at: {
+              revision: revision.current,
+              cue,
+              // Section 4.1 says `row` is meaningful only when `panelId` is not zero, so a menu
+              // item sends both empty. A decimal string, because the handle is a `u64`.
+              row: row ?? "0",
+              panelId,
+              // Nothing to carry yet: a module keys its own storage on this, storage keys on the
+              // file it is in, and `ProjectView` has no id to give. See docs H6.
+              projectKey: 0,
+            },
+          });
+          // Applied before the code is looked at. A module that changed rows and then refused
+          // changed them, and the grid has to draw the document the session holds.
+          for (const patch of outcome.patches) {
+            applyPatch(patch);
+          }
+          // On the same terms: a run the module closed is published whatever it answered after.
+          onPanels(outcome.panels);
+          if (outcome.code !== 0) {
+            // The core does not know what the module was doing, so it has no sentence for this.
+            // The Rust side names the module, the item and the code in the log.
+            console.warn("a module refused its own activation", item, outcome.code);
+          }
+        } catch (failure) {
+          setError(toSubtitleError(failure));
+        }
+      }),
+    [applyPatch, onPanels, serialize],
+  );
+
   const setText = useCallback(
     (cue: number, text: string) => command("subtitle_set_text", { cue, text }),
     [command],
   );
+
+  const setTexts = useCallback(
+    (edits: { cue: number; text: string }[]) => command("subtitle_set_texts", { edits }),
+    [command],
+  );
+
+  const setTimes = useCallback(
+    (cue: number, startMs: number, endMs: number) =>
+      command("subtitle_set_times", { cue, startMs, endMs }),
+    [command],
+  );
+
+  const insertCue = useCallback(
+    (before: number, startMs: number, endMs: number, text: string) =>
+      command("subtitle_insert", { before, startMs, endMs, text }),
+    [command],
+  );
+
+  const deleteCue = useCallback((cue: number) => command("subtitle_delete", { cue }), [command]);
+
+  const splitCue = useCallback(
+    (cue: number, textOffset: number, atMs: number) =>
+      command("subtitle_split", { cue, textOffset, atMs }),
+    [command],
+  );
+
+  const mergeCue = useCallback((cue: number) => command("subtitle_merge", { cue }), [command]);
 
   const undo = useCallback(() => command("subtitle_undo", {}), [command]);
 
@@ -325,9 +452,16 @@ export function useSubtitleFile(): SubtitleFile {
     discardAndOpen,
     adoptTranscription,
     setText,
+    setTexts,
+    setTimes,
+    insertCue,
+    deleteCue,
+    splitCue,
+    mergeCue,
     undo,
     redo,
     save,
     saveAs,
+    invokeModule,
   };
 }

@@ -26,6 +26,10 @@ const EVENT_POLL_SECONDS: f64 = 0.1;
 /// How long shutdown waits for in-flight commands to release their mpv handle.
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// More external subtitle tracks than any document could have put there, so clearing them is a
+/// loop that ends whatever mpv does.
+const MAX_SUBTITLE_REMOVALS: usize = 16;
+
 const OBSERVE_TIME_POS: u64 = 1;
 const OBSERVE_PAUSE: u64 = 2;
 
@@ -101,6 +105,29 @@ pub struct AudioTrack {
     pub playing: bool,
 }
 
+/// What mpv reports about the subtitles it is drawing, read back from mpv rather than remembered
+/// here: mpv is the authority on its own track list, as it is on which audio track plays.
+#[derive(Clone, Copy, Debug)]
+pub struct SubtitlesDrawn {
+    /// External subtitle tracks mpv holds. More than one means a rewrite added a track instead of
+    /// re-reading the one already there.
+    pub tracks: usize,
+    /// Whether the one loaded from the path just given is the track mpv draws.
+    pub selected: bool,
+    pub visible: bool,
+    /// Characters in the line mpv has at the playhead, or none where no line covers it. The line
+    /// itself stays out of here: a subtitle line is the user's own writing.
+    pub chars: Option<usize>,
+}
+
+/// One external subtitle track, as `track-list` reports it.
+struct ExternalSubtitle {
+    id: i64,
+    selected: bool,
+    /// Where mpv read it from, which is the path `sub-add` was given.
+    filename: String,
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PositionPayload {
@@ -138,6 +165,10 @@ struct Shared {
     /// The last pause this app asked mpv for. A `pause` that arrives while this is false is one
     /// nobody here wanted, and BACKLOG N13 is exactly that going unrecorded.
     asked_paused: AtomicBool,
+    /// Where a range playback stops, in seconds, or nothing. mpv has no "play to here and pause":
+    /// its A-B loop repeats or is ignored, and its own issue 9716 answers the same question by
+    /// watching `time-pos`. The event thread does that, and it sees every frame.
+    stop_at: Mutex<Option<f64>>,
 }
 
 impl Shared {
@@ -285,6 +316,7 @@ impl Player {
             pending_open: Mutex::new(None),
             // Nothing is loaded yet, so nothing has been asked to play.
             asked_paused: AtomicBool::new(true),
+            stop_at: Mutex::new(None),
         });
         let stop = Arc::new(AtomicBool::new(false));
 
@@ -397,11 +429,45 @@ impl Player {
     }
 
     pub fn play(&self) -> Result<(), VideoError> {
+        self.clear_stop();
         self.set_pause(false)
     }
 
     pub fn pause(&self) -> Result<(), VideoError> {
+        self.clear_stop();
         self.set_pause(true)
+    }
+
+    /// Play from one second to another, then pause. Both are absolute, and both are clamped into
+    /// the file the way a seek is.
+    ///
+    /// It talks to mpv itself rather than through `seek` and `play`, which clear the target: those
+    /// three exist so that anything the user does during a range cancels its stop instead of
+    /// leaving one armed. Setting the target before playback starts is the other half of that: a
+    /// frame cannot slip past a target that is not there yet.
+    pub fn play_range(&self, from: f64, to: f64) -> Result<(), VideoError> {
+        let mpv = self.handle()?;
+        let duration = self.loaded_duration()?;
+        if !from.is_finite() || !to.is_finite() {
+            return Err(VideoError::command_failed("a range bound is not a number"));
+        }
+        let start = from.clamp(0.0, duration);
+        let end = to.clamp(start, duration);
+        if let Ok(mut target) = self.shared.stop_at.lock() {
+            *target = Some(end);
+        }
+        mpv.command("seek", &[&format!("{start}"), "absolute"])
+            .map_err(|error| from_mpv(error, "seek"))?;
+        self.shared.asked_paused.store(false, Ordering::Relaxed);
+        mpv.set_property("pause", false)
+            .map_err(|error| from_mpv(error, "pause"))
+    }
+
+    /// Forget where a range was going to stop. Anything the user asks for cancels it.
+    fn clear_stop(&self) {
+        if let Ok(mut target) = self.shared.stop_at.lock() {
+            *target = None;
+        }
     }
 
     /// Absolute seconds from the start, clamped into the file's range.
@@ -412,6 +478,7 @@ impl Player {
             return Err(VideoError::command_failed("seek position is not a number"));
         }
         let target = position.clamp(0.0, duration);
+        self.clear_stop();
         mpv.command("seek", &[&format!("{target}"), "absolute"])
             .map_err(|error| from_mpv(error, "seek"))
     }
@@ -588,6 +655,84 @@ impl Player {
             .map_err(|error| from_mpv(error, "aid"))
     }
 
+    /// Make `path` the one external subtitle track mpv draws, and say what mpv reports afterwards.
+    ///
+    /// A track already loaded from this path is re-read in place with `sub-reload`; adding it again
+    /// would leave the old one behind and stack one track per edit. `reread` is false when the file
+    /// on disk has not changed, so a View toggle does not make mpv read it again for nothing.
+    pub fn show_subtitles(
+        &self,
+        path: &Path,
+        reread: bool,
+        visible: bool,
+    ) -> Result<SubtitlesDrawn, VideoError> {
+        let mpv = self.handle()?;
+        // Nothing is loaded, so there is no frame to draw on: mpv refuses `sub-add` outright there.
+        self.loaded_duration()?;
+        let wanted = mpv_path(path);
+
+        // Any other external track is a shadow from before: the document changed format, so its
+        // file has a different extension and the old one would stay loaded beside the new one.
+        for stale in external_subtitles(&mpv)?
+            .into_iter()
+            .filter(|track| track.filename != wanted)
+        {
+            mpv.command("sub-remove", &[&stale.id.to_string()])
+                .map_err(|error| from_mpv(error, "sub-remove"))?;
+        }
+
+        match external_subtitles(&mpv)?
+            .into_iter()
+            .find(|track| track.filename == wanted)
+        {
+            Some(track) if reread => mpv
+                .command("sub-reload", &[&track.id.to_string()])
+                .map_err(|error| from_mpv(error, "sub-reload"))?,
+            Some(_) => {}
+            None => mpv
+                .command("sub-add", &[&wanted, "select"])
+                .map_err(|error| from_mpv(error, "sub-add"))?,
+        }
+
+        mpv.set_property("sub-visibility", visible)
+            .map_err(|error| from_mpv(error, "sub-visibility"))?;
+        let tracks = external_subtitles(&mpv)?;
+        Ok(SubtitlesDrawn {
+            tracks: tracks.len(),
+            selected: tracks
+                .iter()
+                .any(|track| track.filename == wanted && track.selected),
+            visible: mpv
+                .get_property::<bool>("sub-visibility")
+                .map_err(|error| from_mpv(error, "sub-visibility"))?,
+            // No line covering the playhead has no `sub-text` at all. That is absence, not failure.
+            chars: mpv
+                .get_property::<String>("sub-text")
+                .ok()
+                .map(|line| line.chars().count()),
+        })
+    }
+
+    /// Take every external subtitle track off. mpv holding none already is not a failure.
+    ///
+    /// The list is read again after each removal rather than walked once: whether mpv renumbers
+    /// what is left is its business, and a stale id would either miss a track or remove the wrong
+    /// one. The bound is what stops a removal mpv accepts without acting on from looping forever.
+    pub fn drop_subtitles(&self) -> Result<(), VideoError> {
+        let mpv = self.handle()?;
+        self.loaded_duration()?;
+        for _ in 0..MAX_SUBTITLE_REMOVALS {
+            let Some(track) = external_subtitles(&mpv)?.into_iter().next() else {
+                return Ok(());
+            };
+            mpv.command("sub-remove", &[&track.id.to_string()])
+                .map_err(|error| from_mpv(error, "sub-remove"))?;
+        }
+        Err(VideoError::command_failed(
+            "mpv still holds external subtitle tracks after removing them",
+        ))
+    }
+
     fn set_pause(&self, paused: bool) -> Result<(), VideoError> {
         let mpv = self.handle()?;
         self.loaded_duration()?;
@@ -635,6 +780,42 @@ fn validate_path(path: &str) -> Result<String, VideoError> {
     Ok(mpv_path(&resolved))
 }
 
+/// Every external subtitle track mpv holds. Read property by property, as `audio_tracks` reads the
+/// audio ones: libmpv2 hands back scalars.
+fn external_subtitles(mpv: &Mpv) -> Result<Vec<ExternalSubtitle>, VideoError> {
+    let count = mpv
+        .get_property::<i64>("track-list/count")
+        .map_err(|error| from_mpv(error, "track-list/count"))?;
+    let mut tracks = Vec::new();
+    for index in 0..count.max(0) {
+        let kind = mpv
+            .get_property::<String>(&format!("track-list/{index}/type"))
+            .map_err(|error| from_mpv(error, "track-list type"))?;
+        if kind != "sub" {
+            continue;
+        }
+        // A track that came out of the media file is the media's own and is never touched here.
+        if !mpv
+            .get_property::<bool>(&format!("track-list/{index}/external"))
+            .map_err(|error| from_mpv(error, "track-list external"))?
+        {
+            continue;
+        }
+        tracks.push(ExternalSubtitle {
+            id: mpv
+                .get_property::<i64>(&format!("track-list/{index}/id"))
+                .map_err(|error| from_mpv(error, "track-list id"))?,
+            selected: mpv
+                .get_property::<bool>(&format!("track-list/{index}/selected"))
+                .map_err(|error| from_mpv(error, "track-list selected"))?,
+            filename: mpv
+                .get_property::<String>(&format!("track-list/{index}/external-filename"))
+                .map_err(|error| from_mpv(error, "track-list external-filename"))?,
+        });
+    }
+    Ok(tracks)
+}
+
 /// Windows canonicalisation yields a `\\?\` verbatim path, which mpv does not accept. See M0.2.
 fn mpv_path(path: &Path) -> String {
     let text = path.to_string_lossy();
@@ -656,6 +837,21 @@ fn event_loop(mpv: &Mpv, shared: &Shared, stop: &AtomicBool) {
                 change: PropertyData::Double(position),
                 ..
             })) => {
+                // A range's stop is checked here and not on the throttled path below: mpv reports
+                // time-pos at frame rate, so this overshoots by a frame, and the UI's ten updates a
+                // second would overshoot by a tenth. See docs/play-range-tasks.md.
+                let stopping = shared
+                    .stop_at
+                    .lock()
+                    .ok()
+                    .and_then(|mut target| target.take_if(|end| position >= *end))
+                    .is_some();
+                if stopping {
+                    shared.asked_paused.store(true, Ordering::Relaxed);
+                    if let Err(error) = mpv.set_property("pause", true) {
+                        log::warn!("playback: a range could not be stopped: {error}");
+                    }
+                }
                 // mpv reports time-pos at frame rate; the UI gets at most 10 updates per second.
                 if last_position.elapsed() >= POSITION_EVENT_INTERVAL {
                     last_position = Instant::now();

@@ -86,7 +86,14 @@ async function seekTo(seconds) {
     slider.dispatchEvent(new Event("input", { bubbles: true }));
     slider.dispatchEvent(new Event("change", { bubbles: true }));
   }, seconds);
-  await browser.pause(200);
+  // The app's own state rather than a stopwatch. The slider is drawn from the position the seek
+  // set, so a slider reading the target is the render the canvas was painted in. The 200 ms this
+  // replaces passed alone and failed twice under a full battery, which is what a calibrated wait
+  // does on a machine that is busier than the one it was calibrated on.
+  await waitFor(async () => (Math.round(await position()) === Math.round(seconds) ? true : null), {
+    timeout: 15000,
+    message: `the transport to read ${seconds}s after the seek`,
+  });
 }
 
 /** Two seeks while stopped give the window's left edge and its scale, in milliseconds per column. */
@@ -159,10 +166,10 @@ describe("the waveform follows the playhead", () => {
     });
     focusWindow(toplevel.id);
     await waitFor(
-      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      () => browser.execute(() => document.querySelector(".toolbar__video-open") !== null),
       { timeout: 30000, message: "the app UI to render" },
     );
-    await clickElement(toplevel, ".toolbar__open-video");
+    await clickElement(toplevel, ".toolbar__video-open");
     const chooser = await waitForChooser("Choose a video");
     await answerChooser(chooser, requireWaveformFixture(), "video");
     focusWindow(toplevel.id);

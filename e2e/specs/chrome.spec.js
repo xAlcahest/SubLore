@@ -23,12 +23,36 @@ import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
 import { findToplevel } from "../lib/x11.js";
 
-/** The titles M2.0 draws. Subtitles, Timing, Audio and Terms arrive with the milestone that fills
- * each one, and there is no View menu before M2.4 (decision 24 A2 and A4). */
-const TITLES = ["File", "Edit", "View", "Help"];
+/**
+ * The whole bar, in the order it draws it, with the greying each title carries while nothing is
+ * open. A title is drawn whether or not anything behind it can be used, so Audio is here too,
+ * greyed until a media with tracks is open (owner ruling 2026-09-03, which reverses decision 24 A2).
+ */
+const TITLES = [
+  { id: "file", label: "File", disabled: false },
+  { id: "edit", label: "Edit", disabled: false },
+  { id: "subtitle", label: "Subtitles", disabled: false },
+  { id: "timing", label: "Timing", disabled: false },
+  { id: "view", label: "View", disabled: false },
+  { id: "audio", label: "Audio", disabled: true },
+  { id: "help", label: "Help", disabled: false },
+];
+
+/** The titles with something behind them, which are the only ones a click opens. */
+const OPENING = TITLES.filter((title) => !title.disabled);
+
+/** The File commands nothing open leaves usable. Each is drawn greyed rather than left out. */
+const GREYED_IN_FILE = ["file-save", "file-save-copy", "file-discard"];
 
 /** Every command the bars T3 removed used to offer. Each has to reach both routes. */
-const FROM_THE_BARS = ["open-subtitle", "open-video", "save", "save-copy", "undo", "redo"];
+const FROM_THE_BARS = [
+  "file-open-subtitle",
+  "video-open",
+  "file-save",
+  "file-save-copy",
+  "edit-undo",
+  "edit-redo",
+];
 
 const NO_FILE_STATUS = "No subtitle file open.";
 
@@ -87,6 +111,25 @@ function present(selector) {
 
 function textOf(selector) {
   return browser.execute((css) => document.querySelector(css)?.textContent ?? null, selector);
+}
+
+/** A drawn control's greying, or null when the control is not drawn at all. */
+function disabledOf(selector) {
+  return browser.execute((css) => document.querySelector(css)?.disabled ?? null, selector);
+}
+
+/** The bar's titles in the order it draws them, each with the id its class carries. */
+function titlesOnTheBar() {
+  return browser.execute(() =>
+    Array.from(document.querySelectorAll(".menubar__title")).map((title) => ({
+      id:
+        Array.from(title.classList)
+          .find((name) => name.startsWith("menubar__title--"))
+          ?.replace("menubar__title--", "") ?? null,
+      label: title.textContent,
+      disabled: title.disabled,
+    })),
+  );
 }
 
 /** The title of the open dropdown, or null when none is open. */
@@ -150,24 +193,39 @@ describe("the menu bar and the toolbar", () => {
     });
     focusWindow(toplevel.id);
     await waitFor(
-      () => browser.execute(() => document.querySelector(".toolbar__open-subtitle") !== null),
+      () => browser.execute(() => document.querySelector(".toolbar__file-open-subtitle") !== null),
       { timeout: 30000, message: "the app UI to render" },
     );
   });
 
-  it("draws only the titles that have items behind them", async () => {
-    const titles = await browser.execute(() =>
-      Array.from(document.querySelectorAll(".menubar__title")).map((title) => title.textContent),
-    );
+  it("draws every title with nothing open, greying the one with nothing behind it", async () => {
+    // Nothing at all is open, so Audio has no track to list and File has nothing to save.
+    expect(await textOf(".statusbar__document")).toBe(NO_FILE_STATUS);
+    expect(await textOf(".stage__empty")).not.toBe(null);
 
-    expect(titles).toEqual(TITLES);
+    // The bar is whole in the emptiest state there is: Audio is drawn and greyed, not dropped.
+    expect(await titlesOnTheBar()).toEqual(TITLES);
+
+    // The same rule one level down, on the commands the owner went looking for: drawn, greyed.
+    await clickElement(toplevel, ".menubar__title--file");
+    await waitForOpenMenu("File");
+    const drawn = await itemsOfOpenMenu();
+    for (const id of GREYED_IN_FILE) {
+      expect({
+        id,
+        drawn: drawn.includes(id),
+        disabled: await disabledOf(`#menuitem-${id}`),
+      }).toEqual({ id, drawn: true, disabled: true });
+    }
+    pressKey("Escape");
+    await waitForNoMenu();
   });
 
   it("offers every command the removed bars offered, from the menu and from the toolbar", async () => {
     const inMenus = [];
-    for (const title of TITLES) {
-      await clickElement(toplevel, `.menubar__title--${title.toLowerCase()}`);
-      await waitForOpenMenu(title);
+    for (const title of OPENING) {
+      await clickElement(toplevel, `.menubar__title--${title.id}`);
+      await waitForOpenMenu(title.label);
       inMenus.push(...(await itemsOfOpenMenu()));
       pressKey("Escape");
       await waitForNoMenu();
@@ -195,7 +253,7 @@ describe("the menu bar and the toolbar", () => {
   it("opens the first dropdown on Alt, with the cursor on its first enabled item", async () => {
     pressKey("alt");
     await waitForOpenMenu("File");
-    await waitForCursor("open-subtitle");
+    await waitForCursor("file-open-subtitle");
 
     expect(await focusedClass()).toContain("menubar__menu");
 
@@ -204,19 +262,19 @@ describe("the menu bar and the toolbar", () => {
   });
 
   it("walks the items with the arrows and steps over the disabled ones", async () => {
-    // Nothing is open, so Save and Save a copy are the disabled pair in the middle of File.
+    // Nothing is open, so Save, Save a copy and Discard are the disabled run in the middle of File.
     pressKey("alt");
-    await waitForCursor("open-subtitle");
+    await waitForCursor("file-open-subtitle");
     expect(
-      await browser.execute(() => document.querySelector("#menuitem-save")?.disabled ?? null),
+      await browser.execute(() => document.querySelector("#menuitem-file-save")?.disabled ?? null),
     ).toBe(true);
 
     pressKey("Down");
-    await waitForCursor("open-video");
+    await waitForCursor("video-open");
     pressKey("Down");
-    await waitForCursor("quit");
+    await waitForCursor("app-quit");
     pressKey("Up");
-    await waitForCursor("open-video");
+    await waitForCursor("video-open");
 
     pressKey("Escape");
     await waitForNoMenu();
@@ -228,6 +286,10 @@ describe("the menu bar and the toolbar", () => {
 
     pressKey("Right");
     await waitForOpenMenu("Edit");
+    pressKey("Right");
+    await waitForOpenMenu("Subtitles");
+    pressKey("Right");
+    await waitForOpenMenu("Timing");
     pressKey("Right");
     await waitForOpenMenu("View");
     pressKey("Right");
@@ -256,12 +318,15 @@ describe("the menu bar and the toolbar", () => {
   it("activates the item under the cursor on Enter", async () => {
     pressKey("alt");
     await waitForOpenMenu("File");
-    // File, Edit, View, Help: the walk the test above asserts, taken here to reach About.
+    // File, Edit, Subtitles, Timing, View, Help: the walk the test above asserts, taken here to
+    // reach About. Audio is skipped because with nothing open it has no track to list.
+    pressKey("Right");
+    pressKey("Right");
     pressKey("Right");
     pressKey("Right");
     pressKey("Right");
     await waitForOpenMenu("Help");
-    await waitForCursor("about");
+    await waitForCursor("help-about");
 
     pressKey("Return");
     await waitFor(() => present(".about"), {
@@ -305,7 +370,7 @@ describe("the menu bar and the toolbar", () => {
 
   it("opens a subtitle through the File menu", async () => {
     pressKey("alt");
-    await waitForCursor("open-subtitle");
+    await waitForCursor("file-open-subtitle");
 
     pressKey("Return");
     const chooser = await waitForChooser("Choose a subtitle");
@@ -316,6 +381,26 @@ describe("the menu bar and the toolbar", () => {
       timeout: 20000,
       message: "the status bar to report the subtitle the menu opened",
     });
+    expect(await textOf(".statusbar__error")).toBe(null);
+  });
+
+  it("draws the same titles, greying and all, once a document is open", async () => {
+    // The state is opened here rather than inherited, so a failure means the bar moved and not that
+    // an earlier check left something behind. A dropdown left down would sit over the toolbar.
+    pressKey("Escape");
+    await waitForNoMenu();
+    await clickElement(toplevel, ".toolbar__file-open-subtitle");
+    const chooser = await waitForChooser("Choose a subtitle");
+    await answerChooser(chooser, opened, "subtitle");
+    focusWindow(toplevel.id);
+    await waitFor(async () => (await textOf(".statusbar__document"))?.startsWith("SRT") === true, {
+      timeout: 20000,
+      message: "the status bar to report the subtitle the toolbar opened",
+    });
+
+    // Not one title more and not one fewer than the empty app drew, and Audio is still greyed: a
+    // subtitle brings no audio tracks with it. What an open moves is the greying inside the menus.
+    expect(await titlesOnTheBar()).toEqual(TITLES);
     expect(await textOf(".statusbar__error")).toBe(null);
   });
 

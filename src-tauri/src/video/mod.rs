@@ -201,6 +201,12 @@ pub async fn video_open(
     .await
     .map_err(|error| VideoError::player_unavailable(format!("open task failed: {error}")))?;
 
+    // mpv drops every external subtitle track when it loads a file, so the open document goes back
+    // on the frame here. Which of the two the user opened first is not special (decision 7).
+    if opened.is_ok() {
+        crate::preview::refresh(&app).await;
+    }
+
     if opened.is_err() {
         // A failed compensation leaves the surface shown over a video that never loaded, so it is
         // said rather than dropped.
@@ -234,6 +240,16 @@ pub async fn video_pause(state: State<'_, VideoState>) -> Result<(), VideoError>
 #[tauri::command]
 pub async fn video_seek(state: State<'_, VideoState>, position: f64) -> Result<(), VideoError> {
     state.player().seek(position)
+}
+
+/// Play a stretch and stop at its end, which is what timing a line is made of.
+#[tauri::command]
+pub async fn video_play_range(
+    state: State<'_, VideoState>,
+    from: f64,
+    to: f64,
+) -> Result<(), VideoError> {
+    state.player().play_range(from, to)
 }
 
 #[tauri::command]

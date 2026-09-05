@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use sublore_project::layout::CURRENT_VERSION;
 
 use sublore_lib::project::error::ProjectErrorCode;
 use sublore_lib::project::{
@@ -92,7 +93,9 @@ fn a_project_survives_being_closed_and_opened_again_with_its_episodes_and_paths(
     let created = create(&slot, &text(&folder)).expect("a project is created");
     assert_eq!(created.title, "Series One");
     assert_eq!(created.folder, text(&folder));
-    assert_eq!(created.schema_version, 1);
+    // The version this build writes, not a number typed here: the ladder grows and the assertion
+    // means "a new project is created at the current version" rather than "at version one".
+    assert_eq!(created.schema_version, CURRENT_VERSION);
     assert!(created.episodes.is_empty());
 
     add_episode(&slot, "Pilot").expect("the first episode is added");
@@ -313,7 +316,7 @@ fn deleting_a_project_removes_sublore_s_own_files_and_nothing_of_the_user_s() {
     let media = scratch.file("user/ep01.mkv", "the user's only copy of the video");
     let subtitle = scratch.file("user/ep01.srt", "1\n00:00:01,000 --> 00:00:02,000\nHello\n");
     // Two files the user keeps in the project folder itself, which Sublore did not create.
-    let notes = scratch.file("Series/notes.txt", "my glossary notes");
+    let notes = scratch.file("Series/notes.txt", "my grocery list");
     let stray = scratch.file("Series/project.sublore.bak", "a backup the user made");
 
     let before = [

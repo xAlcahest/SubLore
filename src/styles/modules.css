@@ -1,0 +1,146 @@
+/* What a module puts under the grid: the table it fills, and the line its work draws while it
+   runs. One file per region, so this never edits the find band's stylesheet (decision 22).
+
+   Both sit in the panel flow rather than over it, beside the find band and for the same reason:
+   a layer hides the native video surface, and neither of these has any business doing that. */
+
+.modulepanel {
+  display: flex;
+  flex: none;
+  max-height: 12rem;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  background: var(--bg-panel);
+}
+
+.modulepanel__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+}
+
+.modulepanel__title {
+  overflow: hidden;
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modulepanel__close {
+  margin-left: auto;
+}
+
+/* The rows scroll and the band does not grow: a module may fill a table with more rows than the
+   window has height, and the grid above must keep the space its sash left it. */
+.modulepanel__rows {
+  overflow-y: auto;
+  padding: 0 0.75rem 0.5rem;
+}
+
+.modulepanel__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+
+/* The row itself is the primary action, so the whole of it is one control. */
+.modulepanel__activate {
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.3rem 0.2rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.modulepanel__activate:disabled {
+  color: var(--ink-faint);
+}
+
+.modulepanel__activate:enabled:hover {
+  background: var(--bg-sunken);
+}
+
+.modulepanel__cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The first cell takes the room and the rest take what they need. The core has no column widths
+   to read: a cell carries a kind and no name, which is also why there is no header row. */
+.modulepanel__cell--text {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.modulepanel__cell--number,
+.modulepanel__cell--percent {
+  flex: none;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.modulepanel__cell--badge {
+  flex: none;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.2rem;
+  background: var(--accent-bg);
+  color: var(--ink);
+  font-size: 0.8125rem;
+}
+
+.modulepanel__action {
+  flex: none;
+}
+
+.modulework {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-top: 1px solid var(--line);
+  background: var(--bg-panel);
+}
+
+/* The module's own words, and it may write a long line: cut rather than wrapped, so the band
+   stays one row high and the grid above never loses a second one to it. */
+.modulework__status {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modulework__progress {
+  flex: none;
+  width: 10rem;
+}
+
+.modulework__count {
+  flex: none;
+  font-size: 0.875rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.modulework__stop {
+  flex: none;
+}

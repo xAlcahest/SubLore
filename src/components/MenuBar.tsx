@@ -1,15 +1,46 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useLayer } from "../hooks/useLayers";
-import { type Command, type Menu } from "../types/chrome";
+import {
+  commandToken,
+  runCommand,
+  type Command,
+  type CommandId,
+  type CommandRegistry,
+  type Menu,
+} from "../types/chrome";
 
 type MenuBarProps = {
   menus: Menu[];
+  commands: CommandRegistry;
 };
+
+/** A menu's items resolved from ids to the registry's records (T3 C1). */
+function resolve(menu: Menu, commands: CommandRegistry): Command[] {
+  return menu.items.map((id) => commands[id]);
+}
 
 /** The first item the cursor may sit on, or -1 when every item in the menu is disabled. */
 function firstEnabled(items: Command[]): number {
   return items.findIndex((item) => item.enabled);
+}
+
+/** Whether a title has anything to open. A menu with no items is greyed rather than dropped (C2). */
+function opens(menu: Menu): boolean {
+  return menu.items.length > 0;
+}
+
+/**
+ * The next title in `direction` that has something to open, or -1 past the end of the bar. The
+ * walk stops at the ends rather than wrapping, which is what the bar has always done.
+ */
+function stepTitle(menus: Menu[], from: number, direction: number): number {
+  for (let index = from + direction; index >= 0 && index < menus.length; index += direction) {
+    if (opens(menus[index])) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -33,7 +64,7 @@ function stepOver(items: Command[], from: number, direction: number): number {
  * (decision 1). Alt opens the first title, arrows walk it skipping disabled items, Enter activates
  * and Escape closes and hands the keyboard back — the table in shell-layout.md.
  */
-export default function MenuBar({ menus }: MenuBarProps) {
+export default function MenuBar({ menus, commands }: MenuBarProps) {
   const [open, setOpen] = useState<number | null>(null);
   const [cursor, setCursor] = useState(-1);
   const barRef = useRef<HTMLDivElement>(null);
@@ -41,7 +72,7 @@ export default function MenuBar({ menus }: MenuBarProps) {
   /** Where the keyboard was before Alt, so Escape can hand it back. */
   const restoreTo = useRef<HTMLElement | null>(null);
   /** Read by the window listeners, which are registered once and outlive every render. */
-  const latest = useRef({ menus, open, cursor });
+  const latest = useRef({ menus, commands, open, cursor });
 
   // The open dropdown is a layer and the bar itself is not, so the picture gets out of the way only
   // while one is down. Walking from one title to the next never lets it back (decision 1, T8).
@@ -65,23 +96,29 @@ export default function MenuBar({ menus }: MenuBarProps) {
     }
   }
 
-  function activate(command: Command) {
+  /** The menu closes, then the one gated path decides whether anything runs (C3). */
+  function activate(registry: CommandRegistry, id: CommandId) {
     closeMenu(true);
-    command.run();
+    runCommand(registry, id);
   }
 
   function onKeyDown(event: KeyboardEvent) {
     const state = latest.current;
     if (state.open === null) {
       const alone = !event.ctrlKey && !event.shiftKey && !event.metaKey;
-      if (event.key !== "Alt" || !alone || state.menus.length === 0) {
+      if (event.key !== "Alt" || !alone) {
+        return;
+      }
+      // Alt lands on the first title that opens; with none, the key is left to the window.
+      const first = stepTitle(state.menus, -1, 1);
+      if (first < 0) {
         return;
       }
       event.preventDefault();
-      openMenu(0, firstEnabled(state.menus[0].items));
+      openMenu(first, firstEnabled(resolve(state.menus[first], state.commands)));
       return;
     }
-    const items = state.menus[state.open].items;
+    const items = resolve(state.menus[state.open], state.commands);
     switch (event.key) {
       case "ArrowDown":
         setCursor(stepOver(items, state.cursor, 1));
@@ -91,15 +128,16 @@ export default function MenuBar({ menus }: MenuBarProps) {
         break;
       case "ArrowRight":
       case "ArrowLeft": {
-        const next = state.open + (event.key === "ArrowRight" ? 1 : -1);
-        if (next >= 0 && next < state.menus.length) {
-          openMenu(next, firstEnabled(state.menus[next].items));
+        const next = stepTitle(state.menus, state.open, event.key === "ArrowRight" ? 1 : -1);
+        if (next >= 0) {
+          openMenu(next, firstEnabled(resolve(state.menus[next], state.commands)));
         }
         break;
       }
       case "Enter":
+        // The cursor never sits on a greyed item; if the state moved under it, the menu stays open.
         if (state.cursor >= 0 && items[state.cursor].enabled) {
-          activate(items[state.cursor]);
+          activate(state.commands, items[state.cursor].id);
         }
         break;
       case "Escape":
@@ -114,7 +152,7 @@ export default function MenuBar({ menus }: MenuBarProps) {
   }
 
   useEffect(() => {
-    latest.current = { menus, open, cursor };
+    latest.current = { menus, commands, open, cursor };
   });
 
   // Registered once: both handlers read `latest`, so a re-render never drops an event.
@@ -144,52 +182,71 @@ export default function MenuBar({ menus }: MenuBarProps) {
 
   return (
     <div className="menubar" role="menubar" ref={barRef}>
-      {menus.map((menu, index) => (
-        <div className="menubar__group" key={menu.id}>
-          <button
-            className={`menubar__title menubar__title--${menu.id}`}
-            type="button"
-            role="menuitem"
-            aria-haspopup="menu"
-            aria-expanded={open === index}
-            onClick={() => (open === index ? closeMenu(false) : openMenu(index, -1))}
-          >
-            {menu.title}
-          </button>
-          {open === index && (
-            <div
-              className="menubar__menu"
-              role="menu"
-              tabIndex={-1}
-              ref={dropdownRef}
-              aria-label={menu.title}
-              aria-activedescendant={cursor < 0 ? undefined : `menuitem-${menu.items[cursor].id}`}
+      {menus.map((menu, index) => {
+        const items = resolve(menu, commands);
+        return (
+          <div className="menubar__group" key={menu.id}>
+            <button
+              className={`menubar__title menubar__title--${menu.id}`}
+              type="button"
+              role="menuitem"
+              aria-haspopup="menu"
+              aria-expanded={open === index}
+              // Drawn with nothing behind it too, greyed: a title never comes and goes (C2).
+              disabled={!opens(menu)}
+              onClick={() => (open === index ? closeMenu(false) : openMenu(index, -1))}
             >
-              {menu.items.map((command, position) => (
-                <button
-                  className={
-                    `menubar__item menubar__item--${command.id}` +
-                    (position === cursor ? " menubar__item--cursor" : "")
-                  }
-                  id={`menuitem-${command.id}`}
-                  key={command.id}
-                  type="button"
-                  role={command.checked === undefined ? "menuitem" : "menuitemcheckbox"}
-                  aria-checked={command.checked}
-                  tabIndex={-1}
-                  disabled={!command.enabled}
-                  onClick={() => activate(command)}
-                >
-                  <span className="menubar__label">{command.label}</span>
-                  {command.accelerator !== undefined && (
-                    <span className="menubar__accelerator">{command.accelerator}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+              {menu.title}
+            </button>
+            {open === index && (
+              <div
+                className="menubar__menu"
+                role="menu"
+                tabIndex={-1}
+                ref={dropdownRef}
+                aria-label={menu.title}
+                aria-activedescendant={
+                  cursor < 0 ? undefined : `menuitem-${commandToken(items[cursor].id)}`
+                }
+              >
+                {items.map((command, position) => (
+                  <button
+                    className={
+                      `menubar__item menubar__item--${commandToken(command.id)}` +
+                      (position === cursor ? " menubar__item--cursor" : "")
+                    }
+                    id={`menuitem-${commandToken(command.id)}`}
+                    key={command.id}
+                    type="button"
+                    // checked+group is one option of a radio set; checked alone is a plain toggle.
+                    role={
+                      command.checked === undefined
+                        ? "menuitem"
+                        : command.group === undefined
+                          ? "menuitemcheckbox"
+                          : "menuitemradio"
+                    }
+                    aria-checked={command.checked}
+                    tabIndex={-1}
+                    disabled={!command.enabled}
+                    onClick={() => activate(commands, command.id)}
+                  >
+                    <span className="menubar__item-main">
+                      <span className="menubar__mark" aria-hidden="true">
+                        {command.checked === true ? (command.group === undefined ? "✓" : "●") : ""}
+                      </span>
+                      <span className="menubar__label">{command.label}</span>
+                    </span>
+                    {command.accelerator !== undefined && (
+                      <span className="menubar__accelerator">{command.accelerator}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

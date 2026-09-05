@@ -19,6 +19,20 @@ permissions:
   contents: read
 
 jobs:
+  # N8f: the open-core boundary (CLAUDE.md §4), checked in under a second and gating on its own
+  # rather than as a step of `check`, since it needs neither Rust nor the frontend toolchain and
+  # would otherwise wait behind both.
+  vocabulary:
+    name: vocabulary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check for forbidden vocabulary
+        run: scripts/check-vocabulary.sh
+
   check:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -153,6 +167,20 @@ jobs:
         shell: pwsh
         run: .github/scripts/windows-entrypoint.ps1
 
+      # The script above reads names and reports a DLL as ordinal-only when it parsed none from it,
+      # which hides an ordinal import sitting beside named ones in the same DLL. This is the raw
+      # table for the one binary that will not load, so the next failure has the whole of it.
+      - name: The library test binary's own import table (Windows, only when the tests failed)
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $tools = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64" | Select-Object -Last 1
+          $exe = Get-ChildItem target\debug\deps\sublore_lib-*.exe | Select-Object -First 1
+          if (-not $exe) { Write-Host "no sublore_lib test binary on disk"; exit 0 }
+          & (Join-Path $tools.FullName "dumpbin.exe") /imports $exe.FullName
+
   e2e:
     name: e2e smoke (ubuntu)
     runs-on: ubuntu-latest
@@ -184,6 +212,7 @@ jobs:
             webkit2gtk-driver \
             wget \
             x11-utils \
+            x11-xkb-utils \
             xdotool \
             xvfb
 
@@ -229,6 +258,11 @@ jobs:
       # The stand-in sidecar never reads it. Downloaded here because CI asked, never by the app.
       - name: Fetch the transcription model
         run: sh scripts/fetch-model.sh
+
+      # The module spec needs a module beside the binary, and `wdio.conf.js` installs one from the
+      # fixture package's example targets. `pnpm e2e:build` does not build them.
+      - name: Build the module fixtures
+        run: cargo build -p sublore-module-fixture --examples
 
       - name: Build the app
         run: pnpm e2e:build
@@ -520,7 +554,12 @@ jobs:
       # The image carries neither, and the checkout needs both.
       - name: Install what the checkout needs
         run: |
-          apt-get update
+          # The index alone is retried, for the mirror sync that took this job red on 2026-09-05.
+          for attempt in 1 2 3; do
+            if apt-get update; then break; fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 15
+          done
           apt-get install -y --no-install-recommends ca-certificates git
 
       - name: Checkout

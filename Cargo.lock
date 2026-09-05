@@ -3161,6 +3161,9 @@ dependencies = [
  "sublore-edit",
  "sublore-formats",
  "sublore-io",
+ "sublore-matcher",
+ "sublore-module-api",
+ "sublore-module-host",
  "sublore-project",
  "tauri",
  "tauri-build",
@@ -3204,8 +3207,28 @@ name = "sublore-io"
 version = "0.1.0"
 
 [[package]]
+name = "sublore-matcher"
+version = "0.1.0"
+
+[[package]]
 name = "sublore-module-api"
 version = "0.1.0"
+
+[[package]]
+name = "sublore-module-fixture"
+version = "0.1.0"
+dependencies = [
+ "sublore-module-api",
+]
+
+[[package]]
+name = "sublore-module-host"
+version = "0.1.0"
+dependencies = [
+ "libloading",
+ "sublore-module-api",
+ "sublore-module-fixture",
+]
 
 [[package]]
 name = "sublore-project"

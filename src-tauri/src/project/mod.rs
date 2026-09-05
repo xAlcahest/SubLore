@@ -4,6 +4,10 @@
 //!
 //! Nothing in this module writes to a user's media or subtitle file. Attaching, locating,
 //! renaming, detaching and deleting all move records; the files stay where the user put them.
+//!
+//! Every command that changes something says so, one line, after it has succeeded. "Which command
+//! ran" otherwise has no answer outside the interface, and the checks that drive the rail without a
+//! DOM had to infer it from side effects that more than one command produces (BACKLOG.md N26).
 
 pub mod error;
 pub mod session;
@@ -35,7 +39,7 @@ pub struct ProjectState {
 }
 
 impl ProjectState {
-    fn handle(&self) -> SharedProject {
+    pub fn handle(&self) -> SharedProject {
         Arc::clone(&self.open)
     }
 
@@ -103,6 +107,7 @@ pub async fn project_create(
     blocking("create", move || {
         let view = create(&slot, &folder)?;
         session::opened(&app, Path::new(&view.folder));
+        log::info!("project: created {}", view.folder);
         Ok(view)
     })
     .await
@@ -118,6 +123,7 @@ pub async fn project_open(
     blocking("open", move || {
         let view = open(&slot, &folder)?;
         session::opened(&app, Path::new(&view.folder));
+        log::info!("project: opened {}", view.folder);
         Ok(view)
     })
     .await
@@ -134,6 +140,7 @@ pub async fn project_close(
     blocking("close", move || {
         close(&slot)?;
         session::closed(&app);
+        log::info!("project: closed");
         Ok(())
     })
     .await
@@ -143,7 +150,18 @@ pub async fn project_close(
 /// the project; File draws the list (decision 24, D5).
 #[tauri::command]
 pub async fn project_session(app: AppHandle) -> Result<session::Session, ProjectError> {
-    blocking("session", move || Ok(session::read(&app))).await
+    blocking("session", move || {
+        let session = session::read(&app);
+        // One line per launch, whichever way it goes. "Why did it open that project" has no answer
+        // in the log without it, and it is the only moment at which the answer exists: the rail is
+        // empty before this and may be empty after it, and the two are not the same state.
+        match session.folder.as_deref() {
+            Some(folder) => log::info!("project session: read, reopening {folder}"),
+            None => log::info!("project session: read, nothing to reopen"),
+        }
+        Ok(session)
+    })
+    .await
 }
 
 /// Remember which episode is selected, so the next launch comes back to it (decision 24, D5).
@@ -154,6 +172,12 @@ pub async fn project_select_episode(
 ) -> Result<(), ProjectError> {
     blocking("select episode", move || {
         session::selected(&app, episode_id);
+        // Said whether or not the file was written: the line is about which episode the rail is on,
+        // and the store is best-effort by design (see this module's `session`).
+        match episode_id {
+            Some(id) => log::info!("project: episode {id} is the selected one"),
+            None => log::info!("project: no episode is selected"),
+        }
         Ok(())
     })
     .await
@@ -165,7 +189,14 @@ pub async fn project_add_episode(
     title: String,
 ) -> Result<ProjectView, ProjectError> {
     let slot = state.handle();
-    blocking("add episode", move || add_episode(&slot, &title)).await
+    blocking("add episode", move || {
+        let view = add_episode(&slot, &title)?;
+        // The title is in the line because it is what the caller typed: a command that ran with a
+        // name nobody meant is otherwise indistinguishable from one that ran with the right one.
+        log::info!("project: added episode {title:?}");
+        Ok(view)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -177,7 +208,9 @@ pub async fn project_attach_file(
 ) -> Result<ProjectView, ProjectError> {
     let slot = state.handle();
     blocking("attach file", move || {
-        attach_file(&slot, episode_id, &role, &path)
+        let view = attach_file(&slot, episode_id, &role, &path)?;
+        log::info!("project: attached {role} to episode {episode_id}: {path}");
+        Ok(view)
     })
     .await
 }
@@ -193,6 +226,7 @@ pub async fn project_delete(
     blocking("delete", move || {
         let deleted = delete(&slot)?;
         session::forgotten(&app, Path::new(&deleted.folder));
+        log::info!("project: deleted {}", deleted.folder);
         Ok(deleted)
     })
     .await
@@ -206,7 +240,9 @@ pub async fn project_rename_episode(
 ) -> Result<ProjectView, ProjectError> {
     let slot = state.handle();
     blocking("rename episode", move || {
-        rename_episode(&slot, episode_id, &title)
+        let view = rename_episode(&slot, episode_id, &title)?;
+        log::info!("project: renamed episode {episode_id} to {title:?}");
+        Ok(view)
     })
     .await
 }
@@ -218,9 +254,11 @@ pub async fn project_delete_episode(
 ) -> Result<ProjectView, ProjectError> {
     let slot = state.handle();
     blocking("delete episode", move || {
-        with_open(&slot, |project| {
+        let view = with_open(&slot, |project| {
             records::delete_episode(project, episode_id).map_err(ProjectError::from_crate)
-        })
+        })?;
+        log::info!("project: deleted episode {episode_id}");
+        Ok(view)
     })
     .await
 }
@@ -232,9 +270,11 @@ pub async fn project_detach_file(
 ) -> Result<ProjectView, ProjectError> {
     let slot = state.handle();
     blocking("detach file", move || {
-        with_open(&slot, |project| {
+        let view = with_open(&slot, |project| {
             records::detach_file(project, file_id).map_err(ProjectError::from_crate)
-        })
+        })?;
+        log::info!("project: detached file {file_id}");
+        Ok(view)
     })
     .await
 }
@@ -249,11 +289,13 @@ pub async fn project_locate_file(
 ) -> Result<ProjectView, ProjectError> {
     let slot = state.handle();
     blocking("locate file", move || {
-        with_open(&slot, |project| {
+        let view = with_open(&slot, |project| {
             records::relocate_file(project, file_id, Path::new(&path))
                 .map(|_| ())
                 .map_err(ProjectError::from_crate)
-        })
+        })?;
+        log::info!("project: located file {file_id} at {path}");
+        Ok(view)
     })
     .await
 }

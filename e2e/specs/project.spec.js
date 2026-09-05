@@ -19,6 +19,7 @@ import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow, rightClickAt, typeText } from "../lib/input.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
+import { closeAnyOpenProject } from "../lib/rail.js";
 import { findToplevel } from "../lib/x11.js";
 
 /** Copies of src/i18n/en.ts. The harness cannot import TypeScript, so the strings are pinned here. */
@@ -235,24 +236,6 @@ function attachedFiles() {
 
 function sourceLine(file) {
   return `${SOURCE_ROLE} · ${file}`;
-}
-
-/**
- * Every spec shares one data home, so a spec that ran before this one may have left a project open,
- * and a launch now reopens it (decision 24, D5). This one starts from nothing open, whoever it
- * belonged to.
- */
-async function closeAnyOpenProject(toplevel) {
-  if (!(await present(".rail__project"))) {
-    return;
-  }
-  await openProjectMenu(toplevel);
-  await chooseMenuItem(toplevel, "close-project");
-  await confirmDialog(toplevel);
-  await waitFor(() => present(".rail__empty"), {
-    timeout: 20000,
-    message: "the rail to empty once another spec's project is closed",
-  });
 }
 
 /** The app window, after a launch or a relaunch. Also proves exactly one instance is running. */

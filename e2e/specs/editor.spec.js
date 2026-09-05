@@ -10,6 +10,7 @@ import { answerChooser, waitForChooser } from "../lib/chooser.js";
 import { clickAt, focusWindow, typeText } from "../lib/input.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
+import { closeAnyOpenProject } from "../lib/rail.js";
 import { findToplevel } from "../lib/x11.js";
 
 /**
@@ -112,7 +113,7 @@ function workingCopy() {
 
 /** Open a subtitle through the system chooser, which is the only route since T1. */
 async function openSubtitle(toplevel, file) {
-  await clickElement(toplevel, ".toolbar__open-subtitle");
+  await clickElement(toplevel, ".toolbar__file-open-subtitle");
   const chooser = await waitForChooser("Choose a subtitle");
   await answerChooser(chooser, file, "subtitle");
   focusWindow(toplevel.id);
@@ -257,24 +258,6 @@ async function openProjectMenu(toplevel) {
 }
 
 /**
- * Every spec shares one data home and a launch reopens the project that was open (decision 24 D5),
- * so an earlier spec's project is on screen here and `create-project` is not in the menu while one
- * is. This closes whatever is open, so the block below starts from nothing either way.
- */
-async function closeAnyOpenProject(toplevel) {
-  if (!(await present(".rail__project"))) {
-    return;
-  }
-  await openProjectMenu(toplevel);
-  await clickElement(toplevel, ".railmenu__item--close-project");
-  await clickElement(toplevel, ".raildialog__confirm");
-  await waitFor(() => present(".rail__empty"), {
-    timeout: 20000,
-    message: "the rail to empty once another spec's project is closed",
-  });
-}
-
-/**
  * Replace whatever a text field holds. `e2e/lib/input.js` is shared with the M0 and M1 specs and
  * stays frozen, so the ctrl+a lives here, as it does in subtitle.spec.js.
  */
@@ -344,7 +327,7 @@ describe("cue list editing", () => {
       message: `the ${windowWidth}x${windowHeight} "Sublore" toplevel to appear`,
     });
     focusWindow(toplevel.id);
-    await waitFor(() => present(".toolbar__open-subtitle"), {
+    await waitFor(() => present(".toolbar__file-open-subtitle"), {
       timeout: 30000,
       message: "the subtitle bar to render",
     });
@@ -663,7 +646,7 @@ describe("cue list editing", () => {
     // Undone back to the file as it was opened, so there is nothing unsaved any more.
     expect(await present(".statusbar__dirty")).toBe(false);
 
-    await clickElement(toplevel, ".toolbar__redo");
+    await clickElement(toplevel, ".toolbar__edit-redo");
     await waitFor(async () => (await rowText(EDITED_POSITION)) === EDITED_TEXT, {
       timeout: 20000,
       message: "the redone text to come back",
@@ -672,7 +655,7 @@ describe("cue list editing", () => {
   });
 
   it("saves the edit, and every other byte of the file is the byte that was there", async () => {
-    await clickElement(toplevel, ".toolbar__save");
+    await clickElement(toplevel, ".toolbar__file-save");
     await waitFor(async () => (await present(".statusbar__dirty")) === false, {
       timeout: 20000,
       message: "the dirty marker to clear after a save",
@@ -731,7 +714,7 @@ describe("cue list editing", () => {
 
     // Save without pressing Enter first: the click blurs the editor, so the commit it causes and
     // the save must both land, in that order.
-    await clickElement(toplevel, ".toolbar__save");
+    await clickElement(toplevel, ".toolbar__file-save");
     await waitFor(async () => (await present(".statusbar__dirty")) === false, {
       timeout: 20000,
       message: "the dirty marker to clear after saving an open editor",
@@ -799,7 +782,7 @@ describe("cue list editing", () => {
 
     // The toolbar undo that follows must be the first step off the top of the stack. Had the
     // keystroke above reached the document, it would be the second, and the row below moves too.
-    await clickElement(toplevel, ".toolbar__undo");
+    await clickElement(toplevel, ".toolbar__edit-undo");
     await scrollTo(THIRD_POSITION);
     await waitFor(async () => (await rowText(THIRD_POSITION)) === thirdOriginal, {
       timeout: 20000,

@@ -9,8 +9,8 @@
   white-space: nowrap;
 }
 
-/* CSS chrome, not a native menu: Windows and Linux draw the same bar (decision 1). Only the titles
-   with items behind them are here (decision 24 A2 and A4). */
+/* CSS chrome, not a native menu: Windows and Linux draw the same bar (decision 1). Every title the
+   bar knows is drawn, greyed when it has nothing to open (CLAUDE.md, owner ruling 2026-09-03). */
 .menubar {
   display: flex;
   align-items: stretch;
@@ -31,10 +31,15 @@
   font-size: 0.8125rem;
 }
 
-.menubar__title:hover,
+.menubar__title:hover:enabled,
 .menubar__title[aria-expanded="true"] {
   background: var(--bg-sunken);
   color: var(--ink);
+}
+
+/* A title with nothing behind it, in the same ink as a greyed item under one. */
+.menubar__title:disabled {
+  color: var(--ink-faint);
 }
 
 /* Above the panels below it: the regions come later in the document and would paint over it. */
@@ -74,6 +79,18 @@
   color: var(--ink-faint);
 }
 
+.menubar__item-main {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Reserved whether or not this item is checked, so labels stay aligned within one dropdown. */
+.menubar__mark {
+  width: 1em;
+  text-align: center;
+}
+
 .menubar__item--cursor,
 .menubar__item:hover:enabled {
   background: var(--accent-bg);
@@ -104,6 +121,11 @@
 
 .toolbar__button:disabled {
   color: var(--ink-faint);
+}
+
+/* A toggle or radio command drawn as a pressed button (interface-spec 4). */
+.toolbar__button[aria-pressed="true"] {
+  background: var(--accent-bg);
 }
 
 .toolbar__divider {
@@ -161,4 +183,33 @@
   color: var(--ink);
   font: inherit;
   font-size: 0.8125rem;
+}
+
+/* A module file that was found and would not load. Drawn like the other faults on the right of the
+   status bar, and never present when no module file exists. See module-abi.md 3.5. */
+.statusbar__module-error {
+  margin: 0;
+  color: var(--ink-warn);
+}
+
+.about__modules {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.about__modules-heading {
+  margin: 0 0 0.35rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.about__module {
+  margin: 0 0 0.25rem;
+  font-size: 0.875rem;
+}
+
+.about__module--refused {
+  color: var(--ink-warn);
 }

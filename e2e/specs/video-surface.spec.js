@@ -126,7 +126,7 @@ describe("video surface hide and show", () => {
     });
     focusWindow(toplevel.id);
     await waitFor(
-      () => browser.execute(() => document.querySelector(".toolbar__open-video") !== null),
+      () => browser.execute(() => document.querySelector(".toolbar__video-open") !== null),
       {
         timeout: 30000,
         message: "the app UI to render",
@@ -134,7 +134,7 @@ describe("video surface hide and show", () => {
     );
 
     // Open the fixture through the chooser, the way a person does.
-    const open = await centreOf(".toolbar__open-video");
+    const open = await centreOf(".toolbar__video-open");
     clickAt(toplevel.absX + open.x, toplevel.absY + open.y);
     const chooser = await waitForChooser("Choose a video");
     await answerChooser(chooser, videoFixture, "video");

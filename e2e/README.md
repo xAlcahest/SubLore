@@ -8,7 +8,8 @@ Tools the harness needs on PATH: `xdotool`, `xwininfo`, `python3` with python-xl
 ffmpeg is there for the app, not for the harness: `asr.spec.js` transcribes audio the app really
 extracts from `sample.mkv` with it, which is why `wdio.conf.js` requires it at load and says so in
 the same line. No spec measures pixels — `lib/pixels.js`'s `saturation()` has no caller left, and
-`video-surface.spec.js`'s own header says why the picture is not asserted under Xvfb. xdotool,
+`video-surface.spec.js`'s own header says why the picture is not asserted under Xvfb, and
+`preview.spec.js` asserts mpv's own read-back of the overlay it holds for the same reason. xdotool,
 xwininfo and ffmpeg are each checked before any spec starts, so a missing one is a sentence naming it
 rather than a timeout inside whichever spec needed it first.
 
@@ -40,7 +41,7 @@ capture's exit status instead.
 | `specs/subtitle.spec.js`                | `opens an ASS fixture and saves a byte-identical copy`                               | `ass/clean/basic.ass` puts `ASS · 3 cues · CRLF` on the status line, and the copy matches byte for byte.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `specs/subtitle.spec.js`                | `opens a VTT fixture and saves a byte-identical copy`                                | `vtt/clean/basic.vtt` puts `VTT · 3 cues · LF` on the status line, and the copy matches byte for byte.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `specs/subtitle.spec.js`                | `reports a malformed file readably and stays usable`                                 | `srt/malformed/missing-arrow.srt` shows an error naming line 6, and the clean fixture opens straight after.                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `specs/subtitle.spec.js`                | `throws an unsaved edit away and writes nothing when the edit is discarded`          | Discard puts the cue back to the text it was opened with, clears the dirty marker, and leaves the file's bytes alone.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `specs/subtitle.spec.js`                | `throws an unsaved edit away and writes nothing when the edit is discarded`          | Discard puts the cue back to the text it was opened with, clears the dirty marker, and leaves the file's bytes alone. The button itself is drawn throughout, greyed until an open the unsaved edit refused and greyed again once the edit is gone (owner ruling 2026-09-03).                                                                                                                                                                                                                                                                    |
 | `specs/editor.spec.js`                  | `opens the 2000-cue fixture inside the open budget`                                  | A copy of `srt/clean/large-2000.srt` opens and the first row appears in under 1 s (CONTRIBUTING.md §7).                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `specs/editor.spec.js`                  | `renders only the rows in view, over a sizer as tall as the whole file`              | At three scroll positions at most 60 rows exist in the DOM, over a spacer of `2000 × row height`.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `specs/editor.spec.js`                  | `scrolls a viewport at a time without falling behind`                                | Twenty scroll steps, each timed until the list shows different rows: mean under 32 ms, max under 150 ms.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -65,17 +66,22 @@ capture's exit status instead.
 | `specs/project.spec.js`                 | `still lists the episode and its file after the app is restarted`                    | The AC's restart: the session is deleted and a new one launches the binary again, and reopening the folder lists both.                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `specs/project.spec.js`                 | `reports a folder that holds no project and stays usable`                            | Opening an empty folder shows the `noProjectHere` sentence, writes nothing there, and the real project reopens after it.                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `specs/project.spec.js`                 | `deletes the project without touching the files it points at`                        | `project.sublore` is gone, the attached subtitle outside the folder is byte-identical, and the folder itself still exists.                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `specs/chrome.spec.js`                  | `draws only the titles that have items behind them`                                  | File, Edit and Help, and nothing else: a title with no items behind it is not drawn and there is no View menu before M2.4 (decision 24 A2 and A4).                                                                                                                                                                                                                                                                                                                                                                                              |
+| `specs/chrome.spec.js`                  | `draws every title with nothing open, greying the one with nothing behind it`        | With no document and no media open: File, Edit, View, Audio and Help are all on the bar, Audio greyed because it has no track to list, and File draws Save, Save a copy and Discard greyed instead of leaving them out. Owner ruling 2026-09-03, which reverses decision 24 A2.                                                                                                                                                                                                                                                                 |
+| `specs/chrome.spec.js`                  | `draws the same titles, greying and all, once a document is open`                    | The subtitle is opened through the toolbar and the bar is read again: the same five titles, in the same order, Audio still greyed because a subtitle brings no audio with it. No title arrives when a document does.                                                                                                                                                                                                                                                                                                                            |
 | `specs/chrome.spec.js`                  | `offers every command the removed bars offered, from the menu and from the toolbar`  | The command ids behind the three dropdowns hold everything the toolbar draws, and the six commands the deleted bars carried are on both routes.                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `specs/chrome.spec.js`                  | five keyboard checks                                                                 | Alt opens the first dropdown with the cursor on its first enabled item, the arrows walk the items and step over the disabled ones, left and right change dropdown, Enter activates the item under the cursor, and Escape closes and hands the keyboard back to where it was. Driven as keys through XTEST, never as a claim about a handler.                                                                                                                                                                                                    |
 | `specs/chrome.spec.js`                  | five accelerator and route checks                                                    | Ctrl+O, Ctrl+Shift+O and Ctrl+Shift+S raise their choosers and leave the app as it was when dismissed, File > Open subtitle opens a copy of the fixture end to end, and Ctrl+S then writes an edit into it and moves nothing else. Ctrl+Q is `scripts/quit-gate-check.js`, which owns every route that ends the process.                                                                                                                                                                                                                        |
+| `specs/command-registry.spec.js`        | `draws one item per registry entry, and both routes draw the same record`            | Every item the bar draws is one registry entry and every entry is drawn: the two sets agree by id. Nothing the toolbar draws is missing from the menus, and for each command on both routes the label and the greying match, which is what one record behind two routes means (T3 C1).                                                                                                                                                                                                                                                          |
+| `specs/command-registry.spec.js`        | `draws every command with nothing open, greyed rather than absent`                   | With no subtitle and no video: every title is on the bar, Audio greyed because no media has tracks; File draws Save, Save a copy and Discard, all greyed; Edit draws Undo and Redo, greyed; and the toolbar draws all seven of its buttons. Owner ruling 2026-09-03, which reverses decision 24 A2 (T3 C2).                                                                                                                                                                                                                                     |
+| `specs/command-registry.spec.js`        | `refuses a greyed command from the menu, the toolbar and the keyboard`               | Greyed Undo, Redo and Save a copy are fired from the menu, from the toolbar, and Save a copy also from Ctrl+Shift+S. Nothing crosses the IPC boundary, counted with the `lib/ipc.js` probe, and no chooser is raised. The barrier: opening a subtitle through the toolbar straight after sends exactly one `subtitle_open`, so the zero is a refusal and not a probe that never took (T3 C2 and C3).                                                                                                                                            |
+| `specs/command-registry.spec.js`        | `greys and ungreys in place, with nothing appearing or disappearing`                 | Opening a subtitle leaves every title, every menu item and every toolbar button where it was, in the same order. The one greying that moves is Save a copy, and it moves on both routes at once (T3 C2).                                                                                                                                                                                                                                                                                                                                        |
 | `scripts/shutdown-check.js`             | 5 checks                                                                             | Closing the window exits 0, unsignalled, with nothing left alive in the app's process group, and with no close gate raised over a document nobody edited.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `scripts/close-gate-check.js`           | 12 checks                                                                            | Closing with unsaved edits asks save/discard/cancel; each answer is proved by the dialog going away, cancel keeps the app and the file, discard exits 0 leaving the file untouched, save writes the edit, moves nothing else and keeps a backup (BACKLOG N1).                                                                                                                                                                                                                                                                                   |
 | `scripts/close-gate-late-edit-check.js` | 8 checks                                                                             | An edit made after the gate was answered and before the close it asked for is asked about a second time instead of being carried away in silence, and that late edit is the one that ends up on disk (gate 2; the session is read on every close and `CloseAction::AskAgain` is the branch, `lib.rs:178-199`).                                                                                                                                                                                                                                  |
 | `scripts/quit-gate-check.js`            | 17 checks                                                                            | A quit that is not a window close — `AppHandle::exit`, what a menu's Quit item will call — asks what the X button asks: the unsaved-changes dialog, cancel keeping the app and the file, a second quit asking again instead of riding the cancelled answer out, discard exiting 0 with the file untouched, save writing the edit, and a clean quit still exiting (BACKLOG N6). Driven through the File menu's own Quit item from the keyboard, and through Ctrl+Q in the save branch, and red unless the app's log says the quit went that way. |
 | `scripts/startup-args-check.js`         | 7 checks                                                                             | A name on the command line that is not valid Unicode costs that one name and never the launch: the window comes up, the subtitle beside it is the one opened, a real file whose name starts with a dash is opened rather than filtered away, and every argument the app refuses is named in the log (gate 2; `lib.rs:55-57` for the name that is not Unicode, `:62-69` for the dash, `:154-155` for the log).                                                                                                                                   |
 | `scripts/no-display-check.js`           | 5 checks                                                                             | A launch with no display exits non-zero and not with the panic status, having printed one line naming `DISPLAY` and what to do about it, with no panic trace and no crash report (BACKLOG N4). It is the one check that runs without an X server.                                                                                                                                                                                                                                                                                               |
-| `scripts/picker-thread-check.js`        | 14 checks                                                                            | Choosing a project folder and a project file leaves no thread but the main one running `gtk_main_iteration`, read with `eu-stack`, and a cancelled choice still returns as a cancellation (BACKLOG N1c). Then a second run of the app over the same data home: the folder chooser opens at the folder chosen before the app was closed, a remembered folder that has been deleted is dropped and its chooser still answers, and the cancellation before the restart left the memory alone (BACKLOG N7).                                         |
+| `scripts/picker-thread-check.js`        | 20 checks                                                                            | Choosing a project folder and a project file leaves no thread but the main one running `gtk_main_iteration`, read with `eu-stack`, and a cancelled choice still returns as a cancellation (BACKLOG N1c). Then a second run of the app over the same data home: the chooser opens at the folder chosen before the app closed and Open project is what ran over it, a remembered folder that has been deleted is dropped and its chooser still answers, and the cancellation before the restart left the memory alone (BACKLOG N7).               |
 | `scripts/mpv-context-check.js`          | 5 checks                                                                             | A `gpu-context` mpv refuses costs the request and not the window: the app still starts, the refusal is in the log, mpv falls back to the pinned `x11egl`, and the video still attaches (BACKLOG N2b).                                                                                                                                                                                                                                                                                                                                           |
 | `scripts/scaled-surface-check.js`       | 5 checks                                                                             | At an integer display scale the video surface doubles with the window instead of quadrupling or standing still. It does not prove N2c's fractional case, and its header says why.                                                                                                                                                                                                                                                                                                                                                               |
 | `scripts/webview-paint-check.js`        | 5 checks                                                                             | In the configuration users actually get — the NVIDIA WebKit workarounds armed by the app's own detection — the window paints instead of coming up blank, and the app's recorded decision agrees with the machine's driver state.                                                                                                                                                                                                                                                                                                                |
@@ -96,6 +102,19 @@ capture's exit status instead.
 | `specs/current-line.spec.js`            | `shows the line the cursor is on, and follows the cursor when it moves`              | The tools column draws the cue the grid's cursor is on, and moving the cursor moves what it draws.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `specs/current-line.spec.js`            | `commits through the command the grid commits with, and the grid row shows it`       | The only subtitle command the commit issues is `subtitle_set_text`, the grid row shows the text, and nothing is written to disk.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `specs/current-line.spec.js`            | `is undone in one step, which is what a grid edit costs`                             | One Undo puts the document back where it opened and clears the unsaved marker.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `specs/cue-structure.spec.js`           | `inserts a cue under the cursor, from the menu`                                      | Subtitles > Insert cue puts an empty cue below the cursor's row, starting where that row's cue ends and running two seconds. One `subtitle_insert` crosses the boundary and the bytes on disk do not move (M2.7 E2).                                                                                                                                                                                                                                                                                                                            |
+| `specs/cue-structure.spec.js`           | `deletes the cue the cursor is on, from the menu`                                    | Subtitles > Delete cue takes the cursor's row out of the document, one `subtitle_delete` crosses, and nothing is written (M2.7 E2).                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `specs/cue-structure.spec.js`           | `splits a cue at the caret in the current line, from the menu`                       | The caret is walked to a named offset in the current-line box, and Split divides the text there and the times at the cue's midpoint, which is what the shell chooses when no video is open (M2.7 E3).                                                                                                                                                                                                                                                                                                                                           |
+| `specs/cue-structure.spec.js`           | `merges the cursor's cue with the one after it, from the menu`                       | Merge with next joins the two halves back into one cue running from the first one's start to the second one's end (M2.7 E3).                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `specs/cue-structure.spec.js`           | `takes the four back one undo each, and puts them back one redo each`                | Four clicks on the toolbar's Undo walk the document back through each intermediate state and clear the unsaved marker; four Redos walk it forward again. One step per edit, on the stack the text edits use (M2.7).                                                                                                                                                                                                                                                                                                                             |
+| `specs/cue-structure.spec.js`           | `writes nothing until a save, and the saved file reopens as what the grid showed`    | Every edit above leaves the file byte-identical to the one that was opened. The save writes them, and reopening that file through the chooser draws the same rows with the same timings (M2.7).                                                                                                                                                                                                                                                                                                                                                 |
+| `specs/cue-structure.spec.js`           | `keeps the cursor and the selection on the lines they were on when rows move`        | With a three-row range selected, an insert below the cursor moves neither state off its line, and a delete pulls both up with the rows rather than letting the row that filled the gap into the selection (M2.7 E2).                                                                                                                                                                                                                                                                                                                            |
+| `specs/cue-structure.spec.js`           | `never leaves the cursor past the end when the last cue is the one deleted`          | Deleting the last row puts the cursor on the new last row instead of leaving it past the end, where no row is drawn as the cursor at all and the current line says it has none (M2.7 E2).                                                                                                                                                                                                                                                                                                                                                       |
+| `specs/preview.spec.js`                 | `puts a document that was open first onto a video opened after it`                   | Decision 7, one order of the pair: with the document already open, opening the video leaves mpv holding one external subtitle track, selected and visible, with the first cue's own character count at the playhead. Read back off mpv, not off our own bookkeeping.                                                                                                                                                                                                                                                                            |
+| `specs/preview.spec.js`                 | `puts a document opened while the video is already loaded onto the frame`            | The other order, which is the half of the reported bug that had no test: opening a second document over a playing video changes the character count mpv reports at the playhead.                                                                                                                                                                                                                                                                                                                                                                |
+| `specs/preview.spec.js`                 | `puts an edit on the frame without stacking a second subtitle track`                 | Typing over the first cue changes the count mpv reports, and the external track count stays at one: the shadow copy is re-read in place rather than added again.                                                                                                                                                                                                                                                                                                                                                                                |
+| `specs/preview.spec.js`                 | `takes the document off the frame from View, and puts it back`                       | View's `Subtitles on video` turns mpv's overlay off, mpv still holding the same document underneath, and turning it back on restores it with the same line under it.                                                                                                                                                                                                                                                                                                                                                                            |
+| `specs/preview.spec.js`                 | `never writes the subtitle file it is drawing from, and keeps no backup of it`       | After opening, drawing, editing and toggling, the user's file is byte-identical with the same mtime, its folder gained nothing, the backup store gained nothing, and the document is still marked unsaved.                                                                                                                                                                                                                                                                                                                                      |
 
 Everything above runs in the `e2e` CI job except four rows, named rather than counted:
 `webview-paint-check.js`, `wayland-attach-check.js`, and the two probes. `webview-paint-check.js`
@@ -154,6 +173,12 @@ a root window that small the fixture never reaches the ready state, so the size 
 here and in CI. The app starts at 1024x700 and `lib/input.js`'s `resizeWindow` can grow it, so the
 screen is 1920x1080: the largest window a check can ask for and still measure all of.
 
+A check can no longer assume the window took the size it asked for. The shell measures the narrowest
+width it can be drawn at and the window is held there, so at 150 per cent a request for 1024 comes
+back wider under the runner's fonts. `askForWindowSize` sends the request and `waitForWindowSize`
+waits for the width the caller says the window will settle at; `resizeWindow` is still the two
+together for a width that will be granted.
+
 Prerequisites, all of them dev tools rather than repo dependencies:
 
 - `tauri-driver` — `cargo install tauri-driver --version 2.0.6 --locked`
@@ -180,6 +205,109 @@ Environment knobs:
 
 Neither entry point builds anything. A missing binary or fixture fails immediately with the command
 to run, because a silent four-minute rebuild inside a test hook is worse than a red line.
+
+## Four ways to make a run tell you nothing
+
+Each of these produced a failure that meant nothing, and cost a re-run to find out.
+
+**Do not edit a spec file while a run is in progress.** Workers read each file as they reach it, so
+a run started before an edit and finished after it mixes an old binary with new expectations. The
+failure looks like a defect and is not one. Wait for the run, then edit.
+
+**Do not pipe a run through `tail`.** The spec reporter prints a failing spec's assertion where it
+happened, and a failure in the eighth of twenty-seven specs is thousands of lines above the summary.
+Write the whole log to a file and grep it:
+
+```sh
+xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e > /tmp/run.log 2>&1
+grep -nE "✖|failing|Spec Files" /tmp/run.log
+```
+
+**`cp` is aliased to `cp -i` in this shell and blocks on a prompt.** Overwriting a file that is
+already there stops and waits for a keypress nobody is going to press, so a step that looks like a
+copy is a step that has not happened, and the command after it runs against the old bytes. It cost
+ten minutes of a wall clock on 2026-09-05 and it has cost a whole mutation run before that, where
+the mutation was never applied and the green that followed meant nothing. Copy with
+`python3 -c "import shutil; shutil.copyfile(a, b)"` in anything that is not typed by hand.
+
+**`cargo test -p <crate>` stops at the first failing test binary.** A mutation that reddens
+`tests/mutation.rs` leaves `tests/session.rs` unrun, so the report undercounts what the mutation
+actually broke. Use `--no-fail-fast` whenever the point of the run is to see the full blast radius.
+
+## Four ways the instrument lied, all found by running it
+
+**`xdotool` cannot press a function key by name on this X server.** `xdotool key F3` presses Alt
+before the key, with or without `--clearmodifiers`, and the webview is told `altKey` is true, so the
+shell drops it: `commandFor` refuses every press carrying Alt. F5 behaves the same way. The keymap
+has `keycode 69 = F3 F3 F3 F3 F3 F3 XF86Switch_VT_3`, and xdotool resolving the keysym picks a level
+that carries Alt. `pressKey` therefore presses a function key by keycode, looked up through
+python-xlib, and every other key by name exactly as before. A real keyboard sends the keycode, so
+this is the instrument being made to match the hardware rather than the app being bent to the
+instrument. Measured 2026-09-04, on this machine under Xvfb.
+
+**A wait measured in milliseconds is a wait that passes alone and fails in the battery.**
+`waveform-follow.spec.js` paused a fixed 200 ms after a seek before reading the drawn playhead. It
+passed every time the spec ran alone and failed twice in a full run, both times reading a playhead
+three seconds from where the seek had put it. It waits on the transport now, which is drawn from the
+position the seek set, so the slider reading the target is the render the canvas was painted in.
+This is the same class as `docs/environment-anchored-assertions.md`: a number calibrated on an idle
+machine is a number that is wrong on a busy one.
+
+**A side effect more than one command produces cannot say which command ran.**
+`picker-thread-check.js` proved "Add episode reached the project" by watching the size and mtime of
+`project.sublore-wal`. Its keyboard walk landed on Close project instead, a clean close of a WAL
+database checkpoints and removes that file, and a file that has gone is a file that changed: the
+check printed `ok` on a project it had just closed, and then failed four steps later at a chooser
+the closed rail could no longer reach. Two things came out of it. The commands in
+`src-tauri/src/project/mod.rs` each write one line naming what they did, so a check driving the rail
+without a DOM can say which command ran instead of inferring it from a side effect. And a menu walk
+now states two positions, the item it wants and the item the menu's cursor starts on, because
+`RailMenu` opens on the first item that can _run_ while its arrow walk steps over everything: a Down
+count is a distance and never an index, and a constant that reads like an index is how the same bug
+was written twice. See BACKLOG N26.
+
+**A status line that reads the same before and after cannot say the change happened.**
+`asr.spec.js`'s Discard check waited for `SRT · N cues · LF` and then read the grid. The document
+being replaced was itself a transcription of the same stub run, so it had the same cue count and the
+same format and that line was already what the check was waiting for: the wait was satisfied without
+anything having happened, and the assertion read the old grid. It passed for weeks by winning a
+race, and it lost that race the day an unrelated wait a few lines earlier changed the timing. It now
+waits for the offer to take the result to go away, which is true only after the result has been
+taken. The check three tests further down had the right shape already, with a comment saying so, so
+this was a lesson the file had learned once and not applied twice. Same class as N26 above, and the
+same rule underneath both: a guard that cannot tell "not there" from "not there yet" is a race.
+
+## What is retried in CI, and what is never
+
+One thing is retried and it is named here so the list does not grow by habit: `apt-get update` in
+`.github/scripts/package-smoke.sh` and in the `package smoke (ubuntu)` container's own checkout
+step, three attempts fifteen seconds apart. An Ubuntu mirror caught halfway through a sync answers a
+`Packages.gz` one byte off the size it advertised, which took that job red on 2026-09-05 with
+nothing wrong in the tree. Nothing else in that script is retried, because everything below the
+index is what the check exists to find: a package whose dependencies do not resolve, a binary that
+will not start, a library the bundler never declared. A retry there would turn a real failure into a
+slow one.
+
+## Running a Windows binary here
+
+Wine is not Windows and nothing run under it is a Windows behavioural verdict. What it is good for
+is the loader: a Windows build can be linked and started on this machine, and `WINEDEBUG=+loaddll`
+prints every library the loader looks for and every one it does not find. That answered N29 in one
+run, where the CI diagnostic had named the wrong symbol twice and each attempt cost fourteen minutes.
+
+```sh
+# Once: the pinned libmpv's own MinGW import library, the same archive install-libmpv-windows.ps1
+# fetches and the same checksum.
+7z x mpv-dev-x86_64-<tag>-git-<rev>.7z -o/tmp/mpv
+RUSTFLAGS="-L native=/tmp/mpv" cargo test -p sublore --lib --target x86_64-pc-windows-gnu --no-run
+# The DLLs the loader will look for beside the binary, which is where Windows looks first.
+cp target/x86_64-pc-windows-gnu/debug/WebView2Loader.dll target/x86_64-pc-windows-gnu/debug/deps/
+WINEDEBUG=+loaddll wine64 target/x86_64-pc-windows-gnu/debug/deps/sublore_lib-*.exe --list
+```
+
+The gnu linker keeps the whole graph and the MSVC linker CI uses keeps only what is referenced, so
+an import present here may be absent there and the reverse. It proves loading and linking, and the
+runner is still what says whether a job is green.
 
 ## Reading a CI run that looks stopped
 
@@ -257,8 +385,21 @@ are the contract. Renaming one breaks the harness. T1 took three of them away wi
 belonged to — `.bar__input`, `.subbar__input` and `.subbar__dest` — and nothing here uses them any
 more.
 
-`.bar__button`, `.stage__surface`, `.stage__empty`, `.controls__button`,
+`.bar__button`, `.stage__surface`, `.stage__empty`, `.controls`, `.controls__button`,
 `.controls__slider`, `.subbar__open`, `.subbar__save-copy`
+
+S1's window floor adds one attribute and freezes three rows. `.shell` carries `data-minimum-width`,
+the narrowest the shell says the window may be, which `interface-scale.spec.js` reads because there
+is no number it could be compared against. The rows that floor is the widest of are `.menubar`,
+`.toolbar` and `.cuelist__head`, listed in `src/hooks/useWindowFloor.ts`. Rename one in the markup
+without renaming it there and the shell says so in the status bar, in the same line it uses when the
+window refuses the floor: a row it was told to measure and could not find is a bar about to be cut
+off, not a row of width zero.
+
+`.controls` and `.controls__slider` carry more than their names here. The video panel's floor is not
+a number any more: it is what that row asks for on one line, so `dividers.spec.js` and
+`interface-scale.spec.js` read the row's height at both ends of its edge, and read the seek bar
+against the `min-width` its own rule gives it. Take that rule away and those checks stop, loudly.
 
 T7 replaced the project panel's buttons and fields with the rail tree and its context menu, so every
 `.project__*` name is gone. What stands in their place: `.rail`, `.rail__cap`, `.rail__empty`,
@@ -301,11 +442,11 @@ saved line is `.statusbar__message` on its own, `.subbar__error` is `.statusbar_
 
 Added by T3, the menu bar and the toolbar that replaced the command bars: `.menubar__title`,
 `.menubar__title--file`, `.menubar__menu`, `.menubar__item`, `.menubar__item--cursor`,
-`.toolbar__button`, `.toolbar__open-subtitle`, `.toolbar__open-video`, `.toolbar__save`,
-`.toolbar__save-copy`, `.toolbar__undo`, `.toolbar__redo`, `.toolbar__discard`, `.about`,
+`.toolbar__button`, `.toolbar__file-open-subtitle`, `.toolbar__video-open`, `.toolbar__file-save`,
+`.toolbar__file-save-copy`, `.toolbar__edit-undo`, `.toolbar__edit-redo`, `.toolbar__file-discard`, `.about`,
 `.about__title`, `.statusbar__chrome-error`. The toolbar carries the six commands the bars carried,
-under new names: `.bar__button` is `.toolbar__open-video`, `.subbar__open` is
-`.toolbar__open-subtitle`, and `.subbar__save`, `.subbar__save-copy`, `.subbar__undo`,
+under new names: `.bar__button` is `.toolbar__video-open`, `.subbar__open` is
+`.toolbar__file-open-subtitle`, and `.subbar__save`, `.subbar__save-copy`, `.subbar__undo`,
 `.subbar__redo` and `.subbar__discard` are the same names under `.toolbar__`. A menu item's id is
 `menuitem-<command>`, which is how a check names the item the cursor is on without reading copy.
 

@@ -2,8 +2,9 @@
 export const en = {
   appName: "Sublore",
   /**
-   * The menu bar and the toolbar. Only the titles with items behind them are here: Subtitles,
-   * Timing, Audio and Terms arrive with the milestone that fills each (decision 24 A2 and A4).
+   * The menu bar and the toolbar. Every title here is always drawn, greyed when nothing behind it
+   * can be used; Timing and Terms are absent because no command of theirs is registered yet, and
+   * they arrive with the milestone that writes them (decision 24 A4).
    */
   menu: {
     file: {
@@ -19,12 +20,43 @@ export const en = {
       title: "Edit",
       undo: "Undo",
       redo: "Redo",
-      /** Here until the Audio title arrives with the milestone that fills it (decision 24 A2). */
+      find: "Find…",
+      findNext: "Find next",
+      replace: "Replace…",
+      /** Here until an Audio title of its own arrives with the milestone that registers it. */
       transcribe: "Transcribe…",
+    },
+    timing: {
+      title: "Timing",
+      startToPlayhead: "Set start to playhead",
+      endToPlayhead: "Set end to playhead",
+      toCueStart: "Jump to cue start",
+      toCueEnd: "Jump to cue end",
+      selectAtPlayhead: "Select cue at playhead",
+      /** The 500 ms is in the label on purpose: the key says what it will do before you press it. */
+      playLine: "Play line",
+      playBefore: "Play 500 ms before line",
+      playAfter: "Play 500 ms after line",
+      playToEnd: "Play from line start to the end",
+      startEarlier: "Start 10 ms earlier",
+      startLater: "Start 10 ms later",
+      endEarlier: "End 10 ms earlier",
+      endLater: "End 10 ms later",
     },
     view: {
       title: "View",
       waveform: "Waveform",
+      subtitles: "Subtitles on video",
+      /** One of the five interface size radio items (S1). `{percent}` is a whole number. */
+      scale: "{percent}%",
+    },
+    /** The four cue structure edits, interface-spec section 3 order (M2.7 E2, T3 C2). */
+    subtitles: {
+      title: "Subtitles",
+      insert: "Insert cue",
+      delete: "Delete cue",
+      split: "Split cue",
+      merge: "Merge with next",
     },
     audio: {
       title: "Audio",
@@ -44,9 +76,77 @@ export const en = {
       undo: "Ctrl+Z",
       redo: "Ctrl+Y",
       quit: "Ctrl+Q",
+      videoToCueStart: "Ctrl+1",
+      videoToCueEnd: "Ctrl+2",
+      startToPlayhead: "Ctrl+3",
+      endToPlayhead: "Ctrl+4",
+      find: "Ctrl+F",
+      /** The one accelerator with no modifier at all, which is why the field rule has two halves. */
+      findNext: "F3",
+      replace: "Ctrl+H",
     },
     errors: {
       quitFailed: "Sublore could not quit. Close the window instead.",
+    },
+  },
+  /** The find band, in both its modes: replace adds a second field and two buttons to the same row. */
+  find: {
+    title: "Find",
+    replaceTitle: "Find and replace",
+    needleLabel: "Find",
+    replaceLabel: "Replace with",
+    matchCase: "Match case",
+    regex: "Regular expression",
+    /** The selection, whatever its size: one selected cue restricts too (F4b). */
+    inSelection: "Selected cues only",
+    findNext: "Find next",
+    replace: "Replace",
+    replaceAll: "Replace all",
+    noMatch: "No match",
+    badPattern: "That expression is not one this can read. Nothing was changed.",
+    /** A pattern that backtracks for ever. The document is untouched and the window kept answering. */
+    tooSlow: "That expression takes too long to run. Nothing was changed.",
+    /** `{count}` is a whole number. Drawn after a replace all, so the count is never a guess. */
+    replaced: {
+      one: "1 replaced",
+      other: "{count} replaced",
+    },
+    close: "Close",
+  },
+  /**
+   * What a module file that would not load is reported as. The core never learns what a module is
+   * for, so every one of these is about the file and the numbers and nothing else.
+   */
+  modules: {
+    line: "Sublore found {file} but could not use it: {reason}",
+    notAModule: "it is not a Sublore module.",
+    versionDiffers:
+      "it was built for interface version {theirs} and this build speaks version {ours}.",
+    revisionTooNew: "it needs interface revision {theirs} and this build offers {ours}.",
+    tableSize: "its interface table is {theirs} bytes and this build's is {ours}.",
+    refused: "it would not start, and reported code {code}.",
+    unopenable: "the file could not be opened.",
+    /** In About, above the list. Absent entirely when nothing loaded and nothing was refused. */
+    heading: "Modules",
+    /** In About, for a module that loaded. */
+    loaded: "{file}, loaded",
+    /** In About, when the launch asked for none. */
+    skipped: "Modules were not looked for: the app was started with --no-modules.",
+    /**
+     * While a module's own work runs. Every word here is about work and about stopping it: the
+     * core has no name for what any module does, and none of these may acquire one.
+     */
+    work: {
+      /** Shown until the module says something of its own, and never instead of what it says. */
+      working: "Working…",
+      stop: "Stop",
+      count: "{done} of {total}",
+    },
+    /** The table a module fills. About tables, for the same reason. */
+    panel: {
+      /** A percent cell, whose number the module gave and the core does not check. */
+      percent: "{value}%",
+      close: "Close",
     },
   },
   about: {
@@ -56,6 +156,16 @@ export const en = {
     licence: "GNU General Public License, version 3 or later.",
     close: "Close",
   },
+  /** The draggable edges between the panels (D1). Read aloud where a separator is announced. */
+  shell: {
+    videoSash: "Video panel width",
+    gridSash: "Top block height",
+    errors: {
+      windowFloor:
+        "Sublore could not stop the window being made too narrow for its controls. Widen the window if part of a bar is cut off.",
+    },
+  },
+
   video: {
     play: "Play",
     pause: "Pause",
@@ -160,6 +270,16 @@ export const en = {
     label: "Waveform",
     /** Shown in the status bar when a peak job fails. The detail is technical and stays in the log. */
     failed: "The waveform could not be read for this file. The video is unaffected.",
+  },
+
+  preview: {
+    /**
+     * Shown in the status bar when the open document could not be put on the video frame. It says
+     * what is safe as well as what failed: a preview never writes the user's file, so nothing of
+     * theirs is at stake here.
+     */
+    failed:
+      "The subtitles could not be shown on the video. Your subtitle file and video are unchanged.",
   },
 
   subtitle: {

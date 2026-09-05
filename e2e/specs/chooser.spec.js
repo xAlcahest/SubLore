@@ -21,6 +21,7 @@ import { answerChooser, cancelChooser, waitForChooser } from "../lib/chooser.js"
 import { clickAt, focusWindow, rightClickAt, typeText } from "../lib/input.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
+import { closeAnyOpenProject } from "../lib/rail.js";
 import { findToplevel } from "../lib/x11.js";
 
 /**
@@ -31,10 +32,15 @@ const TEXT_TYPES = ["text", "search", "url", "email", "tel", "password", "number
 
 /**
  * Every box a person types into. The rail's question is open only while it is asked; the current
- * line's box is in the tools column whenever a document is (T5). Neither holds a path, which is
- * what the assertion below is about.
+ * line's text box and its two time fields are in the tools column whenever a document is (T5,
+ * M2.7 E1). None of them holds a path, which is what the assertion below is about.
  */
-const ALLOWED_TEXT_FIELDS = ["currentline__text", "raildialog__field"];
+const ALLOWED_TEXT_FIELDS = [
+  "currentline__text",
+  "currentline__time currentline__end",
+  "currentline__time currentline__start",
+  "raildialog__field",
+];
 
 /** The title the episode added below carries, so the rail has a row to raise a file chooser from. */
 const EPISODE_TITLE = "Episode 1";
@@ -214,23 +220,6 @@ async function confirmDialog(toplevel) {
   });
 }
 
-/**
- * Every spec shares one data home, so a spec that ran before this one may have left a project open,
- * and a launch now reopens it (decision 24, D5). This one starts from nothing open.
- */
-async function closeAnyOpenProject(toplevel) {
-  if (!(await present(".rail__project"))) {
-    return;
-  }
-  await openProjectMenu(toplevel);
-  await chooseMenuItem(toplevel, "close-project");
-  await confirmDialog(toplevel);
-  await waitFor(() => present(".rail__empty"), {
-    timeout: 20000,
-    message: "the rail to empty once another spec's project is closed",
-  });
-}
-
 describe("the chooser is the only way in", () => {
   let toplevel = null;
   let projectFolder = null;
@@ -252,7 +241,7 @@ describe("the chooser is the only way in", () => {
     });
     focusWindow(toplevel.id);
     await waitFor(
-      () => browser.execute(() => document.querySelector(".toolbar__open-subtitle") !== null),
+      () => browser.execute(() => document.querySelector(".toolbar__file-open-subtitle") !== null),
       {
         timeout: 30000,
         message: "the app UI to render",
@@ -264,7 +253,7 @@ describe("the chooser is the only way in", () => {
     // be raised and every route below has a state to be left alone.
     await chooseFrom(
       toplevel,
-      ".toolbar__open-subtitle",
+      ".toolbar__file-open-subtitle",
       "Choose a subtitle",
       subtitle,
       "subtitle",
@@ -341,7 +330,7 @@ describe("the chooser is the only way in", () => {
     const empty = await textOf(".stage__empty");
     expect(empty).not.toBe(null);
 
-    await cancelFrom(toplevel, ".toolbar__open-video", "Choose a video", "video");
+    await cancelFrom(toplevel, ".toolbar__video-open", "Choose a video", "video");
 
     expect(await textOf(".stage__empty")).toBe(empty);
     expect(await textOf(".statusbar__video-error")).toBe(null);
@@ -350,7 +339,7 @@ describe("the chooser is the only way in", () => {
   it("leaves the open document alone when the subtitle chooser is dismissed", async () => {
     const status = await textOf(".statusbar__document");
 
-    await cancelFrom(toplevel, ".toolbar__open-subtitle", "Choose a subtitle", "subtitle");
+    await cancelFrom(toplevel, ".toolbar__file-open-subtitle", "Choose a subtitle", "subtitle");
 
     expect(await textOf(".statusbar__document")).toBe(status);
     expect(await textOf(".statusbar__error")).toBe(null);
@@ -362,7 +351,7 @@ describe("the chooser is the only way in", () => {
 
     await cancelFrom(
       toplevel,
-      ".toolbar__save-copy",
+      ".toolbar__file-save-copy",
       "Save a copy of the subtitle",
       "subtitle-save",
     );
