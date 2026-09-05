@@ -1,0 +1,15 @@
+# The comctl32 a Windows binary gets is decided by its manifest, and a Rust test binary has none.
+#
+# The app carries one, so it gets version 6 and its `TaskDialogIndirect` resolves. A test binary
+# gets 5.82, which has the subclassing calls and not that one, and will not start: measured on
+# 2026-09-05 as `sublore_lib-<hash>.exe (exit code: 0xc0000139, STATUS_ENTRYPOINT_NOT_FOUND)`, where
+# comparing its import table against the last green build showed 402 named imports against 235 and
+# the whole windowing stack among the difference. See BACKLOG.md N29.
+#
+# This gives every binary here the dependency the app already declares, so the harness loads what
+# the product loads. It is not a weakening of a check: the check was failing on a library the
+# product never runs without.
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+  "-Clink-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'",
+]
