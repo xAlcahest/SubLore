@@ -13,7 +13,9 @@ use sublore_edit::diff::{self, CueView};
 use sublore_edit::error::EditErrorKind;
 use sublore_edit::plan::{edit, Edit, Edited, Expectation, ExpectedCue};
 use sublore_edit::verify::verify;
-use sublore_formats::{AssEventKind, CueDetail, SubtitleDocument, SubtitleFormat, MAX_TIMECODE_MS};
+use sublore_formats::{
+    AssEvent, AssEventKind, AssField, CueDetail, SubtitleDocument, SubtitleFormat, MAX_TIMECODE_MS,
+};
 
 /// Fixture-count guard: deleting fixtures must turn this suite red, not quietly shrink it.
 const MIN_CLEAN: usize = 43;
@@ -1459,4 +1461,676 @@ fn every_cue_of_an_ass_file_can_be_rewritten_at_once() {
     }
     assert_bytes_outside_the_edit_are_identical(&bytes, &document, &result, "every ass cue");
     assert_reopens_identically(&result.document, "every ass cue");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Writing one declared field of one ASS event (docs/ass-field-write-tasks.md)
+// ---------------------------------------------------------------------------------------------
+
+/// The ASS event a cue index names, or `None` for an SRT block and a VTT cue.
+fn ass_event(document: &SubtitleDocument, index: usize) -> Option<&AssEvent> {
+    match &document.cues().nth(index)?.detail {
+        CueDetail::Ass(event) => Some(event),
+        CueDetail::Srt(_) | CueDetail::Vtt(_) => None,
+    }
+}
+
+/// Every field of an event as the file spells it, padding included.
+fn field_strings(document: &SubtitleDocument, event: &AssEvent) -> Vec<String> {
+    event
+        .fields
+        .iter()
+        .map(|span| document.slice(*span).to_owned())
+        .collect()
+}
+
+/// A value of the shape the field holds: the numeric four take an integer, the rest take a word.
+fn sample_value(field: AssField) -> &'static str {
+    match field {
+        AssField::Layer | AssField::MarginL | AssField::MarginR | AssField::MarginV => "7",
+        AssField::Style | AssField::Actor | AssField::Effect => "Sublore",
+    }
+}
+
+/// The whole proof of the field write, made on the bytes: what moved, what did not, and that undo
+/// puts every byte back. See docs/ass-field-write-tasks.md section 6.
+fn assert_field_write_moves_nothing_else(
+    original: &[u8],
+    before: &SubtitleDocument,
+    result: &Edited,
+    target: usize,
+    field: AssField,
+    value: &str,
+    label: &str,
+) {
+    let event = ass_event(before, target).expect("the target is an ASS event");
+    let at = event
+        .field_index(field)
+        .expect("the caller checked the field is declared");
+    let span = *event.fields.get(at).expect("a declared field is in range");
+    let old_fields = field_strings(before, event);
+
+    assert_bytes_outside_the_edit_are_identical(original, before, result, label);
+
+    // The splice never leaves the field it names, which is why it can never reach a separator.
+    assert!(
+        result.splice.at >= span.start && result.splice.end() <= span.end,
+        "{label}: the splice at {}..{} escaped field {at} at {span:?}",
+        result.splice.at,
+        result.splice.end()
+    );
+    // The cheap assertion that reddens the instant a boundary is off by one.
+    assert!(
+        !result.splice.removed.contains(',') && !result.splice.inserted.contains(','),
+        "{label}: the splice moved a field separator: {:?} -> {:?}",
+        result.splice.removed,
+        result.splice.inserted
+    );
+
+    let written = ass_event(&result.document, target).expect("it is still an ASS event");
+    let new_fields = field_strings(&result.document, written);
+    assert_eq!(
+        old_fields.len(),
+        new_fields.len(),
+        "{label}: the event carried {} fields and now carries {}",
+        old_fields.len(),
+        new_fields.len()
+    );
+    for (position, (was, now)) in old_fields.iter().zip(new_fields.iter()).enumerate() {
+        if position == at {
+            continue;
+        }
+        assert_eq!(
+            was, now,
+            "{label}: field {position} was not edited and changed"
+        );
+    }
+    assert_eq!(
+        new_fields.get(at).map(|raw| {
+            raw.trim_start_matches([' ', '\t'])
+                .trim_end_matches([' ', '\t', '\r'])
+                .to_owned()
+        }),
+        Some(value.to_owned()),
+        "{label}: the field must read back what was written"
+    );
+
+    let old_cue = before.cues().nth(target).expect("the target exists");
+    let new_cue = result
+        .document
+        .cues()
+        .nth(target)
+        .expect("the target still exists");
+    assert_eq!(
+        (old_cue.start.millis(), old_cue.end.millis()),
+        (new_cue.start.millis(), new_cue.end.millis()),
+        "{label}: a field write moved the cue's times"
+    );
+    assert_eq!(
+        before.slice(old_cue.text),
+        result.document.slice(new_cue.text),
+        "{label}: a field write moved the cue's text"
+    );
+    assert_eq!(
+        event.kind, written.kind,
+        "{label}: a field write changed the event kind"
+    );
+    assert_eq!(result.cue_delta, 0, "{label}: a field write moves no cue");
+    assert_other_cues_intact(before, &result.document, target, 1, 1, label);
+    assert_reopens_identically(&result.document, label);
+
+    let restored = sublore_edit::plan::replay(&result.document, &result.splice.inverse(), 0)
+        .unwrap_or_else(|error| panic!("{label}: the write must be undoable: {error}"));
+    assert_eq!(
+        restored.to_bytes(),
+        original,
+        "{label}: undo must restore the exact original bytes"
+    );
+}
+
+#[test]
+fn writing_a_field_into_every_clean_fixture_leaves_every_other_byte_identical() {
+    let mut wrote = 0usize;
+    let mut refused = 0usize;
+    for path in clean_fixtures() {
+        let relative = path.display().to_string();
+        let bytes = std::fs::read(&path).expect("fixture is readable");
+        let document = sublore_formats::parse(format_of(&path), &bytes).expect("fixture parses");
+        let count = document.cues().count();
+        if count == 0 {
+            continue;
+        }
+        let target = count / 2;
+
+        for field in AssField::ALL {
+            let label = format!("{relative}: {field:?}");
+            let value = sample_value(field);
+            let request = Edit::SetField {
+                cue: target,
+                field,
+                value: value.to_owned(),
+            };
+            let declared = ass_event(&document, target)
+                .and_then(|event| event.field_index(field))
+                .is_some();
+
+            if !declared {
+                // No span to replace, so the write is refused rather than the field added.
+                let error = edit(&document, &request)
+                    .expect_err(&format!("{label}: an undeclared field must be refused"));
+                assert_eq!(error.kind, EditErrorKind::NotApplicable, "{label}");
+                assert_eq!(
+                    document.to_bytes(),
+                    bytes,
+                    "{label}: a refusal must leave the document exactly as it was"
+                );
+                refused += 1;
+                continue;
+            }
+
+            let result = edit(&document, &request)
+                .unwrap_or_else(|error| panic!("{label}: must be writable: {error}"));
+            assert_field_write_moves_nothing_else(
+                &bytes, &document, &result, target, field, value, &label,
+            );
+            wrote += 1;
+        }
+    }
+    // In the spirit of MIN_CLEAN: deleting the coverage turns the suite red rather than shrinking
+    // it. Today the clean tree offers 113 writable pairs and 230 refusals.
+    assert!(wrote >= 113, "only {wrote} field writes were exercised");
+    assert!(refused >= 230, "only {refused} refusals were exercised");
+}
+
+/// The value of one declared field, exactly as the file spells it, padding included.
+fn raw_field(document: &SubtitleDocument, cue: usize, field: AssField) -> Option<String> {
+    let event = ass_event(document, cue)?;
+    let at = event.field_index(field)?;
+    Some(document.slice(*event.fields.get(at)?).to_owned())
+}
+
+fn set_field(document: &SubtitleDocument, cue: usize, field: AssField, value: &str) -> Edited {
+    edit(
+        document,
+        &Edit::SetField {
+            cue,
+            field,
+            value: value.to_owned(),
+        },
+    )
+    .unwrap_or_else(|error| panic!("{field:?} on cue {cue} must be writable: {error}"))
+}
+
+fn refuse_field(
+    document: &SubtitleDocument,
+    cue: usize,
+    field: AssField,
+    value: &str,
+) -> EditErrorKind {
+    edit(
+        document,
+        &Edit::SetField {
+            cue,
+            field,
+            value: value.to_owned(),
+        },
+    )
+    .expect_err(&format!(
+        "{field:?} on cue {cue} with {value:?} must be refused"
+    ))
+    .kind
+}
+
+#[test]
+fn naming_a_speaker_writes_the_name_and_nothing_around_it() {
+    // CF1.1: the empty Name field of the first event, filled in place.
+    let (document, bytes) = open("ass/clean/basic.ass");
+    let result = set_field(&document, 0, AssField::Actor, "Ingrid");
+    let after = String::from_utf8(result.document.to_bytes()).expect("utf-8");
+    assert!(
+        after.contains(
+            "Dialogue: 0,0:00:01.34,0:00:03.98,Default,Ingrid,0,0,0,,The harbour freezes over by December."
+        ),
+        "the name must land in the Name field: {after}"
+    );
+    assert_field_write_moves_nothing_else(
+        &bytes,
+        &document,
+        &result,
+        0,
+        AssField::Actor,
+        "Ingrid",
+        "basic actor",
+    );
+}
+
+#[test]
+fn the_first_field_keeps_the_space_after_the_descriptor() {
+    // CF1.4: Layer is written first on the line, so its span holds the space after `Dialogue:`.
+    // A whole-span write would spell `Dialogue:3,...` on the first layer edit of any normal file.
+    let (document, bytes) = open("ass/clean/basic.ass");
+    assert_eq!(
+        raw_field(&document, 1, AssField::Layer).as_deref(),
+        Some(" 0")
+    );
+    let result = set_field(&document, 1, AssField::Layer, "3");
+    let after = String::from_utf8(result.document.to_bytes()).expect("utf-8");
+    assert!(
+        after.contains("Dialogue: 3,0:00:04.12,"),
+        "the space after the descriptor must survive: {after}"
+    );
+    assert_field_write_moves_nothing_else(
+        &bytes,
+        &document,
+        &result,
+        1,
+        AssField::Layer,
+        "3",
+        "basic layer",
+    );
+}
+
+#[test]
+fn the_last_field_before_the_text_keeps_the_comma_the_text_follows() {
+    // CF1.4: Effect is the last declared field before the text in this file.
+    let (document, bytes) = open("ass/clean/basic.ass");
+    let result = set_field(&document, 1, AssField::Effect, "fad");
+    let after = String::from_utf8(result.document.to_bytes()).expect("utf-8");
+    assert!(
+        after.contains("0,0,0,fad,Then we sail in November, like everyone else."),
+        "the separator before the text must survive: {after}"
+    );
+    assert_field_write_moves_nothing_else(
+        &bytes,
+        &document,
+        &result,
+        1,
+        AssField::Effect,
+        "fad",
+        "basic effect",
+    );
+}
+
+#[test]
+fn a_shuffled_format_line_writes_where_it_put_each_field() {
+    // CF1.5: the check that reddens the moment an index is treated as a position. `Name` is first
+    // on the line here and `Style` is last before the text.
+    let (document, bytes) = open("ass/clean/speakers-shuffled.ass");
+    let named = set_field(&document, 0, AssField::Actor, "Sublore");
+    let after = String::from_utf8(named.document.to_bytes()).expect("utf-8");
+    assert!(
+        after.contains("Dialogue: Sublore,0,0:00:01.34,0:00:03.98,0,0,0,,Default,"),
+        "the speaker must land in the first field: {after}"
+    );
+    assert_field_write_moves_nothing_else(
+        &bytes,
+        &document,
+        &named,
+        0,
+        AssField::Actor,
+        "Sublore",
+        "shuffled actor",
+    );
+
+    let styled = set_field(&document, 0, AssField::Style, "Sign");
+    let after = String::from_utf8(styled.document.to_bytes()).expect("utf-8");
+    assert!(
+        after.contains(",0,0,0,,Sign,The harbour freezes over by December."),
+        "the style must land in the last field before the text: {after}"
+    );
+    assert_field_write_moves_nothing_else(
+        &bytes,
+        &document,
+        &styled,
+        0,
+        AssField::Style,
+        "Sign",
+        "shuffled style",
+    );
+}
+
+#[test]
+fn a_field_that_is_one_space_keeps_the_space_and_takes_the_value_after_it() {
+    // CF1.6: this event's Name is first on the line and empty, so the whole span is the space
+    // after the colon. A whole-span write would eat it and spell `Dialogue:Ingrid,...`.
+    let (document, bytes) = open("ass/clean/speakers-shuffled.ass");
+    assert_eq!(
+        raw_field(&document, 2, AssField::Actor).as_deref(),
+        Some(" ")
+    );
+    let result = set_field(&document, 2, AssField::Actor, "Ingrid");
+    let after = String::from_utf8(result.document.to_bytes()).expect("utf-8");
+    assert!(
+        after.contains("Dialogue: Ingrid,0,0:00:07.00,"),
+        "the space is kept and the name follows it: {after}"
+    );
+    assert_field_write_moves_nothing_else(
+        &bytes,
+        &document,
+        &result,
+        2,
+        AssField::Actor,
+        "Ingrid",
+        "empty speaker",
+    );
+}
+
+#[test]
+fn ssa_v4_takes_a_margin_and_leaves_its_marked_field_alone() {
+    // CF1.7: `Marked=0` is a different grammar, so this file declares no Layer at all.
+    let (document, bytes) = open("ass/clean/ssa-v4.ssa");
+    assert_eq!(
+        raw_field(&document, 0, AssField::MarginL).as_deref(),
+        Some("0000")
+    );
+    assert_eq!(raw_field(&document, 0, AssField::Layer), None);
+    assert_eq!(
+        refuse_field(&document, 0, AssField::Layer, "1"),
+        EditErrorKind::NotApplicable
+    );
+
+    let result = set_field(&document, 0, AssField::MarginL, "0040");
+    let after = String::from_utf8(result.document.to_bytes()).expect("utf-8");
+    assert!(
+        after.contains("Dialogue: Marked=0,0:00:02.10,0:00:05.30,Default,NTP,0040,0000,0000,,"),
+        "the margin is written and Marked=0 is untouched: {after}"
+    );
+    assert_field_write_moves_nothing_else(
+        &bytes,
+        &document,
+        &result,
+        0,
+        AssField::MarginL,
+        "0040",
+        "ssa margin",
+    );
+}
+
+#[test]
+fn writing_a_field_on_a_comment_event_leaves_it_a_comment() {
+    // CF1.8: the descriptor is outside every field span, so the drawn cue count cannot move.
+    let (document, bytes) = open("ass/clean/comments-and-semicolons.ass");
+    let target = document
+        .cues()
+        .position(|cue| matches!(&cue.detail, CueDetail::Ass(event) if event.kind == AssEventKind::Comment))
+        .expect("the fixture holds a Comment event");
+    let drawn = document.displayed_cue_count();
+
+    let result = set_field(&document, target, AssField::Style, "Sublore");
+    assert_eq!(
+        result.document.displayed_cue_count(),
+        drawn,
+        "a field write must not turn a Comment into a Dialogue"
+    );
+    assert_field_write_moves_nothing_else(
+        &bytes,
+        &document,
+        &result,
+        target,
+        AssField::Style,
+        "Sublore",
+        "comment style",
+    );
+}
+
+#[test]
+fn a_hand_spaced_field_keeps_its_spaces_on_both_sides() {
+    // CF2.1 and CF2.2: no committed fixture writes its fields with spaces around them.
+    let text = concat!(
+        "[Events]\n",
+        "Format: Layer, Start, End, Style, Name, Text\n",
+        "Dialogue: 0, 0:00:01.34, 0:00:03.98, Default, Ingrid, Spaced out\n",
+    );
+    let document = parse(SubtitleFormat::Ass, text);
+    assert_eq!(
+        raw_field(&document, 0, AssField::Actor).as_deref(),
+        Some(" Ingrid")
+    );
+
+    // Committing the value the panel shows writes nothing at all.
+    let unchanged = set_field(&document, 0, AssField::Actor, "Ingrid");
+    assert!(
+        unchanged.splice.is_noop(),
+        "committing a field unchanged must produce no bytes: {:?}",
+        unchanged.splice
+    );
+    assert_eq!(unchanged.document.to_bytes(), text.as_bytes());
+
+    let result = set_field(&document, 0, AssField::Actor, "Marek");
+    let after = String::from_utf8(result.document.to_bytes()).expect("utf-8");
+    assert!(
+        after.contains(", Default, Marek, Spaced out"),
+        "the file's own spacing must survive on both sides: {after}"
+    );
+    assert_field_write_moves_nothing_else(
+        text.as_bytes(),
+        &document,
+        &result,
+        0,
+        AssField::Actor,
+        "Marek",
+        "hand spaced",
+    );
+}
+
+#[test]
+fn a_style_name_that_ends_in_a_space_commits_unchanged_without_writing() {
+    // CF2.3: the file spells this style `Sign Top `, the panel shows `Sign Top`, and committing
+    // what the panel shows must not delete the file's byte.
+    let (document, bytes) = open("ass/clean/styles-many.ass");
+    assert_eq!(
+        raw_field(&document, 2, AssField::Style).as_deref(),
+        Some("Sign Top ")
+    );
+    let result = set_field(&document, 2, AssField::Style, "Sign Top");
+    assert!(
+        result.splice.is_noop(),
+        "committing the trimmed value must write nothing: {:?}",
+        result.splice
+    );
+    assert_eq!(result.document.to_bytes(), bytes);
+}
+
+#[test]
+fn clearing_a_field_leaves_the_commas_that_surround_it() {
+    // CF2.4.
+    let (document, bytes) = open("ass/clean/speakers.ass");
+    let target = document
+        .cues()
+        .position(|cue| match &cue.detail {
+            CueDetail::Ass(event) => event
+                .field_index(AssField::Actor)
+                .and_then(|at| event.fields.get(at))
+                .is_some_and(|span| !document.slice(*span).is_empty()),
+            CueDetail::Srt(_) | CueDetail::Vtt(_) => false,
+        })
+        .expect("the fixture names a speaker");
+
+    let result = set_field(&document, target, AssField::Actor, "");
+    assert_eq!(
+        raw_field(&result.document, target, AssField::Actor).as_deref(),
+        Some("")
+    );
+    assert_field_write_moves_nothing_else(
+        &bytes,
+        &document,
+        &result,
+        target,
+        AssField::Actor,
+        "",
+        "cleared actor",
+    );
+}
+
+#[test]
+fn a_value_holding_a_comma_is_refused_and_writes_nothing() {
+    // CF3.1, and the worst thing this edit could do to a file: a comma cuts a field the Format
+    // line does not declare, so the text field would begin early and swallow the dialogue.
+    let (document, bytes) = open("ass/clean/basic.ass");
+    assert_eq!(
+        refuse_field(&document, 0, AssField::Actor, "Ingrid, the elder"),
+        EditErrorKind::UnwritableText
+    );
+    assert_eq!(
+        document.to_bytes(),
+        bytes,
+        "a refusal must leave the document exactly as it was"
+    );
+    assert_eq!(document.cues().count(), 3);
+}
+
+#[test]
+fn a_value_holding_a_line_break_or_a_control_character_is_refused() {
+    // CF3.2 and CF3.3, and never stripped: the value the caller passed in is the value it passed.
+    let (document, bytes) = open("ass/clean/basic.ass");
+    for value in [
+        "one\ntwo",
+        "one\rtwo",
+        "one\u{0}two",
+        "one\u{7f}two",
+        "\u{1b}[0m",
+    ] {
+        assert_eq!(
+            refuse_field(&document, 0, AssField::Actor, value),
+            EditErrorKind::UnwritableText,
+            "{value:?} must be refused"
+        );
+    }
+    assert_eq!(document.to_bytes(), bytes);
+}
+
+#[test]
+fn a_field_the_format_line_never_declared_is_refused_rather_than_added() {
+    // CF3.4 and CF3.5. Adding a field means rewriting the Format line and every event under it.
+    let (minimal, minimal_bytes) = open("ass/clean/minimal-fields.ass");
+    for field in AssField::ALL {
+        if field == AssField::Layer {
+            continue;
+        }
+        assert_eq!(
+            refuse_field(&minimal, 0, field, sample_value(field)),
+            EditErrorKind::NotApplicable,
+            "{field:?} is not declared by this file"
+        );
+    }
+    let result = set_field(&minimal, 0, AssField::Layer, "2");
+    assert_field_write_moves_nothing_else(
+        &minimal_bytes,
+        &minimal,
+        &result,
+        0,
+        AssField::Layer,
+        "2",
+        "minimal layer",
+    );
+
+    // A field declared after the text is inside the dialogue, so there is nothing to write.
+    let (after_text, after_text_bytes) = open("ass/clean/field-after-text.ass");
+    assert_eq!(
+        refuse_field(&after_text, 0, AssField::Style, "Sign"),
+        EditErrorKind::NotApplicable
+    );
+    assert_eq!(after_text.to_bytes(), after_text_bytes);
+}
+
+#[test]
+fn an_srt_or_a_vtt_cue_has_no_field_to_write() {
+    // CF3.6.
+    for relative in ["srt/clean/basic-lf.srt", "vtt/clean/basic.vtt"] {
+        let (document, bytes) = open(relative);
+        for field in AssField::ALL {
+            assert_eq!(
+                refuse_field(&document, 0, field, sample_value(field)),
+                EditErrorKind::NotApplicable,
+                "{relative}: {field:?}"
+            );
+        }
+        assert_eq!(document.to_bytes(), bytes, "{relative}");
+    }
+}
+
+#[test]
+fn a_layer_or_a_margin_that_is_not_a_number_is_refused() {
+    // CF3.7. What the control does about it, clamp or refuse or commit a zero, is not decided here.
+    let (document, bytes) = open("ass/clean/basic.ass");
+    for value in ["12a", "", " 4", "4 ", "+4", "1.5", "--4", "99999999999"] {
+        assert_eq!(
+            refuse_field(&document, 0, AssField::Layer, value),
+            EditErrorKind::NotApplicable,
+            "layer {value:?} must be refused"
+        );
+        assert_eq!(
+            refuse_field(&document, 0, AssField::MarginL, value),
+            EditErrorKind::NotApplicable,
+            "margin {value:?} must be refused"
+        );
+    }
+    // A layer is never negative; a margin may be, and leading zeros are kept as written.
+    assert_eq!(
+        refuse_field(&document, 0, AssField::Layer, "-1"),
+        EditErrorKind::NotApplicable
+    );
+    assert_eq!(
+        raw_field(
+            &set_field(&document, 0, AssField::MarginL, "-0040").document,
+            0,
+            AssField::MarginL
+        )
+        .as_deref(),
+        Some("-0040")
+    );
+    assert_eq!(document.to_bytes(), bytes);
+}
+
+#[test]
+fn a_cue_index_the_document_does_not_hold_is_refused() {
+    // CF3.8.
+    let (document, _) = open("ass/clean/basic.ass");
+    assert_eq!(
+        refuse_field(&document, 99, AssField::Actor, "Ingrid"),
+        EditErrorKind::NoSuchCue
+    );
+}
+
+#[test]
+fn a_format_line_naming_one_field_twice_writes_the_first_one() {
+    // The reader takes the first match, so the writer must land there too.
+    let text = concat!(
+        "[Events]\n",
+        "Format: Layer, Start, End, Effect, Effect, Text\n",
+        "Dialogue: 0,0:00:01.34,0:00:03.98,first,second,Hello\n",
+    );
+    let document = parse(SubtitleFormat::Ass, text);
+    let result = set_field(&document, 0, AssField::Effect, "fad");
+    let after = String::from_utf8(result.document.to_bytes()).expect("utf-8");
+    assert!(
+        after.contains("0:00:03.98,fad,second,Hello"),
+        "the write must land on the field the reader reads: {after}"
+    );
+    assert_field_write_moves_nothing_else(
+        text.as_bytes(),
+        &document,
+        &result,
+        0,
+        AssField::Effect,
+        "fad",
+        "twice declared",
+    );
+}
+
+#[test]
+fn each_field_carries_its_own_undo_label() {
+    // CF4.1: `EditLabel` merges only on an equal label, so an Actor write and an Effect write on
+    // one cue must never become one undo step. See ass-field-write-tasks.md W3.
+    let (document, _) = open("ass/clean/basic.ass");
+    let mut labels = Vec::new();
+    for field in AssField::ALL {
+        labels.push(set_field(&document, 0, field, sample_value(field)).label);
+    }
+    for (position, label) in labels.iter().enumerate() {
+        assert!(
+            labels.iter().skip(position + 1).all(|other| other != label),
+            "two fields share the undo label {label:?}"
+        );
+    }
 }

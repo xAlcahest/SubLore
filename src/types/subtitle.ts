@@ -31,6 +31,14 @@ export type CueRow = {
   actor: string;
 };
 
+/**
+ * The ASS event field `subtitle_set_field` writes. The text field is deliberately not on this
+ * list: it is written through `subtitle_set_text`, and nothing else may name it.
+ * A field the open document does not declare is refused, so its control is drawn greyed.
+ */
+export type AssFieldName =
+  "style" | "actor" | "effect" | "layer" | "marginL" | "marginR" | "marginV";
+
 export type SubtitleOpened = {
   summary: SubtitleSummary;
   revision: number;

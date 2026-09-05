@@ -408,6 +408,18 @@ async function derivedFloor() {
  * in, and the window coming back to the floor is what a smallest window width means.
  */
 async function settleAt(id, ask, height, took) {
+  // Counted in the page, because the app's own log does not reach the battery's output. Whether the
+  // resize event fires at all is what separates a put-back that never ran from one that ran and was
+  // told the window was already wide enough. See N32.
+  await browser.execute(() => {
+    window.__subloreResizes = 0;
+    if (window.__subloreResizeSpy === undefined) {
+      window.__subloreResizeSpy = () => {
+        window.__subloreResizes += 1;
+      };
+      window.addEventListener("resize", window.__subloreResizeSpy);
+    }
+  });
   askForWindowSize(id, ask, height);
   try {
     waitForWindowSize(id, took, height);
@@ -419,6 +431,8 @@ async function settleAt(id, ask, height, took) {
       inner: window.innerWidth,
       floor: Number(document.querySelector(".shell")?.dataset.minimumWidth ?? -1),
       ratio: window.devicePixelRatio,
+      resizes: window.__subloreResizes,
+      outer: window.outerWidth,
     }));
     throw new Error(`${refused.message}\nthe page reads ${JSON.stringify(page)}`);
   }

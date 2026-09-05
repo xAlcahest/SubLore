@@ -14,7 +14,7 @@ use sublore_edit::error::EditErrorKind;
 use sublore_edit::history::Run;
 use sublore_edit::plan::Edit;
 use sublore_edit::session::EditSession;
-use sublore_formats::{SubtitleDocument, SubtitleFormat};
+use sublore_formats::{AssField, SubtitleDocument, SubtitleFormat};
 
 /// A typing pause, well inside `history::COALESCE_WINDOW`.
 const KEYSTROKE: Duration = Duration::from_millis(50);
@@ -851,4 +851,174 @@ fn a_many_cue_edit_never_merges_into_the_keystroke_before_it() {
         Some("typed"),
         "one undo must take back the replace and leave the typing under it"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Writing one ASS event field (docs/ass-field-write-tasks.md CF4)
+// ---------------------------------------------------------------------------------------------
+
+fn set_field(cue: usize, field: AssField, value: &str) -> Edit {
+    Edit::SetField {
+        cue,
+        field,
+        value: value.to_owned(),
+    }
+}
+
+#[test]
+fn two_fields_of_one_cue_are_two_undo_steps() {
+    // CF4.1 and CF4.2. The field is on the undo label, so an Actor write and an Effect write on
+    // the same cue cannot merge even when they land inside the coalescing window.
+    let mut session = session("ass/clean/basic.ass");
+    let original = fixture_bytes("ass/clean/basic.ass");
+    let now = Instant::now();
+
+    session
+        .apply(&set_field(0, AssField::Actor, "Ingrid"), Run::New, now)
+        .expect("the Name field is declared");
+    session
+        .apply(
+            &set_field(0, AssField::Effect, "fad"),
+            Run::Continues,
+            now + KEYSTROKE,
+        )
+        .expect("the Effect field is declared");
+    session
+        .apply(&set_text(0, "Rewritten."), Run::Continues, now + KEYSTROKE)
+        .expect("the text is editable");
+
+    for step in 0..3 {
+        session
+            .undo()
+            .unwrap_or_else(|error| panic!("undo {step} must replay: {error}"))
+            .unwrap_or_else(|| panic!("undo {step} must find a step"));
+    }
+    assert_eq!(
+        session.to_bytes(),
+        original,
+        "three writes must take three undos to take back"
+    );
+    assert!(
+        !session.can_undo(),
+        "the stack must hold exactly three steps"
+    );
+    assert!(!session.dirty(), "undoing back to the open bytes is clean");
+}
+
+#[test]
+fn committing_a_field_unchanged_never_grows_the_undo_stack() {
+    // CF4.4: a translator tabbing through the panel without typing leaves the file as they found
+    // it, because the trimmed core makes an unchanged commit byte-identical.
+    let mut session = session("ass/clean/basic.ass");
+    let original = fixture_bytes("ass/clean/basic.ass");
+    let now = Instant::now();
+
+    for field in AssField::ALL {
+        let current = session
+            .views()
+            .first()
+            .map(|view| match field {
+                AssField::Style => view.style.clone(),
+                AssField::Actor => view.actor.clone(),
+                // B5 has not landed, so the panel cannot read these five back yet; the file's own
+                // bytes stand in for what it would show.
+                _ => raw_core(&session, 0, field),
+            })
+            .expect("a first row");
+        let patch = session
+            .apply(&set_field(0, field, &current), Run::New, now + APART)
+            .unwrap_or_else(|error| panic!("{field:?} must be committable: {error}"));
+        assert_eq!(patch.cues.len(), 0, "{field:?} changed a row");
+    }
+
+    assert!(!session.can_undo(), "no step was recorded");
+    assert!(!session.dirty(), "the document was never dirtied");
+    assert_eq!(session.revision(), 0, "the revision never moved");
+    assert_eq!(session.to_bytes(), original);
+}
+
+#[test]
+fn a_field_committed_as_whitespace_writes_nothing_however_often_it_is_committed() {
+    // The panel reads a field through the trim `field_core` applies, so a value that is only
+    // padding displays as empty. Written verbatim it landed outside the core and appended a byte
+    // and an undo step on every commit, which a combo committing on blur would do every time.
+    let mut session = session("ass/clean/basic.ass");
+    let original = fixture_bytes("ass/clean/basic.ass");
+    let now = Instant::now();
+
+    // Spaces only: a tab inside a value is refused outright (CF3.6), padding or not.
+    for (round, value) in [" ", "  ", "   ", "    "].into_iter().enumerate() {
+        let patch = session
+            .apply(
+                &set_field(0, AssField::Actor, value),
+                Run::New,
+                now + APART * (round as u32 + 1),
+            )
+            .unwrap_or_else(|error| panic!("round {round} must be committable: {error}"));
+        assert_eq!(patch.cues.len(), 0, "round {round} changed a row");
+        assert_eq!(
+            session.to_bytes(),
+            original,
+            "round {round} moved a byte of the file"
+        );
+    }
+
+    assert!(!session.can_undo(), "no step was recorded");
+    assert!(!session.dirty(), "the document was never dirtied");
+    assert_eq!(session.revision(), 0, "the revision never moved");
+
+    // The other half of the same rule: a value that has anything in it keeps its own padding,
+    // because a style may genuinely be named with one (C5.2).
+    session
+        .apply(
+            &set_field(0, AssField::Actor, "Bo "),
+            Run::New,
+            now + APART * 9,
+        )
+        .expect("a padded value is writable");
+    // On the file's own bytes, not through `raw_core`, which trims the space back off: that the
+    // panel cannot show the difference is W4's accepted consequence, but the file must hold it.
+    let bytes = String::from_utf8(session.to_bytes()).expect("the fixture is UTF-8");
+    assert!(
+        bytes.contains("Default,Bo ,0,0,0,"),
+        "the value's own trailing space was trimmed on the way out"
+    );
+}
+
+#[test]
+fn a_field_write_after_a_save_leaves_the_document_clean_when_undone() {
+    // CF4.3.
+    let mut session = session("ass/clean/basic.ass");
+    session.mark_saved();
+    session
+        .apply(
+            &set_field(0, AssField::Actor, "Ingrid"),
+            Run::New,
+            Instant::now(),
+        )
+        .expect("the Name field is declared");
+    assert!(session.dirty());
+    session.undo().expect("a step to undo").expect("a patch");
+    assert!(!session.dirty(), "undoing back to the save point is clean");
+}
+
+/// One field of one cue as the file spells it, trimmed the way a column renders it.
+fn raw_core(session: &EditSession, cue: usize, field: AssField) -> String {
+    let document = session.document();
+    let Some(sublore_formats::CueDetail::Ass(event)) =
+        document.cues().nth(cue).map(|cue| &cue.detail)
+    else {
+        panic!("cue {cue} is not an ASS event");
+    };
+    let Some(span) = event
+        .field_index(field)
+        .and_then(|at| event.fields.get(at).copied())
+    else {
+        panic!("cue {cue} declares no {field:?}");
+    };
+    document
+        .slice(span)
+        .trim_start_matches([' ', '\t'])
+        .trim_end_matches([' ', '\t', '\r'])
+        .to_owned()
 }

@@ -18,7 +18,7 @@ pub mod text;
 pub mod timecode;
 pub mod vtt;
 
-pub use cue::{AssEvent, AssEventKind, Cue, CueDetail, SrtCue, VttCue};
+pub use cue::{AssEvent, AssEventKind, AssField, Cue, CueDetail, SrtCue, VttCue};
 pub use document::{CoverageViolation, Segment, SegmentKind, SubtitleDocument, SubtitleFormat};
 pub use error::{ParseError, ParseErrorKind};
 pub use span::Span;

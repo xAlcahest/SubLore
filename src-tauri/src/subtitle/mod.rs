@@ -16,7 +16,7 @@ use sublore_edit::diff::{CuePatch, CueView};
 use sublore_edit::history::Run;
 use sublore_edit::plan::{self, Edit};
 use sublore_edit::session::EditSession;
-use sublore_formats::{parse, Newline, SubtitleDocument, SubtitleFormat};
+use sublore_formats::{parse, AssField, Newline, SubtitleDocument, SubtitleFormat};
 use sublore_io::atomic::save_with_backup;
 use sublore_io::backup::BackupStore;
 use tauri::{AppHandle, Manager, State};
@@ -224,6 +224,58 @@ pub async fn subtitle_set_texts(
 ) -> Result<CuePatchDto, SubtitleError> {
     let edits = edits.into_iter().map(|one| (one.cue, one.text)).collect();
     edited(&app, state.slot(), revision, Edit::SetTexts { edits }).await
+}
+
+/// Which ASS event field a write names. A closed list on the wire too: the text field is not on
+/// it, and no payload can spell it. See docs/ass-field-write-tasks.md W2.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AssFieldDto {
+    Style,
+    Actor,
+    Effect,
+    Layer,
+    MarginL,
+    MarginR,
+    MarginV,
+}
+
+impl From<AssFieldDto> for AssField {
+    fn from(field: AssFieldDto) -> Self {
+        match field {
+            AssFieldDto::Style => AssField::Style,
+            AssFieldDto::Actor => AssField::Actor,
+            AssFieldDto::Effect => AssField::Effect,
+            AssFieldDto::Layer => AssField::Layer,
+            AssFieldDto::MarginL => AssField::MarginL,
+            AssFieldDto::MarginR => AssField::MarginR,
+            AssFieldDto::MarginV => AssField::MarginV,
+        }
+    }
+}
+
+/// One committed field of one cue. A field the document cannot hold is refused rather than added,
+/// and the panel draws that control greyed instead of asking. See ass-field-write-tasks.md W5.
+#[tauri::command]
+pub async fn subtitle_set_field(
+    app: AppHandle,
+    state: State<'_, SubtitleState>,
+    revision: u64,
+    cue: usize,
+    field: AssFieldDto,
+    value: String,
+) -> Result<CuePatchDto, SubtitleError> {
+    edited(
+        &app,
+        state.slot(),
+        revision,
+        Edit::SetField {
+            cue,
+            field: field.into(),
+            value,
+        },
+    )
+    .await
 }
 
 #[tauri::command]
