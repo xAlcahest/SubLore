@@ -995,19 +995,11 @@ fn written_value(value: &str) -> &str {
     value
 }
 
+/// One rule, shared with the grid column that reads the same field back: a control that showed a
+/// value trimmed differently from the one a commit writes would commit something else.
+/// See styles-and-fields-tasks.md F3.
 fn field_core(document: &SubtitleDocument, span: Span) -> Span {
-    let raw = document.slice(span);
-    let lead = raw
-        .len()
-        .saturating_sub(raw.trim_start_matches([' ', '\t']).len());
-    let rest = raw.get(lead..).unwrap_or("");
-    let trail = rest
-        .len()
-        .saturating_sub(rest.trim_end_matches([' ', '\t', '\r']).len());
-    Span::new(
-        span.start.saturating_add(lead),
-        span.end.saturating_sub(trail),
-    )
+    sublore_formats::ass::trim_field(document.source().body(), span)
 }
 
 /// Whether the field holds an integer, and whether that integer may be negative: a margin may, a

@@ -64,7 +64,33 @@ fn round_trip(path: &Path, bytes: &[u8]) -> SubtitleDocument {
             );
         }
     }
+    // A declared style name is a span into this document, and it arrives trimmed, because the grid
+    // trims the style a row shows and a name that did not match would read as unknown.
+    // See styles-and-fields-tasks.md S2.
+    let body = document.source().body();
+    for (index, style) in document.ass_styles().iter().enumerate() {
+        let declared = body.get(style.name.range()).unwrap_or_else(|| {
+            panic!(
+                "{name}: style {index} spans {:?}, outside the body",
+                style.name
+            )
+        });
+        assert_eq!(
+            declared.trim_matches([' ', '\t', '\r']),
+            declared,
+            "{name}: style {index} still carries its padding"
+        );
+    }
     document
+}
+
+/// Every style name the document declares, in file order.
+fn style_names(document: &SubtitleDocument) -> Vec<String> {
+    document
+        .ass_styles()
+        .iter()
+        .map(|style| document.slice(style.name).to_owned())
+        .collect()
 }
 
 /// Parse one clean fixture by name, proving its round-trip on the way in.
@@ -371,4 +397,53 @@ fn a_file_that_ends_without_a_newline_is_still_tiled() {
         .expect("a parsed file has segments");
     assert_eq!(last.span.end, body.len());
     assert!(matches!(last.kind, SegmentKind::Cue(_)));
+}
+
+#[test]
+fn a_file_declares_the_styles_its_own_sections_name() {
+    // S6.1 to S6.4. `Sign Top` is declared with a trailing space and comes back without it.
+    assert_eq!(
+        style_names(&open("styles-many.ass")),
+        ["Default", "Sign Top", "Narrator Italic", "Flashback"]
+    );
+    assert_eq!(style_names(&open("ssa-v4.ssa")), ["Default"]);
+    assert_eq!(style_names(&open("non-latin.ass")), ["見出し", "Default"]);
+    assert_eq!(style_names(&open("unknown-sections.ass")), ["Default"]);
+    assert!(
+        style_names(&open("minimal-fields.ass")).is_empty(),
+        "a file with no styles section declares no styles"
+    );
+    assert!(style_names(&open("bom-lf.ass")).is_empty());
+}
+
+#[test]
+fn every_clean_fixture_declares_its_styles_and_still_round_trips_byte_for_byte() {
+    let clean = dirs("ass").clean;
+    let mut files = 0usize;
+    let mut with_styles = 0usize;
+    let mut declared = 0usize;
+    for (path, bytes) in fixtures(&clean, &EXTENSIONS, MIN_CLEAN) {
+        let document = round_trip(&path, &bytes);
+        assert_eq!(
+            document.to_bytes(),
+            bytes,
+            "{}: reading the styles must not move a byte",
+            path.display()
+        );
+        let names = style_names(&document);
+        files += 1;
+        declared += names.len();
+        with_styles += usize::from(!names.is_empty());
+    }
+    // Printed rather than guessed: `cargo test -- --nocapture` reports what this covered.
+    println!(
+        "styles: {files} clean ASS fixtures round-tripped, {with_styles} of them declare styles, \
+         {declared} styles read in all"
+    );
+    assert!(files >= MIN_CLEAN, "only {files} fixtures were read");
+    assert!(
+        with_styles >= 11,
+        "only {with_styles} fixtures declared a style"
+    );
+    assert!(declared >= 19, "only {declared} styles were read");
 }

@@ -29,12 +29,34 @@ export type CueRow = {
   style: string;
   /** The ASS `Name` (or `Actor`) field, under the same rule as `style`. */
   actor: string;
+  /** The ASS `Effect` field, under the same rule as `style`. */
+  effect: string;
+  /**
+   * The ASS `Layer` field as the file spells it, never as a number: "0000" stays "0000", and a
+   * value that is no integer at all stays itself. Empty means nothing to show, which is the answer
+   * both for a field the file does not declare and for one it declared and left blank;
+   * `declaredFields` is what tells those two apart.
+   */
+  layer: string;
+  /** The ASS `MarginL` field, under the same rule as `layer`. */
+  marginL: string;
+  /** The ASS `MarginR` field, under the same rule as `layer`. */
+  marginR: string;
+  /** The ASS `MarginV` field, under the same rule as `layer`. */
+  marginV: string;
+  /**
+   * Which of the seven fields this row's own `Format:` line declares. A control for a field that
+   * is not on this list is drawn greyed and never asks: the write would be refused. Empty for SRT
+   * and for VTT, so a row of either draws none of the seven.
+   */
+  declaredFields: AssFieldName[];
 };
 
 /**
  * The ASS event field `subtitle_set_field` writes. The text field is deliberately not on this
  * list: it is written through `subtitle_set_text`, and nothing else may name it.
- * A field the open document does not declare is refused, so its control is drawn greyed.
+ * A field the row does not declare is refused, so its control greys itself off `declaredFields`
+ * rather than asking and reading the refusal.
  */
 export type AssFieldName =
   "style" | "actor" | "effect" | "layer" | "marginL" | "marginR" | "marginV";

@@ -7,7 +7,7 @@
 //! a save. See BACKLOG.md M1.3.
 
 use crate::cue::{AssEvent, AssEventKind, AssField, Cue, CueDetail};
-use crate::document::{Segment, SegmentKind, SubtitleDocument, SubtitleFormat};
+use crate::document::{AssStyle, Segment, SegmentKind, SubtitleDocument, SubtitleFormat};
 use crate::error::{ParseError, ParseErrorKind};
 use crate::span::Span;
 use crate::text::SourceText;
@@ -16,6 +16,8 @@ use crate::timecode::{parse_timecode, Timecode};
 /// The section the scanner is inside.
 struct Section {
     is_events: bool,
+    /// A styles section, the only place a `Style:` line names a style. See [`is_styles_header`].
+    is_styles: bool,
     format: Option<FieldFormat>,
 }
 
@@ -27,6 +29,9 @@ struct FieldFormat {
     end_index: Option<usize>,
     style_index: Option<usize>,
     name_index: Option<usize>,
+    /// Where a styles section's `Format:` line puts `Name`. Not `name_index`, which also accepts
+    /// `Actor`: that spelling belongs to an event line and names no style.
+    style_name_index: Option<usize>,
     effect_index: Option<usize>,
     layer_index: Option<usize>,
     margin_l_index: Option<usize>,
@@ -39,8 +44,10 @@ struct FieldFormat {
 /// here.
 pub(crate) fn parse(source: SourceText) -> Result<SubtitleDocument, ParseError> {
     let mut segments: Vec<Segment> = Vec::new();
+    let mut styles: Vec<AssStyle> = Vec::new();
     let mut section = Section {
         is_events: false,
+        is_styles: false,
         format: None,
     };
     let mut blank: Option<Span> = None;
@@ -81,6 +88,7 @@ pub(crate) fn parse(source: SourceText) -> Result<SubtitleDocument, ParseError> 
             let name = rest.get(..close).unwrap_or("").trim_matches([' ', '\t']);
             section = Section {
                 is_events: name.eq_ignore_ascii_case("events"),
+                is_styles: is_styles_header(name),
                 format: None,
             };
             segments.push(Segment {
@@ -133,6 +141,12 @@ pub(crate) fn parse(source: SourceText) -> Result<SubtitleDocument, ParseError> 
                 if descriptor.eq_ignore_ascii_case("format") {
                     let names = source.body().get(remainder.range()).unwrap_or("");
                     section.format = Some(field_format(names, at));
+                // The line stays opaque metadata; only its name is read. See
+                // styles-and-fields-tasks.md S2.
+                } else if section.is_styles && descriptor.eq_ignore_ascii_case("style") {
+                    if let Some(name) = style_name(&source, section.format.as_ref(), remainder) {
+                        styles.push(AssStyle { name });
+                    }
                 }
                 segments.push(Segment {
                     span,
@@ -148,7 +162,73 @@ pub(crate) fn parse(source: SourceText) -> Result<SubtitleDocument, ParseError> 
             kind: SegmentKind::Blank,
         });
     }
-    Ok(SubtitleDocument::new(SubtitleFormat::Ass, source, segments))
+    Ok(SubtitleDocument::new(SubtitleFormat::Ass, source, segments).with_ass_styles(styles))
+}
+
+/// One field's own bytes without the padding around it: leading spaces and tabs, trailing spaces,
+/// tabs and a carriage return, which is what [`timecode_of`] drops from a timing field. Display and
+/// comparison only, and the file keeps every byte it had.
+///
+/// The one implementation: a grid column, a field write and a style name all trim by this rule, and
+/// a read that trimmed differently from the write would show one value and commit another.
+/// See styles-and-fields-tasks.md F3.
+pub fn trim_field(body: &str, span: Span) -> Span {
+    // The spans come from the parser's own field list, so a foreign one is a bug here, not input.
+    debug_assert!(body.get(span.range()).is_some(), "a field span must slice");
+    let raw = body.get(span.range()).unwrap_or("");
+    let lead = raw
+        .len()
+        .saturating_sub(raw.trim_start_matches([' ', '\t']).len());
+    let rest = raw.get(lead..).unwrap_or("");
+    let trail = rest
+        .len()
+        .saturating_sub(rest.trim_end_matches([' ', '\t', '\r']).len());
+    Span::new(
+        span.start.saturating_add(lead),
+        span.end.saturating_sub(trail),
+    )
+}
+
+/// The name a `Style:` line declares, at the index its own section's `Format:` line gives `Name`.
+///
+/// Split on every comma, with no field taking the rest of the line: a style line has no free text,
+/// so a line with too few fields simply has nothing at that index and names nothing, and a name
+/// holding a comma reads as the piece before it, which is all the format can express.
+/// See styles-and-fields-tasks.md S3.
+fn style_name(source: &SourceText, format: Option<&FieldFormat>, remainder: Span) -> Option<Span> {
+    let at = format?.style_name_index?;
+    let body = source.body();
+    let mut start = remainder.start;
+    for _ in 0..at {
+        start = find_comma(body, start, remainder.end)?.saturating_add(1);
+    }
+    let end = find_comma(body, start, remainder.end).unwrap_or(remainder.end);
+    let name = trim_field(body, Span::new(start, end));
+    // A line whose name field is empty declares no style a control could offer or match against.
+    (!name.is_empty()).then_some(name)
+}
+
+/// Whether a section header names a styles section, under any spacing a hand edit may leave in it:
+/// `[V4+ Styles]`, `[V4+Styles]` and `[V4 +  Styles]` are one section.
+///
+/// Only the style list hangs off this. It adds no cue, no segment and no error, so widening it
+/// cannot change what a file parses to, which is why the `events` header keeps its exact match.
+/// See styles-and-fields-tasks.md S2.
+fn is_styles_header(name: &str) -> bool {
+    squeezed_eq(name, "v4styles") || squeezed_eq(name, "v4+styles")
+}
+
+/// `name` equals `want` ignoring ASCII case and every ASCII space inside it. `want` carries none.
+fn squeezed_eq(name: &str, want: &str) -> bool {
+    let mut left = name.bytes().filter(|byte| !byte.is_ascii_whitespace());
+    let mut right = want.bytes();
+    loop {
+        match (left.next(), right.next()) {
+            (None, None) => return true,
+            (Some(one), Some(other)) if one.eq_ignore_ascii_case(&other) => continue,
+            _ => return false,
+        }
+    }
 }
 
 /// A line that holds nothing a reader would see. A lone `\r` is content elsewhere, but a line made
@@ -167,6 +247,7 @@ fn field_format(names: &str, offset: usize) -> FieldFormat {
     let mut end_index = None;
     let mut style_index = None;
     let mut name_index = None;
+    let mut style_name_index = None;
     let mut effect_index = None;
     let mut layer_index = None;
     let mut margin_l_index = None;
@@ -175,6 +256,10 @@ fn field_format(names: &str, offset: usize) -> FieldFormat {
     for (index, name) in names.split(',').enumerate() {
         count = index + 1;
         let name = name.trim_matches([' ', '\t', '\r']);
+        // A styles section names its style `Name` and never `Actor`. See styles-and-fields-tasks S2.
+        if style_name_index.is_none() && name.eq_ignore_ascii_case("name") {
+            style_name_index = Some(index);
+        }
         let slot = if name.eq_ignore_ascii_case("start") {
             &mut start_index
         } else if name.eq_ignore_ascii_case("end") {
@@ -211,6 +296,7 @@ fn field_format(names: &str, offset: usize) -> FieldFormat {
         end_index,
         style_index,
         name_index,
+        style_name_index,
         effect_index,
         layer_index,
         margin_l_index,
@@ -328,10 +414,11 @@ fn timecode_of(source: &SourceText, span: Span) -> Result<Timecode, ParseError> 
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{parse, trim_field};
     use crate::cue::{AssField, CueDetail};
     use crate::document::SegmentKind;
     use crate::error::ParseErrorKind;
+    use crate::span::Span;
     use crate::text::SourceText;
 
     fn document(text: &str) -> crate::document::SubtitleDocument {
@@ -641,6 +728,246 @@ mod tests {
                 .map(|(_, value)| value.clone()),
             Some(Some("0000".to_owned()))
         );
+    }
+
+    /// Every style name the document declares, in file order, as a control would be offered them.
+    fn styles(text: &str) -> Vec<String> {
+        let document = document(text);
+        document
+            .ass_styles()
+            .iter()
+            .map(|style| document.slice(style.name).to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn a_styles_section_names_every_style_it_declares_in_order() {
+        assert_eq!(
+            styles(concat!(
+                "[V4+ Styles]\n",
+                "Format: Name, Fontname, Fontsize, Bold, Italic, Underline, Encoding\n",
+                "Style: Default,Arial,54,0,0,0,1\n",
+                "Style: Sign,Arial,44,0,0,0,1\n",
+            )),
+            vec!["Default".to_owned(), "Sign".to_owned()]
+        );
+    }
+
+    #[test]
+    fn the_v4_dialect_is_read_through_its_own_format_line() {
+        // SSA v4 declares no Underline and puts TertiaryColour where v4+ puts OutlineColour. Read
+        // by name, the two dialects need no telling apart. See styles-and-fields-tasks.md S1.
+        assert_eq!(
+            styles(concat!(
+                "[V4 Styles]\n",
+                "Format: Name, Fontname, Fontsize, PrimaryColour, TertiaryColour, Bold, Encoding\n",
+                "Style: Default,Tahoma,24,16777215,65535,-1,0\n",
+            )),
+            vec!["Default".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_file_with_no_styles_section_declares_no_styles() {
+        assert!(styles(&one_event(
+            "Layer, Start, End, Text",
+            "0,0:00:01.00,0:00:02.00,Hello",
+        ))
+        .is_empty());
+    }
+
+    #[test]
+    fn two_styles_sections_are_read_in_file_order_each_through_its_own_format_line() {
+        assert_eq!(
+            styles(concat!(
+                "[V4 Styles]\n",
+                "Format: Name, Fontname\n",
+                "Style: Legacy,Tahoma\n",
+                "[V4+ Styles]\n",
+                "Format: Fontname, Name\n",
+                "Style: Arial,Modern\n",
+            )),
+            vec!["Legacy".to_owned(), "Modern".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_styles_format_line_that_names_no_name_contributes_nothing() {
+        // And a later section that does name one still contributes its own.
+        assert_eq!(
+            styles(concat!(
+                "[V4+ Styles]\n",
+                "Format: Fontname, Fontsize\n",
+                "Style: Arial,54\n",
+                "[V4 Styles]\n",
+                "Format: Name, Fontname\n",
+                "Style: Default,Arial\n",
+            )),
+            vec!["Default".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_style_line_before_any_format_line_names_nothing() {
+        assert!(styles(concat!(
+            "[V4+ Styles]\n",
+            "Style: Orphan,Arial\n",
+            "Format: Name, Fontname\n",
+        ))
+        .is_empty());
+    }
+
+    #[test]
+    fn a_style_line_outside_a_styles_section_is_not_a_style() {
+        assert!(styles(concat!(
+            "[Script Info]\n",
+            "Format: Name, Fontname\n",
+            "Style: NotHere,Arial\n",
+        ))
+        .is_empty());
+    }
+
+    #[test]
+    fn two_styles_with_the_same_name_are_both_listed() {
+        // Real files have this. Folding the second away would hide it from the translator.
+        assert_eq!(
+            styles(concat!(
+                "[V4+ Styles]\n",
+                "Format: Name, Fontname\n",
+                "Style: Default,Arial\n",
+                "Style: Default,Georgia\n",
+            )),
+            vec!["Default".to_owned(), "Default".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_wrong_field_count_is_read_as_far_as_it_goes_and_never_refused() {
+        // Too few fields to reach the name: skipped. Too many: the extra pieces are ignored. The
+        // file opens either way. See styles-and-fields-tasks.md S3.
+        assert_eq!(
+            styles(concat!(
+                "[V4+ Styles]\n",
+                "Format: Fontname, Fontsize, Name, Encoding\n",
+                "Style: Arial,54\n",
+                "Style: Georgia,48,Narrator,1,7,7,7\n",
+            )),
+            vec!["Narrator".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_style_name_holding_a_comma_reads_as_the_piece_before_it() {
+        // The format cannot express that name, so neither can the list: the piece before the comma
+        // is what a renderer matches on too.
+        assert_eq!(
+            styles(concat!(
+                "[V4+ Styles]\n",
+                "Format: Name, Fontname, Fontsize\n",
+                "Style: Sign, Top,Arial,54\n",
+            )),
+            vec!["Sign".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_style_name_is_trimmed_the_way_a_column_trims_a_field() {
+        // The load-bearing one: a name carried untrimmed would never match the style a row shows,
+        // and every style written with padding would read as unknown.
+        assert_eq!(
+            styles(concat!(
+                "[V4+ Styles]\n",
+                "Format: Name, Fontname\n",
+                "Style: \tSign Top ,Arial\n",
+            )),
+            vec!["Sign Top".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_style_line_that_names_nothing_declares_nothing() {
+        // Corrected after review: an entry with no name is a blank row in a list that exists to be
+        // offered and matched against. See styles-and-fields-tasks.md S3.
+        assert!(styles(concat!(
+            "[V4+ Styles]\n",
+            "Format: Name, Fontname\n",
+            "Style:\n",
+            "Style: ,Arial\n",
+            "Style:    ,Arial\n",
+        ))
+        .is_empty());
+    }
+
+    #[test]
+    fn a_styles_header_is_read_however_its_spaces_fall() {
+        // A hand edit may space the header differently; a section that is a styles section under
+        // any spacing is one. See styles-and-fields-tasks.md S2.
+        for header in [
+            "[V4+ Styles]",
+            "[V4+  Styles]",
+            "[V4+Styles]",
+            "[V4 + Styles]",
+            "[ v4+   styles ]",
+            "[V4 Styles]",
+            "[V4Styles]",
+        ] {
+            assert_eq!(
+                styles(&format!(
+                    "{header}\nFormat: Name, Fontname\nStyle: Default,Arial\n"
+                )),
+                vec!["Default".to_owned()],
+                "{header} is a styles section"
+            );
+        }
+    }
+
+    #[test]
+    fn a_section_that_is_not_a_styles_section_declares_nothing() {
+        // The widening in `is_styles_header` stops at spacing: a different name is a different
+        // section, and an unknown one travels through as metadata as it always has.
+        for header in ["[Styles]", "[V4++ Styles]", "[V5+ Styles]", "[Script Info]"] {
+            assert!(
+                styles(&format!(
+                    "{header}\nFormat: Name, Fontname\nStyle: Default,Arial\n"
+                ))
+                .is_empty(),
+                "{header} is not a styles section"
+            );
+        }
+    }
+
+    #[test]
+    fn a_styles_format_line_spelling_actor_names_no_style() {
+        // `Actor` is the events-line spelling of `Name` (G1). A styles section that borrows it
+        // declares nothing rather than naming a style through a synonym nobody chose for it.
+        assert!(styles(concat!(
+            "[V4+ Styles]\n",
+            "Format: Actor, Fontname\n",
+            "Style: ViaActor,Arial\n",
+        ))
+        .is_empty());
+        // And the events section keeps the synonym it has always had.
+        assert_eq!(
+            named_fields(&one_event(
+                "Layer, Start, End, Style, Actor, Text",
+                "0,0:00:01.00,0:00:02.00,Default,Ingrid,Hello",
+            )),
+            (Some("Default".to_owned()), Some("Ingrid".to_owned()))
+        );
+    }
+
+    #[test]
+    fn trimming_a_field_drops_the_padding_and_nothing_else() {
+        let body = ", 0 ,\ta\tb\t,  ,x\r";
+        let trimmed = |start: usize, end: usize| {
+            let span = trim_field(body, Span::new(start, end));
+            body.get(span.range()).expect("a trimmed span still slices")
+        };
+        assert_eq!(trimmed(1, 4), "0");
+        assert_eq!(trimmed(5, 10), "a\tb");
+        assert_eq!(trimmed(11, 13), "");
+        assert_eq!(trimmed(14, 16), "x");
+        assert_eq!(trimmed(0, 0), "");
     }
 
     #[test]
