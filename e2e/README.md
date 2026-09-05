@@ -206,7 +206,7 @@ Environment knobs:
 Neither entry point builds anything. A missing binary or fixture fails immediately with the command
 to run, because a silent four-minute rebuild inside a test hook is worse than a red line.
 
-## Three ways to make a run tell you nothing
+## Four ways to make a run tell you nothing
 
 Each of these produced a failure that meant nothing, and cost a re-run to find out.
 
@@ -222,6 +222,13 @@ Write the whole log to a file and grep it:
 xvfb-run -a -s "-screen 0 1920x1080x24" pnpm e2e > /tmp/run.log 2>&1
 grep -nE "✖|failing|Spec Files" /tmp/run.log
 ```
+
+**`cp` is aliased to `cp -i` in this shell and blocks on a prompt.** Overwriting a file that is
+already there stops and waits for a keypress nobody is going to press, so a step that looks like a
+copy is a step that has not happened, and the command after it runs against the old bytes. It cost
+ten minutes of a wall clock on 2026-09-05 and it has cost a whole mutation run before that, where
+the mutation was never applied and the green that followed meant nothing. Copy with
+`python3 -c "import shutil; shutil.copyfile(a, b)"` in anything that is not typed by hand.
 
 **`cargo test -p <crate>` stops at the first failing test binary.** A mutation that reddens
 `tests/mutation.rs` leaves `tests/session.rs` unrun, so the report undercounts what the mutation
@@ -280,6 +287,27 @@ nothing wrong in the tree. Nothing else in that script is retried, because every
 index is what the check exists to find: a package whose dependencies do not resolve, a binary that
 will not start, a library the bundler never declared. A retry there would turn a real failure into a
 slow one.
+
+## Running a Windows binary here
+
+Wine is not Windows and nothing run under it is a Windows behavioural verdict. What it is good for
+is the loader: a Windows build can be linked and started on this machine, and `WINEDEBUG=+loaddll`
+prints every library the loader looks for and every one it does not find. That answered N29 in one
+run, where the CI diagnostic had named the wrong symbol twice and each attempt cost fourteen minutes.
+
+```sh
+# Once: the pinned libmpv's own MinGW import library, the same archive install-libmpv-windows.ps1
+# fetches and the same checksum.
+7z x mpv-dev-x86_64-<tag>-git-<rev>.7z -o/tmp/mpv
+RUSTFLAGS="-L native=/tmp/mpv" cargo test -p sublore --lib --target x86_64-pc-windows-gnu --no-run
+# The DLLs the loader will look for beside the binary, which is where Windows looks first.
+cp target/x86_64-pc-windows-gnu/debug/WebView2Loader.dll target/x86_64-pc-windows-gnu/debug/deps/
+WINEDEBUG=+loaddll wine64 target/x86_64-pc-windows-gnu/debug/deps/sublore_lib-*.exe --list
+```
+
+The gnu linker keeps the whole graph and the MSVC linker CI uses keeps only what is referenced, so
+an import present here may be absent there and the reverse. It proves loading and linking, and the
+runner is still what says whether a job is green.
 
 ## Reading a CI run that looks stopped
 
