@@ -19,6 +19,10 @@ import { widestRow } from "../measure";
  */
 const UNSHRINKABLE_ROWS = [".menubar", ".toolbar", ".cuelist__head"];
 
+/** How many times a resize that left the page under the floor is answered before giving up. */
+const HOLD_ASKS = 5;
+const HOLD_GAP_MS = 50;
+
 /**
  * The narrowest the window may be, measured off the shell rather than written down, and carried to
  * the window every time it changes.
@@ -90,15 +94,27 @@ export function useWindowFloor(
     };
     carry();
     // A smallest size is a hint to whatever places the window, and not everything that places a
-    // window honours one. Asked again only while the window is under the floor, so a resize that
-    // respects it costs nothing and one that does not is put back once.
+    // window honours one. Asked again while the page still reads itself under the floor, because
+    // one ask can land before the window's own size has caught up with the resize that prompted
+    // it, and then nothing asks again. Bounded, so a window that cannot grow stops asking. See N32.
+    let live = true;
     const putBack = () => {
-      if (window.innerWidth < width) {
+      let left = HOLD_ASKS;
+      const again = () => {
+        if (!live || left <= 0 || window.innerWidth >= width) {
+          return;
+        }
+        left -= 1;
         carry();
-      }
+        window.setTimeout(again, HOLD_GAP_MS);
+      };
+      again();
     };
     window.addEventListener("resize", putBack);
-    return () => window.removeEventListener("resize", putBack);
+    return () => {
+      live = false;
+      window.removeEventListener("resize", putBack);
+    };
   }, [width]);
 
   return { width, failed: refused || missing };
