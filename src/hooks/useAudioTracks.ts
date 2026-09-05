@@ -8,16 +8,26 @@ export type AudioTrack = {
   ffIndex: number;
   lang: string | null;
   title: string | null;
+  /** mpv's own `selected` flag. Not where the mark comes from: see `currentId` below. */
   playing: boolean;
 };
+
+/** What both audio track commands answer: the list, and which track the panel is drawing. */
+export type AudioTrackList = {
+  tracks: AudioTrack[];
+  currentId: number | null;
+};
+
+/** No media open, and a media with no audio: neither has a track to mark. */
+const NO_TRACKS: AudioTrackList = { tracks: [], currentId: null };
 
 /**
  * The open media's audio tracks, and the one being drawn.
  *
- * Which track counts as current follows the same rule the peak job uses: the one mpv has marked, or
- * the first when it has marked none. mpv does not always have it marked on a loaded machine by the
- * time this is read (BACKLOG N14), and a menu that marks nothing while the panel draws stream one
- * would be telling two different stories about the same file.
+ * Which track that is comes from the backend, which is the side that knows: it is the stream the
+ * peak job was started on. Working it out here from mpv's `selected` flag meant the panel followed
+ * the track that was asked for while the menu followed a flag mpv had not set, so a switch drew one
+ * track and ticked another. See BACKLOG N14.
  */
 export function useAudioTracks(
   path: string | null,
@@ -27,7 +37,7 @@ export function useAudioTracks(
   currentId: number | null;
   switchTo: (id: number) => void;
 } {
-  const [tracks, setTracks] = useState<AudioTrack[]>([]);
+  const [list, setList] = useState<AudioTrackList>(NO_TRACKS);
 
   // Ready, not merely open: `video_open` sets the path and says Loading before mpv has the file,
   // and the backend refuses a track list at that point for the reason `loaded_path` gives. Asking
@@ -35,21 +45,21 @@ export function useAudioTracks(
   // stayed empty for the whole session.
   useEffect(() => {
     if (path === null || !ready) {
-      setTracks([]);
+      setList(NO_TRACKS);
       return;
     }
     let alive = true;
-    void invoke<AudioTrack[]>("audio_tracks")
+    void invoke<AudioTrackList>("audio_tracks")
       .then((listed) => {
         if (alive) {
-          setTracks(listed);
+          setList(listed);
         }
       })
       .catch(() => {
         // No tracks to offer is the same shape as a media with none, and the panel's own line
         // already says that. Nothing here is worth a second message.
         if (alive) {
-          setTracks([]);
+          setList(NO_TRACKS);
         }
       });
     return () => {
@@ -58,17 +68,16 @@ export function useAudioTracks(
   }, [path, ready]);
 
   const switchTo = useCallback((id: number) => {
-    void invoke<AudioTrack[]>("audio_switch_track", { id })
-      .then(setTracks)
+    void invoke<AudioTrackList>("audio_switch_track", { id })
+      .then(setList)
       .catch(() => {
         // The waveform's own failure line covers a switch that could not be peaked; a menu that
         // silently keeps its old mark would be the worse answer, so the list is asked again.
-        void invoke<AudioTrack[]>("audio_tracks")
-          .then(setTracks)
+        void invoke<AudioTrackList>("audio_tracks")
+          .then(setList)
           .catch(() => undefined);
       });
   }, []);
 
-  const current = tracks.find((track) => track.playing) ?? tracks[0];
-  return { tracks, currentId: current?.id ?? null, switchTo };
+  return { tracks: list.tracks, currentId: list.currentId, switchTo };
 }

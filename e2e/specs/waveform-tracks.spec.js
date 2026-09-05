@@ -258,7 +258,12 @@ describe("the Audio menu and the track that is drawn", () => {
 
     const items = await audioItems(toplevel);
     await closeMenu();
-    expect(items.map((item) => item.checked)).toEqual([false, true]);
+    // The label as well as the flag: `checked` on its own cannot tell a mark left on the old track
+    // from a list that came back in the other order.
+    expect(items.map((item) => ({ label: item.label, checked: item.checked }))).toEqual([
+      { label: "Japanese original", checked: false },
+      { label: "English dub", checked: true },
+    ]);
   });
 
   it("switches back to a track already peaked without reading the media again", async () => {
