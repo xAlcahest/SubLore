@@ -161,11 +161,13 @@ jobs:
           foreach ($to in @("target\debug", "target\debug\deps")) {
             Copy-Item "$env:LIBMPV_LIB_DIR\libmpv-2.dll" $to -Force
           }
-          # Found rather than assumed: the build script chooses the architecture directory, and a
-          # copy that silently found nothing is what this step exists to stop.
+          # The architecture is chosen, never taken as the first match: `webview2-com-sys` ships
+          # arm64, x64 and x86 side by side, `arm64` sorts first, and a first match put a 145984
+          # byte arm64 library beside an x64 binary on 2026-09-05, which loads no better than none.
+          # The runner is x64, so the directory is the guard: nothing here reads a size.
           $loader = Get-ChildItem -Recurse -Filter WebView2Loader.dll target\debug |
-            Where-Object { $_.DirectoryName -notlike "*\deps" } | Select-Object -First 1
-          if (-not $loader) { throw "no WebView2Loader.dll under target\debug to put beside the test binaries" }
+            Where-Object { $_.DirectoryName -like "*\x64" } | Select-Object -First 1
+          if (-not $loader) { throw "no x64 WebView2Loader.dll under target\debug to put beside the test binaries" }
           Copy-Item $loader.FullName target\debug\deps -Force
           Get-ChildItem target\debug\libmpv-2.dll, target\debug\deps\libmpv-2.dll, target\debug\deps\WebView2Loader.dll |
             ForEach-Object { "placed $($_.FullName) ($($_.Length) bytes)" }
