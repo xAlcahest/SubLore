@@ -270,6 +270,17 @@ taken. The check three tests further down had the right shape already, with a co
 this was a lesson the file had learned once and not applied twice. Same class as N26 above, and the
 same rule underneath both: a guard that cannot tell "not there" from "not there yet" is a race.
 
+## What is retried in CI, and what is never
+
+One thing is retried and it is named here so the list does not grow by habit: `apt-get update` in
+`.github/scripts/package-smoke.sh` and in the `package smoke (ubuntu)` container's own checkout
+step, three attempts fifteen seconds apart. An Ubuntu mirror caught halfway through a sync answers a
+`Packages.gz` one byte off the size it advertised, which took that job red on 2026-09-05 with
+nothing wrong in the tree. Nothing else in that script is retried, because everything below the
+index is what the check exists to find: a package whose dependencies do not resolve, a binary that
+will not start, a library the bundler never declared. A retry there would turn a real failure into a
+slow one.
+
 ## Reading a CI run that looks stopped
 
 Each check streams its output while it runs. `.github/scripts/e2e-check.sh` runs the check into

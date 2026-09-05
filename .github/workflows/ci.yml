@@ -540,7 +540,12 @@ jobs:
       # The image carries neither, and the checkout needs both.
       - name: Install what the checkout needs
         run: |
-          apt-get update
+          # The index alone is retried, for the mirror sync that took this job red on 2026-09-05.
+          for attempt in 1 2 3; do
+            apt-get update && break
+            [ "$attempt" = 3 ] && exit 1
+            sleep 15
+          done
           apt-get install -y --no-install-recommends ca-certificates git
 
       - name: Checkout
