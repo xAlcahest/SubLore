@@ -27,26 +27,6 @@ Sublore is verified by behaviour rather than by code review: what proves a chang
 - **Translation memory (pro):** exact + fuzzy matching over all lines in the project, across episodes.
 - Offline license check for pro modules (see §4).
 
-### Owner ruling 2026-09-05: the interface is a copy of the reference editor's, exactly
-
-**Sublore's shell replicates the reference editor's interface: where every control sits, what every
-control does, and how every gesture answers.** The same positions and the same behaviour, so a
-translator who already knows that editor sits down and works. This is a product decision and it is
-not open for narrowing.
-
-- **Behaviour and layout are copied; code is not.** The implementation is Sublore's own. Reading the
-  reference's source to learn what it does is directed by the owner. Its name never appears in this
-  repository, which `scripts/check-vocabulary.sh` enforces; call it the reference and cite it as
-  `docs/interface-spec.md` already does.
-- **A gap is work, not a question.** Anything that editor puts on screen, Sublore puts on screen,
-  unless §1's non-goals name it outright: karaoke, animation, diarization, cloud, mobile, and the
-  typesetting tools the 2026-09-03 ruling keeps out while keeping the inline styling controls in.
-  Where something is genuinely ambiguous, build the reference's behaviour and state the assumption.
-- **Positions count.** A control in the wrong panel, or in the right panel in the wrong order, is a
-  defect and is reported as one.
-- This ruling exists because the instruction was given several times and narrowed each time. It is
-  written down so it outlives whoever is holding it in their head.
-
 ### Explicit non-goals for v1 (do not build, do not scaffold "for later")
 - Karaoke, advanced ASS typesetting, animation.
 - Speaker diarization.
