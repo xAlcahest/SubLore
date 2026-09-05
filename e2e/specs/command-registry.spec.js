@@ -50,19 +50,27 @@ const DECLARED = [
   "edit-find",
   "edit-find-next",
   "edit-replace",
+  "time-prev-cue",
+  "time-next-cue",
   "time-start-to-playhead",
   "time-end-to-playhead",
   "video-to-cue-start",
   "video-to-cue-end",
   "edit-select-at-playhead",
+  "wave-play-selection",
+  "time-play-line",
+  "wave-stop",
+  "time-play-before",
+  "time-play-after",
+  "wave-play-first",
+  "wave-play-last",
+  "time-play-to-end",
+  "time-lead-in",
+  "time-lead-out",
   "time-start-earlier",
   "time-start-later",
   "time-end-earlier",
   "time-end-later",
-  "time-play-line",
-  "time-play-before",
-  "time-play-after",
-  "time-play-to-end",
   "subtitle-insert",
   "subtitle-delete",
   "subtitle-split",
@@ -70,6 +78,8 @@ const DECLARED = [
   "help-about",
   "video-toggle-subtitle-overlay",
   "view-waveform-panel",
+  "wave-center-on-cue",
+  "wave-toggle-autoscroll",
   "view-interface-scale-90",
   "view-interface-scale-100",
   "view-interface-scale-110",
@@ -490,8 +500,15 @@ describe("the command registry", () => {
       { route: "menu", id: "subtitle-insert", disabled: false },
       { route: "menu", id: "subtitle-delete", disabled: false },
       { route: "menu", id: "subtitle-merge", disabled: false },
-      // The four nudges need a cursor and nothing else, so a document alone ungreys them. The four
-      // playback commands beside them in Timing want a video too, and stay greyed here.
+      // Next line needs a row after the cursor's, which the fixture's three cues give it; Previous
+      // line stays greyed because the cursor opens on row 0 and there is nothing above it.
+      { route: "menu", id: "time-next-cue", disabled: false },
+      // The two leads move a boundary, so a cursor is all they want, exactly like the nudges below.
+      { route: "menu", id: "time-lead-in", disabled: false },
+      { route: "menu", id: "time-lead-out", disabled: false },
+      // The four nudges need a cursor and nothing else, so a document alone ungreys them. The
+      // playback commands beside them in Timing want a video too, and stay greyed here, and so do
+      // the waveform's own two in View: there are no peaks to centre on without one.
       { route: "menu", id: "time-start-earlier", disabled: false },
       { route: "menu", id: "time-start-later", disabled: false },
       { route: "menu", id: "time-end-earlier", disabled: false },

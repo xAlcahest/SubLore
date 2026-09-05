@@ -37,4 +37,14 @@
      the playhead. See M2.5. */
   --marker-start: #6fd08c;
   --marker-end: #e8935f;
+
+  /* The boundaries of every other line on the panel, in one muted colour: they say where the lines
+     either side of this one are, and they are not what a drag grabs (interface-spec 5.4). */
+  --marker-other: #6a6a7a;
+
+  /* The four background roles a stretch of the waveform can be in, plain being --bg-media and the
+     other three these. The higher role wins wherever two lines overlap. */
+  --wave-other: #16161d;
+  --wave-other-selected: #1d2430;
+  --wave-current: #26303d;
 }

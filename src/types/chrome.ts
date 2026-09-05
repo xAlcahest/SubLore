@@ -22,7 +22,10 @@ type CommandArea =
   // because interface-spec 3 gives it a menu title of its own and the two grow separately.
   | "time"
   | "video"
-  | "view";
+  | "view"
+  // The waveform panel's own controls: what it plays, where its window is, and what it follows.
+  // Its own area rather than part of `audio`, which is the open track and the tracks beside it.
+  | "wave";
 
 /** A command's registry key, and the only name any route ever holds it by. */
 export type CommandId = `${CommandArea}.${string}`;

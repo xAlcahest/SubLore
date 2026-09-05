@@ -71,6 +71,10 @@ const DEFAULT_INTERFACE_SCALE: f64 = 1.1;
 const MIN_INTERFACE_SCALE: f64 = 0.9;
 const MAX_INTERFACE_SCALE: f64 = 1.5;
 
+/// Whether the waveform follows the cursor's line. On, because a panel that does not follow the
+/// line shows the wrong part of the media on any file longer than its own window.
+const DEFAULT_WAVE_AUTOSCROLL: bool = true;
+
 /// What the panels were left at. Every field carries a default so a file written by an older
 /// version, or one a hand has been in, reads as far as it goes and defaults the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -80,6 +84,7 @@ pub struct Layout {
     pub video_fraction: f64,
     pub top_height: f64,
     pub interface_scale: f64,
+    pub wave_autoscroll: bool,
 }
 
 impl Default for Layout {
@@ -89,6 +94,7 @@ impl Default for Layout {
             video_fraction: DEFAULT_VIDEO_FRACTION,
             top_height: DEFAULT_TOP_HEIGHT,
             interface_scale: DEFAULT_INTERFACE_SCALE,
+            wave_autoscroll: DEFAULT_WAVE_AUTOSCROLL,
         }
     }
 }
@@ -138,6 +144,9 @@ impl Layout {
                 DEFAULT_INTERFACE_SCALE,
                 "an interface scale",
             ),
+            // A boolean has no range to fall outside of, so there is nothing to clamp and nothing
+            // to warn about: it is either in the file or it is the default.
+            wave_autoscroll: self.wave_autoscroll,
         }
     }
 }
@@ -336,6 +345,7 @@ mod tests {
             video_fraction: 0.62,
             top_height: 305.0,
             interface_scale: 1.25,
+            wave_autoscroll: false,
         };
         write_to(&path, left).expect("a layout written under the temp dir");
         assert_eq!(read_from(&path), left);
@@ -409,6 +419,48 @@ mod tests {
         );
     }
 
+    /// One field later again: a file S1 wrote has the scale but not the waveform's follow, and the
+    /// panel opens following the line rather than refusing to read the file.
+    #[test]
+    fn a_layout_written_before_the_waveform_followed_the_line_opens_following_it() {
+        let dir = TempDir::new("no-follow");
+        let path = dir.join(LAYOUT_FILE);
+        std::fs::write(
+            &path,
+            "{\"waveformHeight\": 200, \"videoFraction\": 0.5, \"topHeight\": 260, \"interfaceScale\": 1.25}",
+        )
+        .expect("a layout written before the follow toggle");
+        assert_eq!(
+            read_from(&path),
+            Layout {
+                waveform_height: 200.0,
+                video_fraction: 0.5,
+                top_height: 260.0,
+                interface_scale: 1.25,
+                wave_autoscroll: DEFAULT_WAVE_AUTOSCROLL,
+            }
+        );
+    }
+
+    /// The toggle is the one field with no range, so what it owes is that it survives the trip in
+    /// both positions rather than defaulting back to on.
+    #[test]
+    fn the_waveform_follow_survives_a_write_in_both_positions() {
+        let dir = TempDir::new("follow-both-ways");
+        let path = dir.join(LAYOUT_FILE);
+        for wanted in [false, true] {
+            write_to(
+                &path,
+                Layout {
+                    wave_autoscroll: wanted,
+                    ..Layout::default()
+                },
+            )
+            .expect("a layout under the temp dir");
+            assert_eq!(read_from(&path).wave_autoscroll, wanted);
+        }
+    }
+
     #[test]
     fn a_size_off_either_end_is_brought_back_into_range_rather_than_used() {
         let dir = TempDir::new("out-of-range");
@@ -459,6 +511,7 @@ mod tests {
                     video_fraction: broken,
                     top_height: broken,
                     interface_scale: broken,
+                    wave_autoscroll: DEFAULT_WAVE_AUTOSCROLL,
                 }
                 .sane(),
                 Layout::default(),
@@ -503,6 +556,7 @@ mod tests {
             video_fraction: 0.5,
             top_height: 260.0,
             interface_scale: 1.25,
+            wave_autoscroll: false,
         };
         write_to(&path, second).expect("the second layout");
         assert_eq!(read_from(&path), second);

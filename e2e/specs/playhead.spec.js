@@ -36,20 +36,31 @@ const INSIDE_SECOND = 6.5;
 
 /** Every item the Timing menu draws, in the order the menu lists them. */
 const TIMING_ITEMS = [
+  "time-prev-cue",
+  "time-next-cue",
   "time-start-to-playhead",
   "time-end-to-playhead",
   "video-to-cue-start",
   "video-to-cue-end",
   "edit-select-at-playhead",
+  "wave-play-selection",
   "time-play-line",
+  "wave-stop",
   "time-play-before",
   "time-play-after",
+  "wave-play-first",
+  "wave-play-last",
   "time-play-to-end",
+  "time-lead-in",
+  "time-lead-out",
   "time-start-earlier",
   "time-start-later",
   "time-end-earlier",
   "time-end-later",
 ];
+
+/** The one clicked below: it sends its command the moment it is asked, so a leak has a name. */
+const SENDS_ON_CLICK = "time-start-to-playhead";
 
 function dataHome() {
   const home = process.env.SUBLORE_E2E_DATA_HOME;
@@ -220,7 +231,7 @@ describe("the times follow the playhead", () => {
     }
 
     await watchCommands();
-    await clickElement(toplevel, `.menubar__item--${TIMING_ITEMS[0]}`);
+    await clickElement(toplevel, `.menubar__item--${SENDS_ON_CLICK}`);
     await browser.pause(500);
     // Nothing crossed the boundary, which is what "greyed" has to mean and not just how it looks.
     expect(await takeCommands()).toEqual([]);
