@@ -999,7 +999,7 @@ fn saved(outcome: sublore_io::atomic::SaveOutcome, dirty: bool) -> SubtitleSaved
     }
 }
 
-fn read_document(path: &Path) -> Result<SubtitleDocument, SubtitleError> {
+pub(crate) fn read_document(path: &Path) -> Result<SubtitleDocument, SubtitleError> {
     if path.as_os_str().is_empty() {
         return Err(SubtitleError::new(
             SubtitleErrorCode::InvalidPath,

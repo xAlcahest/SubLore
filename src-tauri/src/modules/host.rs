@@ -19,23 +19,26 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Mutex;
 use std::thread::ThreadId;
 
+use sublore_edit::diff::CueView;
 use sublore_edit::history::Run;
 use sublore_edit::plan::Edit;
 use sublore_edit::session::EditSession;
 use sublore_formats::SubtitleFormat;
 use sublore_module_api::{
-    SubloreCue, SubloreDocument, SubloreHitFn, SubloreHost, SubloreProposal, SubloreRowFn,
-    SubloreStr, SubloreValue, SubloreWorkFn, SUBLORE_ABI_MINOR, SUBLORE_ERR_BAD_STRING,
-    SUBLORE_ERR_DENIED, SUBLORE_ERR_NOTHING_OPEN, SUBLORE_ERR_NO_SUCH_CUE, SUBLORE_ERR_PANIC,
-    SUBLORE_ERR_STALE_REVISION, SUBLORE_ERR_STORAGE, SUBLORE_ERR_UNSUPPORTED,
+    SubloreCue, SubloreDocument, SubloreHitFn, SubloreHost, SubloreLine, SubloreLineFn,
+    SubloreProposal, SubloreRowFn, SubloreStr, SubloreValue, SubloreWorkFn, SUBLORE_ABI_MINOR,
+    SUBLORE_ERR_BAD_STRING, SUBLORE_ERR_DENIED, SUBLORE_ERR_NOTHING_OPEN, SUBLORE_ERR_NO_SUCH_CUE,
+    SUBLORE_ERR_PANIC, SUBLORE_ERR_STALE_REVISION, SUBLORE_ERR_STORAGE, SUBLORE_ERR_UNSUPPORTED,
     SUBLORE_ERR_UNWRITABLE_TEXT, SUBLORE_ERR_WRONG_THREAD, SUBLORE_FIND_OPTIONS,
     SUBLORE_FORMAT_ASS, SUBLORE_FORMAT_SRT, SUBLORE_FORMAT_VTT, SUBLORE_HOST_SIZE,
-    SUBLORE_LOG_DEBUG, SUBLORE_LOG_ERROR, SUBLORE_LOG_INFO, SUBLORE_LOG_WARN, SUBLORE_OK,
-    SUBLORE_PROPOSAL_SET_CUE_TEXT, SUBLORE_VALUE_BLOB, SUBLORE_VALUE_INT, SUBLORE_VALUE_NULL,
-    SUBLORE_VALUE_REAL, SUBLORE_VALUE_TEXT,
+    SUBLORE_LINE_FLAG_FILE_MISSING, SUBLORE_LOG_DEBUG, SUBLORE_LOG_ERROR, SUBLORE_LOG_INFO,
+    SUBLORE_LOG_WARN, SUBLORE_NO_CUE, SUBLORE_OK, SUBLORE_PROPOSAL_SET_CUE_TEXT,
+    SUBLORE_ROLE_SOURCE, SUBLORE_ROLE_TARGET, SUBLORE_VALUE_BLOB, SUBLORE_VALUE_INT,
+    SUBLORE_VALUE_NULL, SUBLORE_VALUE_REAL, SUBLORE_VALUE_TEXT,
 };
+use sublore_project::model::FileRole;
 use sublore_project::module_store::{self, Cell, OpenTransaction, StoreRefusal};
-use sublore_project::records::Project;
+use sublore_project::records::{self, Project};
 
 use crate::log;
 use crate::subtitle::error::{SubtitleError, SubtitleErrorCode};
@@ -326,7 +329,7 @@ pub fn table(ctx: &HostCtx) -> SubloreHost {
         progress: None,
         document: Some(host_document),
         cue_at: Some(host_cue_at),
-        for_each_line: None,
+        for_each_line: Some(host_for_each_line),
         propose: Some(host_propose),
         find: Some(host_find),
         db_run: Some(host_db_run),
@@ -772,6 +775,186 @@ fn returned(cell: &Cell) -> SubloreValue {
             },
         },
     }
+}
+
+/// The bits `for_each_line` has a meaning for.
+const SUBLORE_ROLES: u32 = SUBLORE_ROLE_SOURCE | SUBLORE_ROLE_TARGET;
+
+/// The interface's word for a role, or none for a role it has no bit for.
+///
+/// Media has none, and that is the interface saying what this walk is: lines of text. A media file
+/// asked for by a mask that cannot name it is a file this never opens.
+fn role_bit(role: FileRole) -> Option<u32> {
+    match role {
+        FileRole::Source => Some(SUBLORE_ROLE_SOURCE),
+        FileRole::Target => Some(SUBLORE_ROLE_TARGET),
+        FileRole::Media => None,
+    }
+}
+
+/// One line on its way to a module. Borrowed out of `cue`, which the caller keeps alive for the
+/// length of the push.
+fn line_of(
+    episode: &sublore_project::model::Episode,
+    role: u32,
+    index: usize,
+    cue: &CueView,
+) -> SubloreLine {
+    SubloreLine {
+        episode_id: episode.id,
+        ordinal: episode.ordinal,
+        role,
+        flags: 0,
+        index: index as u64,
+        cue: SubloreCue {
+            start_ms: cue.start_ms,
+            end_ms: cue.end_ms,
+            text: SubloreStr::borrowed(&cue.text),
+            is_comment: u8::from(cue.comment),
+            has_number: u8::from(cue.number.is_some()),
+            number: cue.number.unwrap_or(0),
+        },
+    }
+}
+
+/// The one push that stands in for a file that gave the walk nothing (§4.4).
+fn missing_line(episode: &sublore_project::model::Episode, role: u32) -> SubloreLine {
+    SubloreLine {
+        episode_id: episode.id,
+        ordinal: episode.ordinal,
+        role,
+        flags: SUBLORE_LINE_FLAG_FILE_MISSING,
+        // Two independent tells at the point the module is already reading: the flag and a index
+        // that is no index. A module that tests neither sees one empty line, which §4.4 names as
+        // the cost of not adding a second sink every module would have to implement.
+        index: SUBLORE_NO_CUE,
+        cue: SubloreCue {
+            start_ms: 0,
+            end_ms: 0,
+            text: SubloreStr::borrowed(""),
+            is_comment: 0,
+            has_number: 0,
+            number: 0,
+        },
+    }
+}
+
+/// Every cue of every attached file whose role is in `roles`, in episode order (§4.4).
+///
+/// # Safety
+/// `host` is the context pointer; `sink` and `on_line` are the module's own.
+unsafe extern "C" fn host_for_each_line(
+    host: *mut c_void,
+    roles: u32,
+    sink: *mut c_void,
+    on_line: SubloreLineFn,
+) -> i32 {
+    guarded(|| {
+        let Some(ctx) = (unsafe { ctx_of(host) }) else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Some(name) = ctx.name() else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Some(on_line) = on_line else {
+            return SUBLORE_ERR_UNSUPPORTED;
+        };
+        // An allowlist and not a mask, as `find`'s options are: a module asking for a role it is
+        // not getting would build its memory out of a subset it believes is the whole.
+        if roles & !SUBLORE_ROLES != 0 {
+            return SUBLORE_ERR_UNSUPPORTED;
+        }
+        let Some(held) = ctx.project() else {
+            return SUBLORE_ERR_NOTHING_OPEN;
+        };
+        // Safety: armed for this call on this thread, so the host holds the project lock for the
+        // whole of it. Shared, and nothing here writes.
+        let Some(project) = (unsafe { &*held }).as_ref() else {
+            return SUBLORE_ERR_NOTHING_OPEN;
+        };
+        // The open document, when there is one. Read on the same terms and for the same reason.
+        let open = ctx
+            .session()
+            .and_then(|held| unsafe { &*held }.as_ref())
+            .filter(|session| session.path().is_some());
+
+        let episodes = match records::episodes(project) {
+            Ok(episodes) => episodes,
+            Err(error) => {
+                log::warn!(
+                    "modules: {name} asked for every line and the episodes would not read: {error}"
+                );
+                return SUBLORE_ERR_STORAGE;
+            }
+        };
+
+        for episode in &episodes {
+            let files = match records::files(project, episode.id) {
+                Ok(files) => files,
+                Err(error) => {
+                    log::warn!(
+                        "modules: {name} asked for every line and episode {} would not read: {error}",
+                        episode.id
+                    );
+                    return SUBLORE_ERR_STORAGE;
+                }
+            };
+            for file in &files {
+                let Some(bit) = role_bit(file.role) else {
+                    continue;
+                };
+                if roles & bit == 0 {
+                    continue;
+                }
+
+                // The open document wins over its own bytes on disk: a memory built from stale
+                // bytes would disagree with what is on screen (§4.4).
+                let held = open.filter(|session| session.path() == Some(file.path.as_path()));
+                // Read into a binding that ends with this file, so the document is dropped before
+                // the next one is opened and peak memory is one file (§4.4).
+                let read = match held {
+                    Some(_) => None,
+                    None => match crate::subtitle::read_document(&file.path) {
+                        Ok(document) => Some(sublore_edit::diff::views(&document)),
+                        Err(error) => {
+                            // Any file that yields no lines arrives as the one missing push, with
+                            // the reason in the log: a walk that aborted for one moved file would
+                            // fail for the whole series (§4.4).
+                            log::info!(
+                                "modules: {name} gets one missing line for {}: {}",
+                                file.path.display(),
+                                error.detail
+                            );
+                            let line = missing_line(episode, bit);
+                            // Safety: the module's own function, given the sink it handed over,
+                            // inside the call it is already in.
+                            let answer = unsafe { on_line(sink, &line) };
+                            if answer != SUBLORE_OK {
+                                return answer;
+                            }
+                            continue;
+                        }
+                    },
+                };
+                let cues: &[CueView] = match (&read, held) {
+                    (Some(views), _) => views,
+                    (None, Some(session)) => session.views(),
+                    // Unreachable: `read` is none only where `held` is some.
+                    (None, None) => &[],
+                };
+
+                for (index, cue) in cues.iter().enumerate() {
+                    let line = line_of(episode, bit, index, cue);
+                    // Safety: as above. Every string points into `cues`, which outlives this push.
+                    let answer = unsafe { on_line(sink, &line) };
+                    if answer != SUBLORE_OK {
+                        return answer;
+                    }
+                }
+            }
+        }
+        SUBLORE_OK
+    })
 }
 
 /// One statement of the module's own, bound and run on the host's connection (§4.7).
@@ -1983,5 +2166,283 @@ mod tests {
         drop(_entered);
         drop(open);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Every line of every episode, H7.
+
+    /// An SRT with `count` cues, written where the test puts it.
+    fn srt(dir: &std::path::Path, name: &str, count: u32) -> std::path::PathBuf {
+        let mut text = String::new();
+        for n in 1..=count {
+            let start = n * 1000;
+            text.push_str(&format!(
+                "{n}\n00:00:0{}, 000 --> 00:00:0{}, 000\n{name} line {n}\n\n",
+                start / 1000,
+                (start / 1000) + 1
+            ));
+        }
+        // The times above are written with the space a parser will not take, so they are fixed here
+        // rather than fought with in a format string.
+        let text = text.replace(", 000", ",000");
+        let path = dir.join(name);
+        std::fs::write(&path, text).expect("the fixture should be writable");
+        path
+    }
+
+    /// What the walk pushed. Named on both sides, like every other sink here.
+    #[derive(Default)]
+    struct Lines {
+        seen: Vec<(i64, u32, u32, u32, u64, String)>,
+        answer: i32,
+        pushes: usize,
+    }
+
+    unsafe extern "C" fn collect_line(sink: *mut c_void, line: *const SubloreLine) -> i32 {
+        let lines = unsafe { &mut *sink.cast::<Lines>() };
+        let line = unsafe { &*line };
+        let text = unsafe { line.cue.text.as_str() }
+            .unwrap_or("<not text>")
+            .to_owned();
+        lines.seen.push((
+            line.episode_id,
+            line.ordinal,
+            line.role,
+            line.flags,
+            line.index,
+            text,
+        ));
+        lines.pushes += 1;
+        lines.answer
+    }
+
+    fn walk(ctx: &HostCtx, roles: u32, lines: &mut Lines) -> i32 {
+        unsafe {
+            host_for_each_line(
+                pointer(ctx),
+                roles,
+                (lines as *mut Lines).cast(),
+                Some(collect_line),
+            )
+        }
+    }
+
+    /// A project with two episodes, each with a source and a target, in ordinal order.
+    fn series(
+        tag: &str,
+    ) -> (
+        std::path::PathBuf,
+        Option<sublore_project::records::Project>,
+    ) {
+        let (dir, mut open) = project(tag);
+        let project = open.as_mut().expect("the project was just made");
+        for (ordinal, title) in [(1u32, "One"), (2, "Two")] {
+            // The ordinal is the database's own, one past the highest, so the two added here come
+            // back as 1 and 2 and the walk's order is the series order.
+            let episode =
+                sublore_project::records::add_episode(project, title, std::time::SystemTime::now())
+                    .expect("an episode should be addable");
+            assert_eq!(episode.ordinal, ordinal);
+            for (role, name) in [
+                (FileRole::Source, format!("e{ordinal}-source.srt")),
+                (FileRole::Target, format!("e{ordinal}-target.srt")),
+            ] {
+                let path = srt(&dir, &name, 2);
+                sublore_project::records::attach_file(
+                    project,
+                    episode.id,
+                    role,
+                    &path,
+                    std::time::SystemTime::now(),
+                )
+                .expect("a file should be attachable");
+            }
+        }
+        (dir, open)
+    }
+
+    #[test]
+    fn every_cue_of_every_attached_file_arrives_in_episode_order() {
+        let (dir, mut open) = series("walk");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+
+        let mut lines = Lines::default();
+        assert_eq!(walk(&ctx, SUBLORE_ROLES, &mut lines), SUBLORE_OK);
+        // Two episodes, two files each, two cues each. Ordinals never go backwards, and inside one
+        // episode the source's cues all arrive before the target's.
+        assert_eq!(lines.pushes, 8);
+        let order: Vec<(u32, u32, u64)> = lines
+            .seen
+            .iter()
+            .map(|(_, ordinal, role, _, index, _)| (*ordinal, *role, *index))
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                (1, SUBLORE_ROLE_SOURCE, 0),
+                (1, SUBLORE_ROLE_SOURCE, 1),
+                (1, SUBLORE_ROLE_TARGET, 0),
+                (1, SUBLORE_ROLE_TARGET, 1),
+                (2, SUBLORE_ROLE_SOURCE, 0),
+                (2, SUBLORE_ROLE_SOURCE, 1),
+                (2, SUBLORE_ROLE_TARGET, 0),
+                (2, SUBLORE_ROLE_TARGET, 1),
+            ]
+        );
+        // And the text is the file's own, so the walk read the file rather than counting rows.
+        assert_eq!(lines.seen[0].5, "e1-source.srt line 1");
+        assert!(lines.seen.iter().all(|line| line.3 == 0));
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_mask_takes_only_the_roles_it_names_and_refuses_a_bit_it_does_not() {
+        let (dir, mut open) = series("mask");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+
+        let mut lines = Lines::default();
+        assert_eq!(walk(&ctx, SUBLORE_ROLE_TARGET, &mut lines), SUBLORE_OK);
+        assert_eq!(lines.pushes, 4);
+        assert!(lines.seen.iter().all(|line| line.2 == SUBLORE_ROLE_TARGET));
+
+        // A bit this build has no meaning for is refused rather than masked off: a module asking
+        // for a role it is not getting would take a subset for the whole.
+        let mut ignored = Lines::default();
+        assert_eq!(
+            walk(&ctx, SUBLORE_ROLES | 4, &mut ignored),
+            SUBLORE_ERR_UNSUPPORTED
+        );
+        assert_eq!(ignored.pushes, 0);
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_that_is_gone_is_one_push_in_its_own_place_and_the_walk_finishes() {
+        let (dir, mut open) = series("gone");
+        // Episode one's target, removed between attaching and reading, which is what a user moving
+        // a file does.
+        std::fs::remove_file(dir.join("e1-target.srt")).expect("the fixture was there");
+
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+        let mut lines = Lines::default();
+        assert_eq!(walk(&ctx, SUBLORE_ROLES, &mut lines), SUBLORE_OK);
+
+        // Seven: the two cues that file would have pushed are one push instead, and everything
+        // after it still arrives.
+        assert_eq!(lines.pushes, 7);
+        let missing: Vec<usize> = lines
+            .seen
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| line.3 == SUBLORE_LINE_FLAG_FILE_MISSING)
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(
+            missing,
+            vec![2],
+            "it did not arrive where its lines would have"
+        );
+        let (episode, ordinal, role, _, index, text) = &lines.seen[2];
+        assert_eq!(
+            (*ordinal, *role, *index),
+            (1, SUBLORE_ROLE_TARGET, SUBLORE_NO_CUE)
+        );
+        assert_eq!(text, "", "the cue beside the flag is empty");
+        assert!(*episode > 0);
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_open_document_wins_over_its_own_bytes_on_disk() {
+        let (dir, mut open) = series("open");
+        let path = dir.join("e1-source.srt");
+        // The session holds an edit nobody has saved, which is the whole point: a memory built from
+        // the file would disagree with what is on screen.
+        let document = crate::subtitle::read_document(&path).expect("the fixture parses");
+        let mut session = Some(EditSession::open(path.clone(), document));
+        session
+            .as_mut()
+            .expect("just made")
+            .apply(
+                &Edit::SetText {
+                    cue: 0,
+                    text: "unsaved".into(),
+                },
+                Run::New,
+                std::time::Instant::now(),
+            )
+            .expect("the edit applies");
+
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default()
+                .with_session(Some(&mut session))
+                .with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+        let mut lines = Lines::default();
+        assert_eq!(walk(&ctx, SUBLORE_ROLES, &mut lines), SUBLORE_OK);
+        assert_eq!(lines.pushes, 8, "the open file was streamed, not skipped");
+        assert_eq!(lines.seen[0].5, "unsaved");
+        // And only that file: the other three are still read off disk.
+        assert_eq!(lines.seen[2].5, "e1-target.srt line 1");
+
+        drop(_entered);
+        drop(session);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_sink_that_stops_the_line_walk_is_answered_with_its_own_code() {
+        let (dir, mut open) = series("stopwalk");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+        let mut lines = Lines {
+            answer: SUBLORE_ERR_CANCELLED,
+            ..Lines::default()
+        };
+        assert_eq!(walk(&ctx, SUBLORE_ROLES, &mut lines), SUBLORE_ERR_CANCELLED);
+        assert_eq!(lines.pushes, 1, "a module that wants one line pays for one");
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_walk_with_no_project_lent_says_nothing_is_open() {
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(NAME, Lent::default());
+        let mut lines = Lines::default();
+        assert_eq!(
+            walk(&ctx, SUBLORE_ROLES, &mut lines),
+            SUBLORE_ERR_NOTHING_OPEN
+        );
+        assert_eq!(lines.pushes, 0);
     }
 }
