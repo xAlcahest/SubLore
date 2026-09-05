@@ -200,6 +200,13 @@ async function editRow(toplevel, position, text) {
     timeout: 20000,
     message: `row ${position} to hold ${JSON.stringify(text)}`,
   });
+  // The row drawing the new text and the document being unsaved are two different states, and the
+  // checks below turn on the second: a run that finishes before it lands replaces a document
+  // nothing had to ask about. Waited for rather than assumed. See BACKLOG.md N25.
+  await waitFor(async () => ((await present(".statusbar__dirty")) ? true : null), {
+    timeout: 20000,
+    message: `the document to be unsaved after row ${position} was committed`,
+  });
 }
 
 async function waitForSubtitleStatus(prefix) {
