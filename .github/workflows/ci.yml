@@ -167,6 +167,20 @@ jobs:
         shell: pwsh
         run: .github/scripts/windows-entrypoint.ps1
 
+      # The script above reads names and reports a DLL as ordinal-only when it parsed none from it,
+      # which hides an ordinal import sitting beside named ones in the same DLL. This is the raw
+      # table for the one binary that will not load, so the next failure has the whole of it.
+      - name: The library test binary's own import table (Windows, only when the tests failed)
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $tools = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64" | Select-Object -Last 1
+          $exe = Get-ChildItem target\debug\deps\sublore_lib-*.exe | Select-Object -First 1
+          if (-not $exe) { Write-Host "no sublore_lib test binary on disk"; exit 0 }
+          & (Join-Path $tools.FullName "dumpbin.exe") /imports $exe.FullName
+
   e2e:
     name: e2e smoke (ubuntu)
     runs-on: ubuntu-latest
