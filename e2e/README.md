@@ -420,6 +420,13 @@ Added by M2.3: `.subbar__save`, `.subbar__undo`, `.subbar__redo`, `.subbar__disc
 `.cuelist__row--comment`, `.cuelist__pos`, `.cuelist__number`, `.cuelist__start`, `.cuelist__end`,
 `.cuelist__text`, `.cuelist__editor`, `.cuelist__empty`
 
+Added by the Style and Actor columns (grid-columns-tasks.md G3): `.cuelist__style`,
+`.cuelist__actor`, `.cuelist__headcell--style`, `.cuelist__headcell--actor` and
+`.cuelist__headcell--text`. The first four are absent from the head and from every row whenever no
+cue in the list fills that column, which is what `grid-columns.spec.js` reads a missing cell for;
+the fifth is on the head's text cell always, and carries the rule that makes the head and a row
+divide the row's slack the same way.
+
 Added by T6, the cursor and the selection as two states (decision 5): `.cuelist__row--active` is the
 cursor and `.cuelist__row--selected` is now membership in the selection, not the one row that was
 both. `aria-selected` on a row is membership, `aria-activedescendant` on `.cuelist` names the cursor

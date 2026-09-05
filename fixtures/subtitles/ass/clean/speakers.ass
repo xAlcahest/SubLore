@@ -1,0 +1,20 @@
+[Script Info]
+Title: Nordic Line - Episode 04
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: 1920
+PlayResY: 1080
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,54,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,60,60,40,1
+Style: Sign,Arial,44,&H00FFD070,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,7,40,40,40,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.34,0:00:03.98,Default,Ingrid,0,0,0,,The harbour freezes over by December.
+Dialogue: 0,0:00:04.12,0:00:06.75,Default,Marek,0,0,0,,Then we sail in November, like everyone else.
+Dialogue: 0,0:00:07.00,0:00:09.44,Sign,,0,0,0,,HARBOUR OFFICE - CLOSED
+Dialogue: 0,0:00:09.60,0:00:12.10,Default,Ingrid,0,0,0,,Everyone else lost a boat last year.
+Dialogue: 0,0:00:12.30,0:00:14.90,Default,,0,0,0,,Nobody signed for the delivery.

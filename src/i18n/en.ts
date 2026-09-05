@@ -340,6 +340,10 @@ export const en = {
       start: "Start",
       end: "End",
       text: "Text",
+      /** The ASS style the event names. Drawn only when some cue in the list names one. */
+      style: "Style",
+      /** The ASS `Name` field, under the word every editor puts on the column. */
+      actor: "Actor",
       /** Characters per second, the reading rate of decision 24 A8. */
       cps: "CPS",
       /** Marks an ASS Comment: event, which a player does not draw. */

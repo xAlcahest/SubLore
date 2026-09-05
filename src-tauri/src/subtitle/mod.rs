@@ -78,6 +78,10 @@ pub struct CueRowDto {
     pub comment: bool,
     /// The cue's own number, when the file wrote one. Never renumbered.
     pub number: Option<u32>,
+    /// The ASS style the event names, empty when the format declares none and for SRT and VTT.
+    pub style: String,
+    /// The ASS `Name` (or `Actor`) field, under the same rule.
+    pub actor: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -984,6 +988,8 @@ fn rows(views: &[CueView]) -> Vec<CueRowDto> {
             text: view.text.clone(),
             comment: view.comment,
             number: view.number,
+            style: view.style.clone(),
+            actor: view.actor.clone(),
         })
         .collect()
 }

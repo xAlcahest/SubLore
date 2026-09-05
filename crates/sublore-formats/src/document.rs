@@ -260,6 +260,8 @@ mod tests {
                 descriptor: Span::new(0, 0),
                 fields: Vec::new(),
                 text_field: 0,
+                style_field: None,
+                name_field: None,
             }),
         }
     }

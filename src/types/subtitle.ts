@@ -25,6 +25,10 @@ export type CueRow = {
   comment: boolean;
   /** The cue's own number, when the file wrote one. Never renumbered. */
   number: number | null;
+  /** The ASS style the event names. Empty string when there is none, never null. */
+  style: string;
+  /** The ASS `Name` (or `Actor`) field, under the same rule as `style`. */
+  actor: string;
 };
 
 export type SubtitleOpened = {

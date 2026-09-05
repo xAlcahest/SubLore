@@ -96,7 +96,27 @@
   color: var(--ink-warn);
 }
 
-.cuelist__text {
+/* Both take the row's slack and neither declares a width, which is what keeps them out of the
+   window's own floor: src/measure.ts counts a growing child at its declared `min-width`. The
+   `max-width` is what keeps the text column the wide one once there is slack to share. */
+.cuelist__style,
+.cuelist__headcell--style,
+.cuelist__actor,
+.cuelist__headcell--actor {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 9rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The head's own text cell shares this rule. With Text the only growing cell it could shrink-wrap
+   its label and still start where a row's text started, because everything before it was a fixed
+   width; with two growing cells in front of it, a head and a row that do not divide the slack by
+   the same rule stop lining up. */
+.cuelist__text,
+.cuelist__headcell--text {
   flex: 1;
   min-width: 0;
   overflow: hidden;

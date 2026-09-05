@@ -25,6 +25,8 @@ struct FieldFormat {
     count: usize,
     start_index: Option<usize>,
     end_index: Option<usize>,
+    style_index: Option<usize>,
+    name_index: Option<usize>,
     offset: usize,
 }
 
@@ -151,12 +153,14 @@ fn is_blank(text: &str) -> bool {
         .all(|byte| matches!(byte, b' ' | b'\t' | b'\r'))
 }
 
-/// Read a `Format:` field list: how many fields events in this section carry, and which two hold
-/// the timing. The first `Start` and the first `End` win.
+/// Read a `Format:` field list: how many fields events in this section carry, which two hold the
+/// timing, and which two the grid names a line by. The first match of each name wins.
 fn field_format(names: &str, offset: usize) -> FieldFormat {
     let mut count = 0;
     let mut start_index = None;
     let mut end_index = None;
+    let mut style_index = None;
+    let mut name_index = None;
     for (index, name) in names.split(',').enumerate() {
         count = index + 1;
         let name = name.trim_matches([' ', '\t', '\r']);
@@ -164,12 +168,22 @@ fn field_format(names: &str, offset: usize) -> FieldFormat {
             start_index = Some(index);
         } else if end_index.is_none() && name.eq_ignore_ascii_case("end") {
             end_index = Some(index);
+        } else if style_index.is_none() && name.eq_ignore_ascii_case("style") {
+            style_index = Some(index);
+        // The specification calls the speaker `Name`; tools that follow the column label write
+        // `Actor`. One condition, so the first field named either wins. See grid-columns-tasks G1.
+        } else if name_index.is_none()
+            && (name.eq_ignore_ascii_case("name") || name.eq_ignore_ascii_case("actor"))
+        {
+            name_index = Some(index);
         }
     }
     FieldFormat {
         count,
         start_index,
         end_index,
+        style_index,
+        name_index,
         offset,
     }
 }
@@ -223,8 +237,16 @@ fn event_cue(
             descriptor,
             fields,
             text_field,
+            style_field: before_text(format.style_index, text_field),
+            name_field: before_text(format.name_index, text_field),
         }),
     })
+}
+
+/// A declared field only names something readable while it sits before the text, which takes the
+/// rest of the line: anything at or past it is inside the dialogue. See grid-columns-tasks.md G1.
+fn before_text(index: Option<usize>, text_field: usize) -> Option<usize> {
+    index.filter(|at| *at < text_field)
 }
 
 /// The first comma in `body[from..to]`, as an absolute offset. Commas are ASCII, so the offset is
@@ -260,6 +282,7 @@ fn timecode_of(source: &SourceText, span: Span) -> Result<Timecode, ParseError> 
 #[cfg(test)]
 mod tests {
     use super::parse;
+    use crate::cue::CueDetail;
     use crate::document::SegmentKind;
     use crate::error::ParseErrorKind;
     use crate::text::SourceText;
@@ -275,6 +298,28 @@ mod tests {
     fn kind(text: &str) -> ParseErrorKind {
         let source = SourceText::from_bytes(text.as_bytes()).expect("valid utf-8 fixture");
         parse(source).expect_err("the fixture must be refused").kind
+    }
+
+    /// The style and the name the first event declares, as the parser hands them: the file's own
+    /// bytes, so a field written first on the line still carries the space after the descriptor.
+    /// `None` where the section's `Format:` line names no such field before the text.
+    fn named_fields(text: &str) -> (Option<String>, Option<String>) {
+        let document = document(text);
+        let cue = document.cues().next().expect("the fixture holds one event");
+        let CueDetail::Ass(event) = &cue.detail else {
+            panic!("an ASS cue carries an ASS event");
+        };
+        let read = |at: Option<usize>| {
+            at.map(|at| {
+                let span = *event.fields.get(at).expect("a declared field is in range");
+                document.slice(span).to_owned()
+            })
+        };
+        (read(event.style_field), read(event.name_field))
+    }
+
+    fn one_event(format_line: &str, event_line: &str) -> String {
+        format!("[Events]\nFormat: {format_line}\nDialogue: {event_line}\n")
     }
 
     #[test]
@@ -326,6 +371,92 @@ mod tests {
                 "Dialogue: 0,0:00:01.00abc,0:00:02.00,Hello\n",
             )),
             ParseErrorKind::BadTimecode
+        );
+    }
+
+    #[test]
+    fn the_specifications_own_field_order_names_the_style_and_the_speaker() {
+        assert_eq!(
+            named_fields(&one_event(
+                "Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+                "0,0:00:01.00,0:00:02.00,Sign,Ingrid,0,0,0,,Hello",
+            )),
+            (Some("Sign".to_owned()), Some("Ingrid".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_shuffled_field_order_names_them_where_it_put_them() {
+        // The check that fails the moment either index is read as a position (G1). The speaker is
+        // the first field on the line, so its raw span still holds the descriptor's own space.
+        assert_eq!(
+            named_fields(&one_event(
+                "Name, Layer, Start, End, MarginL, MarginR, MarginV, Effect, Style, Text",
+                "Ingrid,0,0:00:01.00,0:00:02.00,0,0,0,,Sign,Hello",
+            )),
+            (Some("Sign".to_owned()), Some(" Ingrid".to_owned()))
+        );
+    }
+
+    #[test]
+    fn the_speaker_field_spelled_actor_is_read_too() {
+        assert_eq!(
+            named_fields(&one_event(
+                "Layer, Start, End, Style, Actor, MarginL, MarginR, MarginV, Effect, Text",
+                "0,0:00:01.00,0:00:02.00,Sign,Ingrid,0,0,0,,Hello",
+            )),
+            (Some("Sign".to_owned()), Some("Ingrid".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_format_line_declaring_both_spellings_takes_whichever_comes_first() {
+        // One condition covers the two spellings, so order on the line decides and nothing else
+        // does. Written down because a split into two branches would change it silently (G1).
+        assert_eq!(
+            named_fields(&one_event(
+                "Layer, Start, End, Style, Name, Actor, Text",
+                "0,0:00:01.00,0:00:02.00,Sign,Ingrid,Marek,Hello",
+            )),
+            (Some("Sign".to_owned()), Some("Ingrid".to_owned()))
+        );
+        assert_eq!(
+            named_fields(&one_event(
+                "Layer, Start, End, Style, Actor, Name, Text",
+                "0,0:00:01.00,0:00:02.00,Sign,Ingrid,Marek,Hello",
+            )),
+            (Some("Sign".to_owned()), Some("Ingrid".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_format_line_declaring_neither_names_neither() {
+        assert_eq!(
+            named_fields(&one_event(
+                "Layer, Start, End, Text",
+                "0,0:00:01.00,0:00:02.00,Hello",
+            )),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn a_field_declared_after_the_text_names_nothing() {
+        // The last declared field takes the rest of the line, so an index that reaches it is
+        // pointing into the dialogue and must not be handed to a column.
+        assert_eq!(
+            named_fields(&one_event(
+                "Layer, Start, End, Text, Style",
+                "0,0:00:01.00,0:00:02.00,Hello and, in passing,Default",
+            )),
+            (None, None)
+        );
+        assert_eq!(
+            named_fields(&one_event(
+                "Layer, Start, End, Text, Name",
+                "0,0:00:01.00,0:00:02.00,Hello and, in passing,Ingrid",
+            )),
+            (None, None)
         );
     }
 }
