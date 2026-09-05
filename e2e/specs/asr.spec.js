@@ -478,12 +478,21 @@ describe("transcription", () => {
     await waitForUnsavedDialogGone("Discard");
     focusWindow(toplevel.id);
 
-    await waitForSubtitleStatus(`SRT · ${cues.length} cues · LF`);
+    // Waited for on the offer going away, and not on the status line. The document being replaced
+    // here is itself a transcription of the same run, so it has the same cue count and the same
+    // format, and `SRT · N cues · LF` reads identical before and after: a guard that cannot tell
+    // "not there" from "not there yet". The offer only goes when the result has been taken.
+    await waitFor(
+      async () => ((await propertyOf(".asrbar__use", "tagName")) === null ? true : null),
+      {
+        timeout: 20000,
+        message: "the offer to go away, which is what taking the result does to it",
+      },
+    );
+    expect(await textOf(".statusbar__document")).toContain(`SRT · ${cues.length} cues · LF`);
     expect(words(await rowText(1))).toBe(words(cues[0].text));
     expect(await present(".statusbar__dirty")).toBe(true);
     expect(await propertyOf(".toolbar__file-save", "disabled")).toBe(false);
-    // The result is the document now, so there is nothing left to offer.
-    expect(await propertyOf(".asrbar__use", "tagName")).toBe(null);
     // Discarding drops edits that were never on disk; it never rewrites the file they came from.
     expect(readFileSync(path.join(saveDir, "from-transcription.srt")).equals(saved)).toBe(true);
   });
