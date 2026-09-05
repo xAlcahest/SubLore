@@ -233,9 +233,16 @@ fn a_transaction_that_fails_leaves_the_table_as_it_was() {
     )
     .expect("its own table");
 
-    let refused: Result<(), StoreRefusal> = transaction(&mut project, MODULE, |conn| {
-        conn.execute_batch("INSERT INTO m_fixture_notes (id) VALUES (7)")
-            .expect("the row goes in inside the transaction");
+    let refused: Result<(), StoreRefusal> = transaction(&mut project, MODULE, |open| {
+        // Safety: the handle is used inside the body it was handed to and never kept.
+        unsafe {
+            open.run(
+                "INSERT INTO m_fixture_notes (id) VALUES (7)",
+                &[],
+                &mut nowhere,
+            )
+        }
+        .expect("the row goes in inside the transaction");
         // The module's own work refuses, which is the only thing that decides a rollback.
         Err(StoreRefusal::Failed("the module gave up".into()))
     });
@@ -271,9 +278,16 @@ fn a_transaction_that_succeeds_keeps_what_it_wrote() {
     )
     .expect("its own table");
 
-    transaction(&mut project, MODULE, |conn| {
-        conn.execute_batch("INSERT INTO m_fixture_notes (id) VALUES (7)")
-            .map_err(|error| StoreRefusal::Failed(error.to_string()))
+    transaction(&mut project, MODULE, |open| {
+        // Safety: used inside the body it was handed to.
+        unsafe {
+            open.run(
+                "INSERT INTO m_fixture_notes (id) VALUES (7)",
+                &[],
+                &mut nowhere,
+            )
+        }
+        .map(|_| ())
     })
     .expect("the transaction commits");
 
@@ -300,16 +314,39 @@ fn a_transaction_that_succeeds_keeps_what_it_wrote() {
 #[test]
 fn a_transaction_holds_a_module_to_its_own_tables_too() {
     let (dir, mut project) = project("guarded");
-    let refused: Result<(), StoreRefusal> = transaction(&mut project, MODULE, |conn| {
-        match conn.execute_batch("PRAGMA user_version = 99") {
-            Ok(()) => Ok(()),
-            Err(error) => Err(StoreRefusal::Failed(error.to_string())),
-        }
+    let refused: Result<(), StoreRefusal> = transaction(&mut project, MODULE, |open| {
+        // Safety: used inside the body it was handed to.
+        unsafe { open.run("PRAGMA user_version = 99", &[], &mut nowhere) }.map(|_| ())
     });
-    assert!(
-        refused.is_err(),
+    assert_eq!(
+        refused,
+        Err(StoreRefusal::Denied),
         "the guard is off inside a transaction, so a module could write the core's own version"
     );
+    episodes(&project).expect("the core reads its own tables afterwards");
+    drop(project);
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn every_statement_of_a_transaction_is_guarded_not_just_the_first() {
+    let (dir, mut project) = project("stillguarded");
+    let refused: Result<(), StoreRefusal> = transaction(&mut project, MODULE, |open| {
+        // Safety: both are used inside the body the handle was given to.
+        unsafe {
+            open.run(
+                "CREATE TABLE m_fixture_notes (id INTEGER)",
+                &[],
+                &mut nowhere,
+            )
+        }
+        .expect("its own table, inside the transaction");
+        // The second statement is the one that matters: a guard installed and taken off around
+        // each statement would leave this one running under the core's own rules.
+        unsafe { open.run("SELECT id FROM episodes", &[], &mut nowhere) }.map(|_| ())
+    });
+    assert_eq!(refused, Err(StoreRefusal::Denied));
+
     episodes(&project).expect("the core reads its own tables afterwards");
     drop(project);
     fs::remove_dir_all(&dir).ok();

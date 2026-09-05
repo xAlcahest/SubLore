@@ -24,14 +24,18 @@ use sublore_edit::plan::Edit;
 use sublore_edit::session::EditSession;
 use sublore_formats::SubtitleFormat;
 use sublore_module_api::{
-    SubloreCue, SubloreDocument, SubloreHitFn, SubloreHost, SubloreProposal, SubloreStr,
-    SUBLORE_ABI_MINOR, SUBLORE_ERR_BAD_STRING, SUBLORE_ERR_DENIED, SUBLORE_ERR_NOTHING_OPEN,
-    SUBLORE_ERR_NO_SUCH_CUE, SUBLORE_ERR_PANIC, SUBLORE_ERR_STALE_REVISION,
-    SUBLORE_ERR_UNSUPPORTED, SUBLORE_ERR_UNWRITABLE_TEXT, SUBLORE_ERR_WRONG_THREAD,
-    SUBLORE_FIND_OPTIONS, SUBLORE_FORMAT_ASS, SUBLORE_FORMAT_SRT, SUBLORE_FORMAT_VTT,
-    SUBLORE_HOST_SIZE, SUBLORE_LOG_DEBUG, SUBLORE_LOG_ERROR, SUBLORE_LOG_INFO, SUBLORE_LOG_WARN,
-    SUBLORE_OK, SUBLORE_PROPOSAL_SET_CUE_TEXT,
+    SubloreCue, SubloreDocument, SubloreHitFn, SubloreHost, SubloreProposal, SubloreRowFn,
+    SubloreStr, SubloreValue, SubloreWorkFn, SUBLORE_ABI_MINOR, SUBLORE_ERR_BAD_STRING,
+    SUBLORE_ERR_DENIED, SUBLORE_ERR_NOTHING_OPEN, SUBLORE_ERR_NO_SUCH_CUE, SUBLORE_ERR_PANIC,
+    SUBLORE_ERR_STALE_REVISION, SUBLORE_ERR_STORAGE, SUBLORE_ERR_UNSUPPORTED,
+    SUBLORE_ERR_UNWRITABLE_TEXT, SUBLORE_ERR_WRONG_THREAD, SUBLORE_FIND_OPTIONS,
+    SUBLORE_FORMAT_ASS, SUBLORE_FORMAT_SRT, SUBLORE_FORMAT_VTT, SUBLORE_HOST_SIZE,
+    SUBLORE_LOG_DEBUG, SUBLORE_LOG_ERROR, SUBLORE_LOG_INFO, SUBLORE_LOG_WARN, SUBLORE_OK,
+    SUBLORE_PROPOSAL_SET_CUE_TEXT, SUBLORE_VALUE_BLOB, SUBLORE_VALUE_INT, SUBLORE_VALUE_NULL,
+    SUBLORE_VALUE_REAL, SUBLORE_VALUE_TEXT,
 };
+use sublore_project::module_store::{self, Cell, OpenTransaction, StoreRefusal};
+use sublore_project::records::Project;
 
 use crate::log;
 use crate::subtitle::error::{SubtitleError, SubtitleErrorCode};
@@ -62,6 +66,25 @@ struct InFlight {
     /// The pointer is valid for exactly as long as this record is armed, which [`Entered`] ties to
     /// the borrow it was made from.
     session: Option<*mut Option<EditSession>>,
+    /// The project the host locked before making this call, or none when none is open.
+    ///
+    /// Lent on the same terms as the session and for a different reason: the connection under it is
+    /// `Send` and not `Sync`, so the lock is what keeps two threads off one connection, and holding
+    /// it across the call is what lets a module's own transaction stay open while its body runs.
+    ///
+    /// **Nothing in this process takes this lock and the session's in the other order**, which is
+    /// what stops the pair deadlocking. `crate::project` never reaches the session and
+    /// `crate::subtitle` never reaches the project; the two meet here and nowhere else.
+    project: Option<*mut Option<Project>>,
+    /// The name this module's own tables are prefixed with, or none when its file name yields no id
+    /// the storage will accept. None costs it its storage and never gives it another module's.
+    storage: Option<String>,
+    /// The transaction this module has open, while it has one.
+    ///
+    /// A statement made from inside a transaction runs through this and not through the project
+    /// above, for two reasons that both have to hold: the transaction already installed the guard
+    /// for the whole of its body, and it already holds the only mutable borrow of the project.
+    open: Option<OpenTransaction>,
     /// What the module changed during this call, in the order it changed it.
     ///
     /// A module proposes one cue at a time and may propose more than once, and each one is an edit
@@ -89,15 +112,16 @@ impl HostCtx {
 
     /// Arm the context for one call into the module named `name`, on this thread.
     ///
-    /// `session` is the host's own locked session, lent for the call. The returned guard borrows it
-    /// for its own lifetime, so the lock cannot be released while the record still names it, and
-    /// the guard disarms on drop, so a body that returns early or panics leaves the context closed
-    /// behind it.
-    pub fn enter<'a>(
-        &'a self,
-        name: &str,
-        session: Option<&'a mut Option<EditSession>>,
-    ) -> Entered<'a> {
+    /// `lent` is what the host locked before making the call. The returned guard borrows all of it
+    /// for its own lifetime, so no lock can be released while the record still names what it
+    /// guards, and the guard disarms on drop, so a body that returns early or panics leaves the
+    /// context closed behind it.
+    pub fn enter<'a>(&'a self, name: &str, lent: Lent<'a>) -> Entered<'a> {
+        let Lent {
+            session,
+            project,
+            storage,
+        } = lent;
         // Recovered rather than refused: nothing but this assignment runs under this lock, so a
         // poisoning could only come from a panic elsewhere, and refusing for ever afterwards would
         // cost every later module call for a fault that is not in them.
@@ -109,6 +133,9 @@ impl HostCtx {
             thread: std::thread::current().id(),
             name: name.to_owned(),
             session: session.map(|held| held as *mut Option<EditSession>),
+            project: project.map(|held| held as *mut Option<Project>),
+            storage,
+            open: None,
             proposed: Vec::new(),
         });
         Entered {
@@ -147,6 +174,42 @@ impl HostCtx {
         .flatten()
     }
 
+    /// The project lent to the call the caller is inside, as a pointer, on the same terms and for
+    /// the same reason as [`HostCtx::session`].
+    fn project(&self) -> Option<*mut Option<Project>> {
+        self.with(|call| {
+            (call.thread == std::thread::current().id())
+                .then_some(call.project)
+                .flatten()
+        })
+        .flatten()
+    }
+
+    /// The prefix this module's own tables live under, or none when it has no usable id.
+    fn storage(&self) -> Option<String> {
+        self.with(|call| {
+            (call.thread == std::thread::current().id())
+                .then(|| call.storage.clone())
+                .flatten()
+        })
+        .flatten()
+    }
+
+    /// The transaction this module has open, or none.
+    fn open(&self) -> Option<OpenTransaction> {
+        self.with(|call| {
+            (call.thread == std::thread::current().id())
+                .then_some(call.open)
+                .flatten()
+        })
+        .flatten()
+    }
+
+    /// Note the transaction now open, or that the one that was is finished.
+    fn set_open(&self, open: Option<OpenTransaction>) {
+        self.record(|call| call.open = open);
+    }
+
     /// Change the record, holding the lock for the change and nothing else.
     fn record<R>(&self, write: impl FnOnce(&mut InFlight) -> R) -> Option<R> {
         self.call.lock().ok()?.as_mut().map(write)
@@ -167,14 +230,51 @@ impl Default for HostCtx {
     }
 }
 
-/// Safety: the record holds a raw pointer, which is what costs `HostCtx` its automatic marker
+/// Safety: the record holds raw pointers, which is what costs `HostCtx` its automatic marker
 /// traits, and sharing the context across threads is exactly what it is for: a module that calls
-/// from a thread of its own has to reach a refusal rather than a missing symbol. The pointer is
-/// dereferenced only after the thread comparison in [`HostCtx::session`] has passed, and that
-/// comparison fails on every thread but the one the record was armed from, so no second thread can
-/// ever reach the session through it.
+/// from a thread of its own has to reach a refusal rather than a missing symbol. Every one of them
+/// is dereferenced only after the thread comparison in the reader that hands it out has passed, and
+/// that comparison fails on every thread but the one the record was armed from, so no second thread
+/// can ever reach the session, the project or an open transaction through them.
 unsafe impl Send for HostCtx {}
 unsafe impl Sync for HostCtx {}
+
+/// What the host locks before a call into a module and lends it for the length of that call.
+///
+/// A value rather than a list of arguments, so a caller adding one more thing to lend cannot leave
+/// an old call site quietly lending less than it holds.
+#[derive(Default)]
+pub struct Lent<'a> {
+    session: Option<&'a mut Option<EditSession>>,
+    project: Option<&'a mut Option<Project>>,
+    storage: Option<String>,
+}
+
+impl<'a> Lent<'a> {
+    /// The open document, locked by the caller for the whole of the call.
+    ///
+    /// Takes an option, because a caller whose own lock was poisoned has a session it holds and
+    /// cannot lend, and that is not the same thing as a caller with nothing to lend.
+    pub fn with_session(mut self, session: Option<&'a mut Option<EditSession>>) -> Self {
+        self.session = session;
+        self
+    }
+
+    /// The open project and the prefix this module's own tables live under.
+    ///
+    /// The two together, because a project with no id to reach it by is a project no module may
+    /// touch: `storage` is what every statement is held inside, so lending one without the other
+    /// would be lending storage nobody can name.
+    pub fn with_project(
+        mut self,
+        project: &'a mut Option<Project>,
+        storage: Option<String>,
+    ) -> Self {
+        self.project = Some(project);
+        self.storage = storage;
+        self
+    }
+}
 
 /// One armed call. Disarms the context when it goes.
 ///
@@ -183,9 +283,9 @@ unsafe impl Sync for HostCtx {}
 #[must_use = "the gate is armed only while this guard is alive"]
 pub struct Entered<'a> {
     ctx: &'a HostCtx,
-    /// The session borrow the record holds a pointer to. Nothing reads this field: it is what stops
-    /// the caller from releasing the lock while the record still names it.
-    borrowed: PhantomData<&'a mut Option<EditSession>>,
+    /// The borrows the record holds pointers to. Nothing reads this field: it is what stops the
+    /// caller from releasing a lock while the record still names what it guards.
+    borrowed: PhantomData<(&'a mut Option<EditSession>, &'a mut Option<Project>)>,
 }
 
 impl Entered<'_> {
@@ -229,8 +329,8 @@ pub fn table(ctx: &HostCtx) -> SubloreHost {
         for_each_line: None,
         propose: Some(host_propose),
         find: Some(host_find),
-        db_run: None,
-        db_transaction: None,
+        db_run: Some(host_db_run),
+        db_transaction: Some(host_db_transaction),
         panel_begin: None,
         panel_row: None,
         panel_end: None,
@@ -577,6 +677,260 @@ unsafe extern "C" fn host_find(
     })
 }
 
+/// What a refusal from the store means to a module.
+fn storage_code(refusal: &StoreRefusal) -> i32 {
+    match refusal {
+        StoreRefusal::Denied => SUBLORE_ERR_DENIED,
+        // The host refused to run it rather than the statement failing, which is what `DENIED`
+        // says: nothing behind the semicolon was prepared, let alone executed (§4.7).
+        StoreRefusal::MoreThanOneStatement => SUBLORE_ERR_DENIED,
+        StoreRefusal::Failed(_) => SUBLORE_ERR_STORAGE,
+    }
+}
+
+/// The parameters a module bound, read out of its own array.
+///
+/// # Safety
+/// `params` points at `count` readable values for this call, or is null when `count` is zero. Every
+/// string among them points at bytes valid for this call.
+unsafe fn bound(params: *const SubloreValue, count: usize) -> Result<Vec<Cell>, i32> {
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    if params.is_null() {
+        return Err(SUBLORE_ERR_BAD_STRING);
+    }
+    let given = unsafe { std::slice::from_raw_parts(params, count) };
+    given
+        .iter()
+        .map(|value| match value.kind {
+            SUBLORE_VALUE_NULL => Ok(Cell::Null),
+            SUBLORE_VALUE_INT => Ok(Cell::Int(value.i)),
+            SUBLORE_VALUE_REAL => Ok(Cell::Real(value.f)),
+            SUBLORE_VALUE_TEXT => {
+                unsafe { value.s.as_str() }.map(|text| Cell::Text(text.to_owned()))
+            }
+            SUBLORE_VALUE_BLOB => Ok(Cell::Blob(unsafe { blob(value.s) }.to_vec())),
+            // A kind this build has no meaning for is refused rather than guessed at: a parameter
+            // read as the wrong type is a statement that runs and answers the wrong thing.
+            _ => Err(SUBLORE_ERR_UNSUPPORTED),
+        })
+        .collect()
+}
+
+/// The bytes of a blob, which are not a string and are not validated as one.
+///
+/// # Safety
+/// `bytes.ptr` points at `bytes.len` readable bytes for this call, or is null when the length is
+/// zero.
+unsafe fn blob<'a>(bytes: SubloreStr) -> &'a [u8] {
+    if bytes.len == 0 || bytes.ptr.is_null() {
+        return &[];
+    }
+    unsafe { std::slice::from_raw_parts(bytes.ptr, bytes.len) }
+}
+
+/// One cell on its way back to a module. Borrowed out of `cell`, which the caller keeps alive for
+/// the length of the push.
+fn returned(cell: &Cell) -> SubloreValue {
+    let empty = SubloreStr {
+        ptr: std::ptr::null(),
+        len: 0,
+    };
+    match cell {
+        Cell::Null => SubloreValue {
+            kind: SUBLORE_VALUE_NULL,
+            i: 0,
+            f: 0.0,
+            s: empty,
+        },
+        Cell::Int(number) => SubloreValue {
+            kind: SUBLORE_VALUE_INT,
+            i: *number,
+            f: 0.0,
+            s: empty,
+        },
+        Cell::Real(number) => SubloreValue {
+            kind: SUBLORE_VALUE_REAL,
+            i: 0,
+            f: *number,
+            s: empty,
+        },
+        Cell::Text(text) => SubloreValue {
+            kind: SUBLORE_VALUE_TEXT,
+            i: 0,
+            f: 0.0,
+            s: SubloreStr::borrowed(text),
+        },
+        Cell::Blob(bytes) => SubloreValue {
+            kind: SUBLORE_VALUE_BLOB,
+            i: 0,
+            f: 0.0,
+            s: SubloreStr {
+                ptr: bytes.as_ptr(),
+                len: bytes.len(),
+            },
+        },
+    }
+}
+
+/// One statement of the module's own, bound and run on the host's connection (§4.7).
+///
+/// # Safety
+/// `host` is the context pointer; `sql` and every string among `params` point at bytes valid for
+/// this call; `sink` and `on_row` are the module's own.
+unsafe extern "C" fn host_db_run(
+    host: *mut c_void,
+    sql: SubloreStr,
+    params: *const SubloreValue,
+    param_count: usize,
+    sink: *mut c_void,
+    on_row: SubloreRowFn,
+) -> i32 {
+    guarded(|| {
+        let Some(ctx) = (unsafe { ctx_of(host) }) else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Some(name) = ctx.name() else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Ok(sql) = (unsafe { sql.as_str() }) else {
+            return SUBLORE_ERR_BAD_STRING;
+        };
+        let params = match unsafe { bound(params, param_count) } {
+            Ok(params) => params,
+            Err(code) => return code,
+        };
+        // What the module's own sink answered, which ends the walk the way `find`'s does.
+        let mut answer = SUBLORE_OK;
+        let mut push = |cells: &[Cell]| {
+            let Some(on_row) = on_row else {
+                return true;
+            };
+            let returned: Vec<SubloreValue> = cells.iter().map(returned).collect();
+            // Safety: the module's own function, given the sink it handed over, inside the call it
+            // is already in. Every string points into `cells`, which outlives this push.
+            answer = unsafe { on_row(sink, returned.as_ptr(), returned.len()) };
+            answer == SUBLORE_OK
+        };
+
+        let ran = if let Some(open) = ctx.open() {
+            // Inside the module's own transaction: that call holds the only mutable borrow of the
+            // project and already installed the guard for the whole of its body, so the statement
+            // goes through the handle rather than borrowing the project a second time.
+            //
+            // Safety: the handle is read out of the record, which the transaction clears before it
+            // returns, so it is only ever reached while that call is still on this stack.
+            unsafe { open.run(sql, &params, &mut push) }
+        } else {
+            let Some(held) = ctx.project() else {
+                return SUBLORE_ERR_NOTHING_OPEN;
+            };
+            // Safety: armed for this call on this thread, so the host holds the project lock for
+            // the whole of it, and no transaction is open, so nothing else borrows it right now.
+            let Some(project) = (unsafe { &*held }).as_ref() else {
+                return SUBLORE_ERR_NOTHING_OPEN;
+            };
+            // No id is no storage, never storage under a name nobody checked: the guard holds a
+            // module inside `m_<id>_*` and there is no prefix to hold this one inside.
+            //
+            // **After the project and not before it**, because a module told it was denied when
+            // there is simply nothing open would read that as its own id being refused, which is
+            // permanent, and stop asking. Nothing open is the condition that goes away.
+            let Some(id) = ctx.storage() else {
+                log::warn!(
+                    "modules: {name} has no usable storage id, so its statement was refused"
+                );
+                return SUBLORE_ERR_DENIED;
+            };
+            module_store::run(project, &id, sql, &params, &mut push)
+        };
+
+        match ran {
+            Ok(_) => answer,
+            Err(refusal) => {
+                if let StoreRefusal::Failed(detail) = &refusal {
+                    log::warn!("modules: {name} ran a statement that failed: {detail}");
+                }
+                storage_code(&refusal)
+            }
+        }
+    })
+}
+
+/// The module's own work, inside one IMMEDIATE transaction (§4.7).
+///
+/// # Safety
+/// `host` is the context pointer, and `work` is the module's own function, called with `work_ctx`
+/// unchanged.
+unsafe extern "C" fn host_db_transaction(
+    host: *mut c_void,
+    work_ctx: *mut c_void,
+    work: SubloreWorkFn,
+) -> i32 {
+    guarded(|| {
+        let Some(ctx) = (unsafe { ctx_of(host) }) else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Some(name) = ctx.name() else {
+            return SUBLORE_ERR_WRONG_THREAD;
+        };
+        let Some(work) = work else {
+            log::warn!("modules: {name} asked for a transaction with no body");
+            return SUBLORE_ERR_UNSUPPORTED;
+        };
+        // Refused rather than attempted. SQLite has savepoints and this interface does not expose
+        // them, so a transaction inside a transaction would be one the host cannot account for.
+        if ctx.open().is_some() {
+            log::warn!("modules: {name} asked for a transaction inside one it already had open");
+            return SUBLORE_ERR_DENIED;
+        }
+        let Some(held) = ctx.project() else {
+            return SUBLORE_ERR_NOTHING_OPEN;
+        };
+        // Safety: armed for this call on this thread, so the host holds the project lock for the
+        // whole of it, and no transaction is open, so this is the only borrow.
+        let Some(project) = (unsafe { &mut *held }).as_mut() else {
+            return SUBLORE_ERR_NOTHING_OPEN;
+        };
+        // After the project, for the reason `host_db_run` writes out.
+        let Some(id) = ctx.storage() else {
+            log::warn!("modules: {name} has no usable storage id, so its transaction was refused");
+            return SUBLORE_ERR_DENIED;
+        };
+
+        // The module's own code, kept out here so a rollback can still answer with it rather than
+        // with the host's word for "the body said no".
+        let mut answered = SUBLORE_OK;
+        let outcome = module_store::transaction(project, &id, |open| {
+            ctx.set_open(Some(open));
+            // Safety: the module's own function, given the context it handed over, inside the call
+            // it is already in.
+            answered = unsafe { work(work_ctx) };
+            ctx.set_open(None);
+            if answered == SUBLORE_OK {
+                Ok(())
+            } else {
+                Err(StoreRefusal::Failed(format!(
+                    "the module's own work reported {answered}"
+                )))
+            }
+        });
+        match outcome {
+            Ok(()) => SUBLORE_OK,
+            // Its own refusal, and the rollback already happened: it hears what it said, not what
+            // the host called it.
+            Err(_) if answered != SUBLORE_OK => answered,
+            Err(refusal) => {
+                if let StoreRefusal::Failed(detail) = &refusal {
+                    log::warn!("modules: {name}'s transaction failed: {detail}");
+                }
+                storage_code(&refusal)
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -630,7 +984,7 @@ mod tests {
     #[test]
     fn a_call_inside_the_one_the_host_made_reaches_its_body() {
         let ctx = HostCtx::new();
-        let _entered = ctx.enter(NAME, None);
+        let _entered = ctx.enter(NAME, Lent::default());
         let (code, collected) = find_in(&ctx, "By then the fog had eaten the boats.", "fog", 0);
         assert_eq!(code, SUBLORE_OK);
         assert_eq!(collected.hits, vec![(12, 3)]);
@@ -639,7 +993,7 @@ mod tests {
     #[test]
     fn a_call_from_another_thread_is_refused_and_does_not_block() {
         let ctx = HostCtx::new();
-        let _entered = ctx.enter(NAME, None);
+        let _entered = ctx.enter(NAME, Lent::default());
         // The record is armed for this thread, and the call below is made on another one. It must
         // come back, and come back refused: a module that stashed the pointer gets a code.
         let elsewhere = std::thread::scope(|scope| {
@@ -657,7 +1011,7 @@ mod tests {
     #[test]
     fn a_call_after_the_one_it_belonged_to_returned_is_refused() {
         let ctx = HostCtx::new();
-        drop(ctx.enter(NAME, None));
+        drop(ctx.enter(NAME, Lent::default()));
         let (code, collected) = find_in(&ctx, "the fog", "fog", 0);
         assert_eq!(code, SUBLORE_ERR_WRONG_THREAD);
         assert!(collected.hits.is_empty());
@@ -700,7 +1054,7 @@ mod tests {
     #[test]
     fn the_fold_is_the_matcher_s_own_and_the_case_option_turns_it_off() {
         let ctx = HostCtx::new();
-        let _entered = ctx.enter(NAME, None);
+        let _entered = ctx.enter(NAME, Lent::default());
         let (code, folded) = find_in(&ctx, "By then the FOG had eaten", "fog", 0);
         assert_eq!(code, SUBLORE_OK);
         assert_eq!(folded.hits, vec![(12, 3)]);
@@ -718,7 +1072,7 @@ mod tests {
     #[test]
     fn tags_are_skipped_only_when_asked_for_and_the_offsets_stay_the_raw_line_s() {
         let ctx = HostCtx::new();
-        let _entered = ctx.enter(NAME, None);
+        let _entered = ctx.enter(NAME, Lent::default());
         let line = "the {\\i1}fog";
         let (_, plain) = find_in(&ctx, line, "the fog", 0);
         assert!(
@@ -735,7 +1089,7 @@ mod tests {
     #[test]
     fn a_sink_that_stops_the_walk_is_pushed_once_and_its_answer_comes_back() {
         let ctx = HostCtx::new();
-        let _entered = ctx.enter(NAME, None);
+        let _entered = ctx.enter(NAME, Lent::default());
         let mut collected = Collected {
             answer: SUBLORE_ERR_CANCELLED,
             ..Collected::default()
@@ -757,7 +1111,7 @@ mod tests {
     #[test]
     fn an_option_bit_this_build_has_no_meaning_for_is_refused_rather_than_masked_off() {
         let ctx = HostCtx::new();
-        let _entered = ctx.enter(NAME, None);
+        let _entered = ctx.enter(NAME, Lent::default());
         // The next bit up. A mask would answer this as an ordinary folded search, and the module
         // would believe it had asked for something it did not get.
         let (code, collected) = find_in(&ctx, "the fog", "fog", 4);
@@ -768,7 +1122,7 @@ mod tests {
     #[test]
     fn a_find_with_no_sink_function_is_refused_rather_than_jumped_through() {
         let ctx = HostCtx::new();
-        let _entered = ctx.enter(NAME, None);
+        let _entered = ctx.enter(NAME, Lent::default());
         let code = unsafe {
             host_find(
                 pointer(&ctx),
@@ -785,7 +1139,7 @@ mod tests {
     #[test]
     fn a_haystack_that_is_not_text_is_refused() {
         let ctx = HostCtx::new();
-        let _entered = ctx.enter(NAME, None);
+        let _entered = ctx.enter(NAME, Lent::default());
         let invalid = [0xffu8, 0xfe];
         let mut collected = Collected::default();
         let code = unsafe {
@@ -852,7 +1206,7 @@ mod tests {
     fn the_document_answers_with_the_count_that_includes_an_ass_comment_event() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
 
         let (code, answer) = document_of(&ctx);
         assert_eq!(code, SUBLORE_OK);
@@ -871,7 +1225,7 @@ mod tests {
     fn a_document_that_is_not_open_is_said_rather_than_guessed_at() {
         let ctx = HostCtx::new();
         let mut none: Option<EditSession> = None;
-        let _entered = ctx.enter(NAME, Some(&mut none));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut none)));
         let (code, answer) = document_of(&ctx);
         assert_eq!(code, SUBLORE_ERR_NOTHING_OPEN);
         // The out parameter is untouched, so a module that ignores the code reads its own zeroes
@@ -883,7 +1237,7 @@ mod tests {
     #[test]
     fn a_call_the_host_lent_no_session_reads_nothing() {
         let ctx = HostCtx::new();
-        let _entered = ctx.enter(NAME, None);
+        let _entered = ctx.enter(NAME, Lent::default());
         assert_eq!(document_of(&ctx).0, SUBLORE_ERR_NOTHING_OPEN);
         assert_eq!(cue_of(&ctx, 0).0, SUBLORE_ERR_NOTHING_OPEN);
     }
@@ -894,7 +1248,7 @@ mod tests {
             sublore_formats::parse(SubtitleFormat::Srt, SRT.as_bytes()).expect("srt should parse");
         let mut session = Some(EditSession::untitled(document));
         let ctx = HostCtx::new();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
 
         let (code, first) = cue_of(&ctx, 0);
         assert_eq!(code, SUBLORE_OK);
@@ -923,7 +1277,7 @@ mod tests {
     fn an_ass_line_break_stays_the_two_characters_the_file_wrote() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
 
         let (code, first) = cue_of(&ctx, 0);
         assert_eq!(code, SUBLORE_OK);
@@ -945,7 +1299,7 @@ mod tests {
     fn one_index_past_the_last_cue_is_refused_rather_than_wrapped() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
 
         assert_eq!(cue_of(&ctx, 2).0, SUBLORE_OK);
         assert_eq!(cue_of(&ctx, 3).0, SUBLORE_ERR_NO_SUCH_CUE);
@@ -957,7 +1311,7 @@ mod tests {
     fn a_read_with_nowhere_to_write_is_refused_rather_than_written_through_null() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
         assert_eq!(
             unsafe { host_document(pointer(&ctx), std::ptr::null_mut()) },
             SUBLORE_ERR_BAD_STRING
@@ -972,7 +1326,7 @@ mod tests {
     fn a_read_from_another_thread_is_refused_even_with_a_session_lent() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
         let elsewhere = std::thread::scope(|scope| {
             scope
                 .spawn(|| (document_of(&ctx).0, cue_of(&ctx, 0).0))
@@ -1025,7 +1379,7 @@ mod tests {
     fn a_proposal_changes_the_cue_and_the_window_is_handed_the_patch() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let entered = ctx.enter(NAME, Some(&mut session));
+        let entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
 
         let before = revision_of(&ctx);
         assert!(!dirty(&ctx));
@@ -1060,7 +1414,7 @@ mod tests {
         let ctx = HostCtx::new();
         let mut session = opened();
         let was = {
-            let entered = ctx.enter(NAME, Some(&mut session));
+            let entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
             let was = text_of(&ctx, 0);
             let revision = revision_of(&ctx);
             assert_eq!(
@@ -1085,7 +1439,7 @@ mod tests {
     fn a_stale_revision_changes_nothing_and_is_said_rather_than_applied() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
         let was = text_of(&ctx, 0);
 
         let behind = revision_of(&ctx).wrapping_sub(1);
@@ -1101,7 +1455,7 @@ mod tests {
     fn a_kind_this_build_has_no_meaning_for_is_refused_and_changes_nothing() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
         let was = text_of(&ctx, 0);
 
         // The next value up. Section 4.5 keeps this field open for a segment the core cannot
@@ -1124,7 +1478,7 @@ mod tests {
     fn a_cue_past_the_end_is_refused_rather_than_appended() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
         let revision = revision_of(&ctx);
         assert_eq!(
             propose(&ctx, revision, 3, "nowhere"),
@@ -1141,7 +1495,7 @@ mod tests {
     fn text_this_format_cannot_write_is_refused_by_the_guard_the_commands_run() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
         // An ASS event is one line in the file, so a line break inside its text has nowhere to go.
         // The refusal is the planner's own, reached through the same guard `apply_edit` runs.
         let revision = revision_of(&ctx);
@@ -1156,7 +1510,7 @@ mod tests {
     fn a_proposal_with_no_document_and_one_with_no_proposal_are_both_refused() {
         let ctx = HostCtx::new();
         let mut none: Option<EditSession> = None;
-        let _entered = ctx.enter(NAME, Some(&mut none));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut none)));
         assert_eq!(
             propose(&ctx, 0, 0, "nothing to change"),
             SUBLORE_ERR_NOTHING_OPEN
@@ -1171,7 +1525,7 @@ mod tests {
     fn a_proposal_from_another_thread_never_reaches_the_document() {
         let ctx = HostCtx::new();
         let mut session = opened();
-        let _entered = ctx.enter(NAME, Some(&mut session));
+        let _entered = ctx.enter(NAME, Lent::default().with_session(Some(&mut session)));
         let elsewhere = std::thread::scope(|scope| {
             scope
                 .spawn(|| propose(&ctx, 0, 0, "from a thread of its own"))
@@ -1193,5 +1547,441 @@ mod tests {
             "the cut moved back further than one character"
         );
         assert_eq!(capped("short"), "short");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Storage, H6. Every check below runs against a real project, because the tables a module must
+    // not reach have to exist for a refusal to mean anything.
+
+    /// The id the checks below arm with. A name the storage accepts, so a refusal is the guard's
+    /// and never the id's.
+    const STORAGE: &str = "fixture";
+
+    /// A directory of this check's own, and a project inside it.
+    fn project(
+        tag: &str,
+    ) -> (
+        std::path::PathBuf,
+        Option<sublore_project::records::Project>,
+    ) {
+        use std::sync::atomic::AtomicU32;
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos())
+            .unwrap_or(0);
+        let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "sublore-host-store-{tag}-{}-{nanos}-{unique}",
+            std::process::id()
+        ));
+        let folder = dir.join("Series");
+        std::fs::create_dir_all(&folder).expect("the project folder should be creatable");
+        let project = sublore_project::records::Project::create(
+            &folder,
+            "A series",
+            std::time::SystemTime::now(),
+        )
+        .expect("a project should be made");
+        (dir, Some(project))
+    }
+
+    /// What one statement pushed back. A named type rather than a tuple, on the same terms as
+    /// `Collected`: a void pointer is only as safe as the agreement between the two casts.
+    #[derive(Default)]
+    struct Rows {
+        rows: Vec<Vec<Cell>>,
+        /// What the sink answers, so a check can stop the walk.
+        answer: i32,
+        pushes: usize,
+    }
+
+    unsafe extern "C" fn collect_row(
+        sink: *mut c_void,
+        cells: *const SubloreValue,
+        count: usize,
+    ) -> i32 {
+        let collected = unsafe { &mut *sink.cast::<Rows>() };
+        let read = unsafe { bound(cells, count) }.expect("the host wrote its own cells");
+        collected.rows.push(read);
+        collected.pushes += 1;
+        collected.answer
+    }
+
+    fn run_sql(ctx: &HostCtx, sql: &str, params: &[Cell], rows: &mut Rows) -> i32 {
+        let given: Vec<SubloreValue> = params.iter().map(returned).collect();
+        unsafe {
+            host_db_run(
+                pointer(ctx),
+                SubloreStr::borrowed(sql),
+                if given.is_empty() {
+                    std::ptr::null()
+                } else {
+                    given.as_ptr()
+                },
+                given.len(),
+                (rows as *mut Rows).cast(),
+                Some(collect_row),
+            )
+        }
+    }
+
+    /// The same, for a statement whose rows nobody wants.
+    fn run_quiet(ctx: &HostCtx, sql: &str) -> i32 {
+        let mut rows = Rows::default();
+        run_sql(ctx, sql, &[], &mut rows)
+    }
+
+    /// What a module's transaction body is given. Named on both sides, for the same reason as the
+    /// sinks above.
+    struct Work {
+        host: *mut c_void,
+        /// What the body does once, and what it answered.
+        what: fn(*mut c_void) -> i32,
+        inner: i32,
+        /// What the body itself reports, which is what decides commit or rollback.
+        answer: i32,
+    }
+
+    unsafe extern "C" fn run_work(work_ctx: *mut c_void) -> i32 {
+        let work = unsafe { &mut *work_ctx.cast::<Work>() };
+        work.inner = (work.what)(work.host);
+        work.answer
+    }
+
+    unsafe extern "C" fn empty_body(_: *mut c_void) -> i32 {
+        SUBLORE_OK
+    }
+
+    fn transact(ctx: &HostCtx, answer: i32, what: fn(*mut c_void) -> i32) -> (i32, i32) {
+        let mut work = Work {
+            host: pointer(ctx),
+            what,
+            inner: SUBLORE_OK,
+            answer,
+        };
+        let code = unsafe {
+            host_db_transaction(
+                pointer(ctx),
+                (&mut work as *mut Work).cast(),
+                Some(run_work),
+            )
+        };
+        (code, work.inner)
+    }
+
+    #[test]
+    fn a_module_reads_back_through_the_host_what_it_wrote_through_it() {
+        let (dir, mut open) = project("roundtrip");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+
+        assert_eq!(
+            run_quiet(
+                &ctx,
+                "CREATE TABLE m_fixture_notes (n INTEGER, r REAL, t TEXT, b BLOB, z INTEGER)"
+            ),
+            SUBLORE_OK
+        );
+        let written = [
+            Cell::Int(7),
+            Cell::Real(1.5),
+            Cell::Text("Hütte".into()),
+            Cell::Blob(vec![0, 255, 10]),
+            Cell::Null,
+        ];
+        let mut rows = Rows::default();
+        assert_eq!(
+            run_sql(
+                &ctx,
+                "INSERT INTO m_fixture_notes VALUES (?1, ?2, ?3, ?4, ?5)",
+                &written,
+                &mut rows
+            ),
+            SUBLORE_OK
+        );
+
+        let mut rows = Rows::default();
+        assert_eq!(
+            run_sql(
+                &ctx,
+                "SELECT n, r, t, b, z FROM m_fixture_notes",
+                &[],
+                &mut rows
+            ),
+            SUBLORE_OK
+        );
+        // Every one of the five kinds, out the way it went in: a blob with a NUL in it included,
+        // which is what says the boundary carries bytes and not a C string.
+        assert_eq!(rows.rows, vec![written.to_vec()]);
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_statement_with_no_project_lent_says_nothing_is_open() {
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(NAME, Lent::default());
+        assert_eq!(run_quiet(&ctx, "SELECT 1"), SUBLORE_ERR_NOTHING_OPEN);
+    }
+
+    #[test]
+    fn a_module_whose_file_name_yields_no_id_gets_no_storage() {
+        let (dir, mut open) = project("noid");
+        let ctx = HostCtx::new();
+        // The project is lent and the id is not, which is what a file named `sublore_module_Foo`
+        // produces. It must cost that module its storage, never give it somebody else's.
+        let _entered = ctx.enter(NAME, Lent::default().with_project(&mut open, None));
+        assert_eq!(
+            run_quiet(&ctx, "CREATE TABLE m_fixture_notes (x INTEGER)"),
+            SUBLORE_ERR_DENIED
+        );
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_tables_the_core_owns_are_refused_through_the_host_too() {
+        let (dir, mut open) = project("guarded");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+        assert_eq!(
+            run_quiet(&ctx, "SELECT id, title FROM episodes"),
+            SUBLORE_ERR_DENIED
+        );
+        assert_eq!(
+            run_quiet(&ctx, "PRAGMA user_version = 99"),
+            SUBLORE_ERR_DENIED
+        );
+        // Two statements are one refusal and neither runs, so nothing is smuggled behind the
+        // semicolon.
+        assert_eq!(
+            run_quiet(
+                &ctx,
+                "CREATE TABLE m_fixture_a (x INTEGER); CREATE TABLE m_fixture_b (x INTEGER)"
+            ),
+            SUBLORE_ERR_DENIED
+        );
+        assert_eq!(
+            run_quiet(&ctx, "SELECT count(*) FROM m_fixture_a"),
+            SUBLORE_ERR_STORAGE,
+            "the first of the two ran"
+        );
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_sink_that_stops_the_walk_is_answered_with_its_own_code() {
+        let (dir, mut open) = project("stop");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+        run_quiet(&ctx, "CREATE TABLE m_fixture_notes (id INTEGER)");
+        for id in 1..=3 {
+            run_sql(
+                &ctx,
+                "INSERT INTO m_fixture_notes (id) VALUES (?1)",
+                &[Cell::Int(id)],
+                &mut Rows::default(),
+            );
+        }
+
+        let mut rows = Rows {
+            answer: SUBLORE_ERR_CANCELLED,
+            ..Rows::default()
+        };
+        let code = run_sql(
+            &ctx,
+            "SELECT id FROM m_fixture_notes ORDER BY id",
+            &[],
+            &mut rows,
+        );
+        assert_eq!(code, SUBLORE_ERR_CANCELLED);
+        assert_eq!(rows.pushes, 1, "a module that wants one row pays for one");
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_transaction_the_module_refuses_rolls_back_and_answers_its_own_code() {
+        let (dir, mut open) = project("rollback");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+        run_quiet(&ctx, "CREATE TABLE m_fixture_notes (id INTEGER)");
+
+        let (code, inner) = transact(&ctx, SUBLORE_ERR_CANCELLED, |host| unsafe {
+            host_db_run(
+                host,
+                SubloreStr::borrowed("INSERT INTO m_fixture_notes (id) VALUES (7)"),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                None,
+            )
+        });
+        assert_eq!(inner, SUBLORE_OK, "the row went in inside the transaction");
+        // Its own word for why, not the host's: a module that cancelled hears that it cancelled.
+        assert_eq!(code, SUBLORE_ERR_CANCELLED);
+
+        let mut rows = Rows::default();
+        assert_eq!(
+            run_sql(&ctx, "SELECT id FROM m_fixture_notes", &[], &mut rows),
+            SUBLORE_OK
+        );
+        assert!(rows.rows.is_empty(), "the rolled back row is still there");
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_transaction_that_succeeds_keeps_what_it_wrote_and_leaves_none_open() {
+        let (dir, mut open) = project("commit");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+        run_quiet(&ctx, "CREATE TABLE m_fixture_notes (id INTEGER)");
+
+        let (code, inner) = transact(&ctx, SUBLORE_OK, |host| unsafe {
+            host_db_run(
+                host,
+                SubloreStr::borrowed("INSERT INTO m_fixture_notes (id) VALUES (7)"),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                None,
+            )
+        });
+        assert_eq!((code, inner), (SUBLORE_OK, SUBLORE_OK));
+
+        let mut rows = Rows::default();
+        run_sql(&ctx, "SELECT id FROM m_fixture_notes", &[], &mut rows);
+        assert_eq!(rows.rows, vec![vec![Cell::Int(7)]]);
+        // And the record is clean afterwards, which a handle left behind would not be: the next
+        // statement would run on a connection this call has already given back.
+        assert!(ctx.open().is_none());
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_transaction_inside_a_transaction_is_refused_and_the_outer_one_still_commits() {
+        let (dir, mut open) = project("nested");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+        run_quiet(&ctx, "CREATE TABLE m_fixture_notes (id INTEGER)");
+
+        let (code, inner) = transact(&ctx, SUBLORE_OK, |host| unsafe {
+            let refused = host_db_transaction(host, std::ptr::null_mut(), Some(empty_body));
+            host_db_run(
+                host,
+                SubloreStr::borrowed("INSERT INTO m_fixture_notes (id) VALUES (7)"),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                None,
+            );
+            refused
+        });
+        assert_eq!(
+            inner, SUBLORE_ERR_DENIED,
+            "the inner transaction was opened"
+        );
+        assert_eq!(code, SUBLORE_OK);
+
+        // The refusal cost the outer transaction nothing: what it wrote after being told no is
+        // still there.
+        let mut rows = Rows::default();
+        run_sql(&ctx, "SELECT id FROM m_fixture_notes", &[], &mut rows);
+        assert_eq!(rows.rows, vec![vec![Cell::Int(7)]]);
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn every_statement_of_a_transaction_is_held_inside_the_module_s_own_tables() {
+        let (dir, mut open) = project("txnguard");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+
+        let (_, inner) = transact(&ctx, SUBLORE_OK, |host| unsafe {
+            host_db_run(
+                host,
+                SubloreStr::borrowed("CREATE TABLE m_fixture_notes (id INTEGER)"),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                None,
+            );
+            // The second statement is the one that matters: the guard installed for the body has
+            // to still be on when it runs.
+            host_db_run(
+                host,
+                SubloreStr::borrowed("SELECT id FROM episodes"),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                None,
+            )
+        });
+        assert_eq!(inner, SUBLORE_ERR_DENIED);
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_statement_from_another_thread_is_refused_and_does_not_block() {
+        let (dir, mut open) = project("elsewhere");
+        let ctx = HostCtx::new();
+        let _entered = ctx.enter(
+            NAME,
+            Lent::default().with_project(&mut open, Some(STORAGE.to_owned())),
+        );
+        let refused = std::thread::scope(|scope| {
+            scope
+                .spawn(|| run_quiet(&ctx, "SELECT 1"))
+                .join()
+                .expect("the other thread must return rather than block")
+        });
+        assert_eq!(refused, SUBLORE_ERR_WRONG_THREAD);
+
+        drop(_entered);
+        drop(open);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

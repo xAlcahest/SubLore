@@ -28,6 +28,20 @@ const SUFFIX: &str = ".dll";
 const SUFFIX: &str = ".so";
 const PREFIX: &str = "sublore_module_";
 
+/// The storage id a module file's own name yields, or none when it yields nothing usable.
+///
+/// A free function so it can be checked without a library to load: what it decides is a name, and a
+/// name needs no mapped image to be wrong.
+fn id_of(path: &Path) -> Option<&str> {
+    let name = path.file_name()?.to_str()?;
+    let id = name.strip_prefix(PREFIX)?.strip_suffix(SUFFIX)?;
+    let usable = !id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_');
+    usable.then_some(id)
+}
+
 /// Why a file that looked like a module was not used. The list is closed and it is §3.5's table,
 /// so the sentence the user reads is assembled from these rather than from a string invented here.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,6 +108,19 @@ impl Loaded {
     /// The minor revision this module filled its table to.
     pub fn minor(&self) -> u32 {
         self.table.minor
+    }
+
+    /// The name this module's own tables are prefixed with, taken from its file name.
+    ///
+    /// **Not something the module declares, and that is the point.** The guard exists to hold a
+    /// module inside `m_<id>_*`, so a module that named its own prefix could name another module's
+    /// and the guard would hand it the key it was built to withhold. The file is what the user
+    /// installed and what §3.4 already matches, and a module cannot lie about it.
+    ///
+    /// `None` when what is left after the prefix is not an id the storage will accept, which costs
+    /// that module its storage rather than giving it storage under a name nobody checked.
+    pub fn id(&self) -> Option<&str> {
+        id_of(&self.path)
     }
 
     /// The module's own table. Valid only while this value is alive.
@@ -241,4 +268,41 @@ unsafe fn try_one(path: &Path, host: &SubloreHost) -> Result<Loaded, Refusal> {
         table,
         _library: library,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A module file's name as it ships on this platform.
+    fn shipped(stem: &str) -> PathBuf {
+        PathBuf::from(format!("/opt/sublore/{PREFIX}{stem}{SUFFIX}"))
+    }
+
+    #[test]
+    fn a_module_s_storage_id_is_what_its_file_is_called() {
+        assert_eq!(id_of(&shipped("notes")), Some("notes"));
+        assert_eq!(id_of(&shipped("notes_2")), Some("notes_2"));
+    }
+
+    #[test]
+    fn a_name_the_storage_would_refuse_yields_no_id_at_all() {
+        // Upper case, a space and a quote: each of them is a name `is_module_id` refuses, and the
+        // module losing its storage is the direction this has to fail in. Storage under a name
+        // nobody checked is the one outcome that must not be reachable.
+        for stem in ["Notes", "note book", "notes'; DROP TABLE series; --", ""] {
+            assert_eq!(
+                id_of(&shipped(stem)),
+                None,
+                "{stem:?} was accepted as an id"
+            );
+        }
+    }
+
+    #[test]
+    fn a_file_that_is_not_shaped_like_a_module_yields_nothing() {
+        assert_eq!(id_of(Path::new("/opt/sublore/libfoo.so")), None);
+        assert_eq!(id_of(Path::new(&format!("/opt/{PREFIX}notes.txt"))), None);
+        assert_eq!(id_of(Path::new("/opt/sublore/")), None);
+    }
 }

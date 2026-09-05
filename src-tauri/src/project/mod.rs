@@ -35,7 +35,7 @@ pub struct ProjectState {
 }
 
 impl ProjectState {
-    fn handle(&self) -> SharedProject {
+    pub fn handle(&self) -> SharedProject {
         Arc::clone(&self.open)
     }
 

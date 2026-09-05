@@ -26,8 +26,9 @@ use sublore_module_api::{
 use sublore_module_host::{scan, Loaded, Refusal};
 
 use crate::log;
+use crate::project::SharedProject;
 use crate::subtitle::{CuePatchDto, SessionSlot};
-use host::HostCtx;
+use host::{HostCtx, Lent};
 
 /// Why a file that looked like a module was not used, as the frontend receives it.
 ///
@@ -258,7 +259,9 @@ impl Drop for Held {
                 continue;
             };
             // No session at teardown: the window is gone and there is nothing to lend.
-            let _entered = self.ctx.enter(&file_name(running.module.path()), None);
+            let _entered = self
+                .ctx
+                .enter(&file_name(running.module.path()), Lent::default());
             // Safety: `ctx` is what this module's own `create` wrote, handed back exactly once.
             unsafe { destroy(running.ctx) };
             running.ctx = std::ptr::null_mut();
@@ -344,7 +347,8 @@ impl ModuleState {
             // interface promises them (§2.1), and `instance` is one writable pointer. The gate is
             // armed for the call and disarmed the moment it returns (§2.5).
             let made = {
-                let _entered = ctx.enter(&name, session.as_deref_mut());
+                let _entered =
+                    ctx.enter(&name, Lent::default().with_session(session.as_deref_mut()));
                 unsafe {
                     create(
                         &mut instance,
@@ -366,7 +370,8 @@ impl ModuleState {
             };
             // Safety: the sink outlives the call, and `push_item` is this process's own.
             let told = {
-                let _entered = ctx.enter(&name, session.as_deref_mut());
+                let _entered =
+                    ctx.enter(&name, Lent::default().with_session(session.as_deref_mut()));
                 unsafe { describe(instance, (&mut sink as *mut Sink).cast(), Some(push_item)) }
             };
             for refusal in &sink.refused {
@@ -400,6 +405,7 @@ impl ModuleState {
         item: u32,
         at: &SubloreInvocation,
         session: &SessionSlot,
+        project: &SharedProject,
     ) -> InvokeOutcome {
         let Ok(mut held) = self.held.lock() else {
             log::error!("modules: the module lock is poisoned, so nothing can be activated");
@@ -427,6 +433,9 @@ impl ModuleState {
             };
         };
 
+        // The module's own storage prefix, taken from its file name and never from the module
+        // (module-abi.md §4.7 and docs/module-host-tasks.md H6). None costs it its storage.
+        let storage = running.module.id().map(str::to_owned);
         let mut session = match session.lock() {
             Ok(held) => Some(held),
             Err(_) => {
@@ -434,7 +443,20 @@ impl ModuleState {
                 None
             }
         };
-        let entered = held.ctx.enter(&name, session.as_deref_mut());
+        // Locked after the session and released with it. Nothing else in this process takes both,
+        // so this order is the only one there is and the pair cannot deadlock.
+        let mut project = match project.lock() {
+            Ok(held) => Some(held),
+            Err(_) => {
+                log::warn!("modules: the project lock is poisoned, so {name} is lent none");
+                None
+            }
+        };
+        let mut lent = Lent::default().with_session(session.as_deref_mut());
+        if let Some(project) = project.as_deref_mut() {
+            lent = lent.with_project(project, storage);
+        }
+        let entered = held.ctx.enter(&name, lent);
         // Safety: the module's own function, given the instance its `create` wrote and a record
         // valid for the call, with the session locked for the whole of it.
         let code = unsafe { invoke(running.ctx, item, at) };
@@ -598,8 +620,9 @@ pub async fn module_invoke(
     tauri::async_runtime::spawn_blocking(move || {
         use tauri::Manager;
         let session = app.state::<crate::subtitle::SubtitleState>().slot();
+        let project = app.state::<crate::project::ProjectState>().handle();
         app.state::<ModuleState>()
-            .invoke(module, item, &at, &session)
+            .invoke(module, item, &at, &session, &project)
     })
     .await
     .unwrap_or_else(|error| {

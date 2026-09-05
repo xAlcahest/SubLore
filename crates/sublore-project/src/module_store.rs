@@ -116,29 +116,69 @@ pub fn run(
     on_row: &mut dyn FnMut(&[Cell]) -> bool,
 ) -> Result<usize, StoreRefusal> {
     guarded(project.connection(), id, |conn| {
-        let mut statement = conn.prepare(sql).map_err(refusal_of)?;
-        let bound: Vec<Value> = params.iter().map(Cell::bound).collect();
-        let columns = statement.column_count();
-        let mut rows = statement
-            .query(rusqlite::params_from_iter(bound))
-            .map_err(refusal_of)?;
-
-        let mut pushed = 0usize;
-        loop {
-            let Some(row) = rows.next().map_err(refusal_of)? else {
-                break;
-            };
-            let mut cells = Vec::with_capacity(columns);
-            for index in 0..columns {
-                cells.push(Cell::read(row.get_ref(index).map_err(refusal_of)?));
-            }
-            pushed += 1;
-            if !on_row(&cells) {
-                break;
-            }
-        }
-        Ok(pushed)
+        run_guarded(conn, sql, params, on_row)
     })
+}
+
+/// The connection a module's transaction is open on, handed to the body of that transaction.
+///
+/// A raw pointer behind a named type rather than a borrow, because the host has to hold it across a
+/// call into foreign code and back: a module's body calls `db_run` from inside its own transaction,
+/// and a borrow cannot be stashed in the record the host's gate reads. Naming the type is what
+/// makes the two sides of that stash agree, and it keeps `Connection` unnameable outside this
+/// crate, which is what stops anything in the app from opening one of its own (§4.7).
+#[derive(Clone, Copy)]
+pub struct OpenTransaction(*const Connection);
+
+impl OpenTransaction {
+    /// Run one statement inside this transaction, with the guard it already installed.
+    ///
+    /// # Safety
+    /// Valid only while the [`transaction`] call that produced this handle has not returned. A copy
+    /// kept past that point names a connection this crate has given back.
+    pub unsafe fn run(
+        self,
+        sql: &str,
+        params: &[Cell],
+        on_row: &mut dyn FnMut(&[Cell]) -> bool,
+    ) -> Result<usize, StoreRefusal> {
+        run_guarded(unsafe { &*self.0 }, sql, params, on_row)
+    }
+}
+
+/// Run one statement on a connection whose guard is already installed.
+///
+/// Separate from [`run`] because a statement made from inside a module's own transaction must not
+/// install the guard and take it off again: [`transaction`] installed it for the whole of the body,
+/// and a nested pair would take it off for everything the body does afterwards.
+fn run_guarded(
+    conn: &Connection,
+    sql: &str,
+    params: &[Cell],
+    on_row: &mut dyn FnMut(&[Cell]) -> bool,
+) -> Result<usize, StoreRefusal> {
+    let mut statement = conn.prepare(sql).map_err(refusal_of)?;
+    let bound: Vec<Value> = params.iter().map(Cell::bound).collect();
+    let columns = statement.column_count();
+    let mut rows = statement
+        .query(rusqlite::params_from_iter(bound))
+        .map_err(refusal_of)?;
+
+    let mut pushed = 0usize;
+    loop {
+        let Some(row) = rows.next().map_err(refusal_of)? else {
+            break;
+        };
+        let mut cells = Vec::with_capacity(columns);
+        for index in 0..columns {
+            cells.push(Cell::read(row.get_ref(index).map_err(refusal_of)?));
+        }
+        pushed += 1;
+        if !on_row(&cells) {
+            break;
+        }
+    }
+    Ok(pushed)
 }
 
 /// Run `work` inside one transaction, committing on `Ok` and rolling back on anything else.
@@ -149,13 +189,13 @@ pub fn run(
 pub fn transaction<T>(
     project: &mut Project,
     id: &str,
-    work: impl FnOnce(&Connection) -> Result<T, StoreRefusal>,
+    work: impl FnOnce(OpenTransaction) -> Result<T, StoreRefusal>,
 ) -> Result<T, StoreRefusal> {
     let conn = project.connection_mut();
     conn.execute_batch("BEGIN IMMEDIATE").map_err(refusal_of)?;
     // The guard goes on inside the transaction and comes off before it is closed, because BEGIN
     // and COMMIT are the core's own statements and a module's rules have nothing to say about them.
-    let answer = guarded(conn, id, work);
+    let answer = guarded(conn, id, |conn| work(OpenTransaction(conn)));
     let closing = if answer.is_ok() {
         conn.execute_batch("COMMIT")
     } else {
