@@ -42,10 +42,11 @@ export function useWindowFloor(
   scale: number,
   chrome: string,
   block: number | null,
-): { width: number | null; failed: boolean } {
+): { width: number | null; failed: boolean; seen: number | null } {
   const [rows, setRows] = useState<number | null>(null);
   const [refused, setRefused] = useState(false);
   const [missing, setMissing] = useState(false);
+  const [seen, setSeen] = useState<number | null>(null);
 
   // Before the paint, for the same reason the transport's floor is read there: the number the
   // window is given must not be one read against type that has already been replaced. Nothing here
@@ -87,16 +88,21 @@ export function useWindowFloor(
     if (width === null) {
       return;
     }
-    const carry = () => {
-      void invoke("layout_set_minimum_width", { width })
-        .then(() => setRefused(false))
+    // `hold` grows the window; without it only the hint is set. The page decides, because the page
+    // is the one that has read itself narrower than the floor, and the window's own answer about
+    // how wide it is can still be the one from before the resize that prompted the call. See N32.
+    const carry = (hold: boolean) => {
+      void invoke<number>("layout_set_minimum_width", { width, hold })
+        .then((was) => {
+          setRefused(false);
+          setSeen(was);
+        })
         .catch(() => setRefused(true));
     };
-    carry();
+    carry(false);
     // A smallest size is a hint to whatever places the window, and not everything that places a
-    // window honours one. Asked again while the page still reads itself under the floor, because
-    // one ask can land before the window's own size has caught up with the resize that prompted
-    // it, and then nothing asks again. Bounded, so a window that cannot grow stops asking. See N32.
+    // window honours one. Asked again while the page still reads itself under the floor, bounded,
+    // so a window that cannot grow stops asking.
     let live = true;
     const putBack = () => {
       let left = HOLD_ASKS;
@@ -105,7 +111,7 @@ export function useWindowFloor(
           return;
         }
         left -= 1;
-        carry();
+        carry(true);
         window.setTimeout(again, HOLD_GAP_MS);
       };
       again();
@@ -117,5 +123,5 @@ export function useWindowFloor(
     };
   }, [width]);
 
-  return { width, failed: refused || missing };
+  return { width, failed: refused || missing, seen };
 }

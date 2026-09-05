@@ -233,13 +233,25 @@ fn configured_min_height(window: &tauri::WebviewWindow) -> f64 {
 /// into a file would outlive the fonts it was read against. The height stays what the configuration
 /// declared, for the reason on `configured_min_height`.
 #[tauri::command]
-pub fn layout_set_minimum_width(window: tauri::WebviewWindow, width: f64) -> Result<(), String> {
-    hold_at_least(&window, width).inspect_err(|reason| {
+pub fn layout_set_minimum_width(
+    window: tauri::WebviewWindow,
+    width: f64,
+    hold: bool,
+) -> Result<f64, String> {
+    hold_at_least(&window, width, hold).inspect_err(|reason| {
         log::warn!("layout: the window could not be held at {width} css pixels wide: {reason}");
     })
 }
 
-fn hold_at_least(window: &tauri::WebviewWindow, width: f64) -> Result<(), String> {
+/// Sets the hint, and when `hold` grows the window to `width` without asking it how wide it is.
+///
+/// `hold` comes from the page, which asks only when it has read itself narrower than the floor.
+/// That reading is the one that cannot be stale relative to the decision it drives, where
+/// `inner_size` can still answer with the width from before the resize that prompted the call and
+/// leave the window under its floor with nothing to ask again. See N32.
+///
+/// Returns the width `inner_size` reported, for the caller that wants to know what was seen.
+fn hold_at_least(window: &tauri::WebviewWindow, width: f64, hold: bool) -> Result<f64, String> {
     if !width.is_finite() || width <= 0.0 || width > MAX_MINIMUM_WIDTH {
         return Err(format!("{width} is not a width a window can be held at"));
     }
@@ -248,8 +260,6 @@ fn hold_at_least(window: &tauri::WebviewWindow, width: f64) -> Result<(), String
         .set_min_size(Some(tauri::LogicalSize::new(width, height)))
         .map_err(|error| format!("the smallest size was refused: {error}"))?;
 
-    // A floor the window is already under is not a floor: a minimum does not resize a window that
-    // is smaller than it, so the difference is asked for once, here.
     let scale = window
         .scale_factor()
         .map_err(|error| format!("no scale factor to read a width against: {error}"))?;
@@ -257,12 +267,14 @@ fn hold_at_least(window: &tauri::WebviewWindow, width: f64) -> Result<(), String
         .inner_size()
         .map_err(|error| format!("the window would not say how wide it is: {error}"))?
         .to_logical(scale);
-    if inner.width < width {
+    // A floor the window is already under is not a floor: a minimum does not resize a window that
+    // is already smaller than it, so the difference is asked for here.
+    if hold {
         window
             .set_size(tauri::LogicalSize::new(width, inner.height))
             .map_err(|error| format!("coming up to it was refused: {error}"))?;
     }
-    Ok(())
+    Ok(inner.width)
 }
 
 #[cfg(test)]

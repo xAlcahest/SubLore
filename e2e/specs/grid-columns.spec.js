@@ -433,6 +433,7 @@ async function settleAt(id, ask, height, took) {
       ratio: window.devicePixelRatio,
       resizes: window.__subloreResizes,
       outer: window.outerWidth,
+      seen: Number(document.querySelector(".shell")?.dataset.floorSeen ?? -1),
     }));
     throw new Error(`${refused.message}\nthe page reads ${JSON.stringify(page)}`);
   }
