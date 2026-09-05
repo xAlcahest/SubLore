@@ -346,3 +346,18 @@ fn srt(cue: &Cue) -> &SrtCue {
         other => panic!("an SRT cue must carry SRT detail, found {other:?}"),
     }
 }
+
+#[test]
+fn no_clean_fixture_declares_a_style() {
+    // Only ASS has a styles section, so every row of one of these files carries an empty style.
+    // See styles-and-fields-tasks.md S6.5.
+    let dirs = common::dirs("srt");
+    for (path, bytes) in common::fixtures(&dirs.clean, &["srt"], MIN_CLEAN) {
+        let document = common::assert_round_trip(FORMAT, &path, &bytes);
+        assert!(
+            document.ass_styles().is_empty(),
+            "{} declares a style it cannot have",
+            path.display()
+        );
+    }
+}

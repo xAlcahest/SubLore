@@ -82,6 +82,23 @@ pub struct CueRowDto {
     pub style: String,
     /// The ASS `Name` (or `Actor`) field, under the same rule.
     pub actor: String,
+    /// The ASS `Effect` field, under the same rule.
+    pub effect: String,
+    /// The ASS `Layer` field as the file spells it, not as a number: `"0000"` stays `"0000"` and a
+    /// value that is no integer at all stays itself. See styles-and-fields-tasks.md F2.
+    pub layer: String,
+    /// The ASS `MarginL` field, under the same rule as the layer.
+    pub margin_l: String,
+    /// The ASS `MarginR` field, under the same rule as the layer.
+    pub margin_r: String,
+    /// The ASS `MarginV` field, under the same rule as the layer.
+    pub margin_v: String,
+    /// Which of the seven this row's own `Format:` line declares, spelled the way
+    /// `subtitle_set_field` takes them. A blank declared field and a field the line never declared
+    /// both carry `""`, so this is what tells them apart and what a control reads to know whether
+    /// it may be used: a write to a field absent from this list is refused and moves no byte.
+    /// Empty for SRT and VTT. See styles-and-fields-tasks.md F2.
+    pub declared_fields: Vec<AssFieldDto>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -228,7 +245,10 @@ pub async fn subtitle_set_texts(
 
 /// Which ASS event field a write names. A closed list on the wire too: the text field is not on
 /// it, and no payload can spell it. See docs/ass-field-write-tasks.md W2.
-#[derive(Clone, Copy, Debug, Deserialize)]
+///
+/// Serialized as well as deserialized, so the names a row reports as declared are the very names a
+/// write takes: one list, no second spelling to drift. See styles-and-fields-tasks.md F2.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AssFieldDto {
     Style,
@@ -238,6 +258,20 @@ pub enum AssFieldDto {
     MarginL,
     MarginR,
     MarginV,
+}
+
+impl From<AssField> for AssFieldDto {
+    fn from(field: AssField) -> Self {
+        match field {
+            AssField::Style => AssFieldDto::Style,
+            AssField::Actor => AssFieldDto::Actor,
+            AssField::Effect => AssFieldDto::Effect,
+            AssField::Layer => AssFieldDto::Layer,
+            AssField::MarginL => AssFieldDto::MarginL,
+            AssField::MarginR => AssFieldDto::MarginR,
+            AssField::MarginV => AssFieldDto::MarginV,
+        }
+    }
 }
 
 impl From<AssFieldDto> for AssField {
@@ -1042,6 +1076,16 @@ fn rows(views: &[CueView]) -> Vec<CueRowDto> {
             number: view.number,
             style: view.style.clone(),
             actor: view.actor.clone(),
+            effect: view.effect.clone(),
+            layer: view.layer.clone(),
+            margin_l: view.margin_l.clone(),
+            margin_r: view.margin_r.clone(),
+            margin_v: view.margin_v.clone(),
+            declared_fields: view
+                .declared_fields
+                .iter()
+                .map(|field| AssFieldDto::from(*field))
+                .collect(),
         })
         .collect()
 }
@@ -1119,5 +1163,93 @@ fn newline_str(newline: Newline) -> &'static str {
         Newline::Crlf => "crlf",
         Newline::Mixed => "mixed",
         Newline::None => "none",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{rows, AssField, AssFieldDto};
+    use sublore_edit::diff::CueView;
+
+    fn view() -> CueView {
+        CueView {
+            start_ms: 1,
+            end_ms: 2,
+            text: "Hello".to_owned(),
+            comment: false,
+            number: None,
+            style: "Default".to_owned(),
+            actor: "Ingrid".to_owned(),
+            effect: "fad".to_owned(),
+            layer: "0000".to_owned(),
+            margin_l: "10".to_owned(),
+            margin_r: "20".to_owned(),
+            margin_v: "30".to_owned(),
+            declared_fields: vec![AssField::Style, AssField::MarginL],
+        }
+    }
+
+    /// `CueRow` in src/types/subtitle.ts is this same interface in another language, and the three
+    /// margin keys are spelled the way `AssFieldName` spells them. A rename on one side and not the
+    /// other would leave a control reading `undefined`.
+    #[test]
+    fn a_row_goes_on_the_wire_under_the_names_the_ui_reads() {
+        let row = rows(&[view()]).remove(0);
+        let json = serde_json::to_value(&row).expect("a row serializes");
+        let object = json.as_object().expect("a row is an object");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "actor",
+                "comment",
+                "declaredFields",
+                "effect",
+                "endMs",
+                "layer",
+                "marginL",
+                "marginR",
+                "marginV",
+                "number",
+                "startMs",
+                "style",
+                "text",
+            ]
+        );
+        assert_eq!(
+            object.get("marginL").and_then(|value| value.as_str()),
+            Some("10")
+        );
+        assert_eq!(
+            object.get("layer").and_then(|value| value.as_str()),
+            Some("0000")
+        );
+    }
+
+    /// A row reports its declared fields under the same names `subtitle_set_field` takes, so a
+    /// control can pass one straight back. One list, no second spelling to drift.
+    /// See styles-and-fields-tasks.md F2.
+    #[test]
+    fn a_row_names_its_declared_fields_the_way_a_write_names_them() {
+        let json = serde_json::to_value(rows(&[view()]).remove(0)).expect("a row serializes");
+        assert_eq!(
+            json.get("declaredFields"),
+            Some(&serde_json::json!(["style", "marginL"]))
+        );
+        for name in [
+            "style", "actor", "effect", "layer", "marginL", "marginR", "marginV",
+        ] {
+            let sent = serde_json::to_value(AssFieldDto::from(AssField::from(
+                serde_json::from_value::<AssFieldDto>(serde_json::json!(name))
+                    .expect("the wire name deserializes"),
+            )))
+            .expect("a field name serializes");
+            assert_eq!(
+                sent,
+                serde_json::json!(name),
+                "{name} survives the round trip"
+            );
+        }
     }
 }

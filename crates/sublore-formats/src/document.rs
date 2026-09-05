@@ -91,12 +91,27 @@ pub enum SegmentKind {
     Cue(Cue),
 }
 
+/// One style a `[V4 Styles]` or `[V4+ Styles]` section declares.
+///
+/// The name only. What an inline styling control would want beside it (the bold, italic and
+/// underline flags) is not here: it would have to travel as the file's own bytes, and deciding what
+/// those bytes mean belongs to the control that reads them, with its own tests.
+/// See styles-and-fields-tasks.md S1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AssStyle {
+    /// The name as the section's own `Format:` line places it, padding trimmed by
+    /// [`crate::ass::trim_field`], which is the same trim a grid column gives a cue's style. The
+    /// two must match or a declared style reads as unknown.
+    pub name: Span,
+}
+
 /// A parsed file: the bytes it came from, and the ordered segments that tile them.
 #[derive(Clone, Debug)]
 pub struct SubtitleDocument {
     format: SubtitleFormat,
     source: SourceText,
     segments: Vec<Segment>,
+    ass_styles: Vec<AssStyle>,
 }
 
 impl SubtitleDocument {
@@ -107,7 +122,22 @@ impl SubtitleDocument {
             format,
             source,
             segments,
+            ass_styles: Vec::new(),
         }
+    }
+
+    /// Attach the styles the ASS parser found. Every other format leaves the list empty, and the
+    /// whole document is re-parsed after every splice, so the list cannot go stale.
+    pub fn with_ass_styles(mut self, styles: Vec<AssStyle>) -> Self {
+        self.ass_styles = styles;
+        self
+    }
+
+    /// The styles this file declares, in the order it declares them. Empty for SRT, for VTT, and
+    /// for an ASS file with no styles section. Duplicated names are listed as often as the file
+    /// spells them. See styles-and-fields-tasks.md S3.
+    pub fn ass_styles(&self) -> &[AssStyle] {
+        &self.ass_styles
     }
 
     pub fn format(&self) -> SubtitleFormat {
