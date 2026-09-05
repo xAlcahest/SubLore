@@ -235,9 +235,9 @@ fn the_good_fixture_loads_and_describes_what_it_contributes() {
     };
     assert_eq!(answer, SUBLORE_OK);
 
-    // A title, two items under it, and one the host is meant to refuse. This sink is not the host
-    // and accepts everything, which is what lets it see the last one at all.
-    assert_eq!(items.len(), 4, "a title and three items: {items:?}");
+    // A title, three items under it, and one the host is meant to refuse. This sink is not the
+    // host and accepts everything, which is what lets it see the last one at all.
+    assert_eq!(items.len(), 5, "a title and four items: {items:?}");
     assert_eq!(items[0].kind, SUBLORE_ITEM_MENU_TITLE);
     assert_eq!(items[0].parent, 0, "the title is top level");
     for under in &items[1..] {
@@ -251,10 +251,16 @@ fn the_good_fixture_loads_and_describes_what_it_contributes() {
         items[2].enable_when,
         sublore_module_api::SUBLORE_ENABLE_DOCUMENT_OPEN
     );
+    // The one that writes its own table needs a project, because there is no database to write
+    // without one.
+    assert_eq!(
+        items[3].enable_when,
+        sublore_module_api::SUBLORE_ENABLE_PROJECT_OPEN
+    );
     // The last is the fixture's own trap, and the zero is what makes it one: §5.2 has no value
     // for it, so a host that draws that item has stopped checking.
     assert_eq!(
-        items[3].enable_when, 0,
+        items[4].enable_when, 0,
         "the refusable item must carry a state with no meaning"
     );
     // The locale went in through `create` and came back out inside a label, which is the only

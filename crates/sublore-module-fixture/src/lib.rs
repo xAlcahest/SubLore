@@ -43,6 +43,17 @@ const ITEM_ID: u32 = 2;
 const REFUSED_ID: u32 = 3;
 /// Proposes against a revision one behind the session's, which the host must refuse (section 9.6).
 const STALE_ID: u32 = 4;
+/// Writes a row into this module's own table, which is the only way to see storage from outside.
+const STORE_ID: u32 = 5;
+
+/// This module's own table, under the prefix the host derives from this file's name (section 4.7).
+///
+/// Every statement below is one statement with no semicolon in it, because `db_run` prepares one
+/// and refuses trailing text.
+const MAKE_TABLE: &str =
+    "CREATE TABLE IF NOT EXISTS m_fixture_notes (id INTEGER PRIMARY KEY, note TEXT NOT NULL)";
+const ADD_NOTE: &str = "INSERT INTO m_fixture_notes (note) VALUES ('kept')";
+const COUNT_NOTES: &str = "SELECT count(*) FROM m_fixture_notes";
 
 /// What the fixture writes into the first cue. Its own words, so a check can tell it apart from
 /// anything the core or the user could have put there.
@@ -168,6 +179,17 @@ unsafe extern "C" fn describe(ctx: *mut c_void, sink: *mut c_void, push: Sublore
             label: SubloreStr::borrowed("Rewrite from a stale revision"),
             icon: SubloreStr::borrowed(""),
         },
+        SubloreItem {
+            id: STORE_ID,
+            kind: SUBLORE_ITEM_MENU_ITEM,
+            parent: TITLE_ID,
+            // A project, because the statements below run on the project's own database and there
+            // is nothing to run them on without one.
+            enable_when: sublore_module_api::SUBLORE_ENABLE_PROJECT_OPEN,
+            flags: 0,
+            label: SubloreStr::borrowed("Store a note"),
+            icon: SubloreStr::borrowed(""),
+        },
         // Last, and deliberately wrong: `enable_when` is left at zero, which is the value section
         // 5.2 says a module that forgot to set it sends. The host must refuse this item rather than
         // draw a control enabled when it should not be, and the check counts what reached the menu.
@@ -260,8 +282,125 @@ unsafe extern "C" fn invoke(
         // One behind it, which is what a module that read the document and then let the user edit
         // would be holding. The host has to refuse it and change nothing.
         STALE_ID => unsafe { rewrite_first_cue(at.revision.wrapping_sub(1)) },
+        STORE_ID => unsafe { store_a_note() },
         // An id this module never contributed.
         _ => SUBLORE_ERR_UNSUPPORTED,
+    }
+}
+
+/// What one row of a counting statement said.
+struct Counted {
+    value: i64,
+    /// Whether a row arrived at all, so a count of zero is told from a walk that pushed nothing.
+    pushed: bool,
+}
+
+/// # Safety
+/// Called by the host with the sink this module handed it and cells valid for the call.
+unsafe extern "C" fn take_count(
+    sink: *mut c_void,
+    cells: *const sublore_module_api::SubloreValue,
+    cell_count: usize,
+) -> i32 {
+    if sink.is_null() || cells.is_null() || cell_count == 0 {
+        return SUBLORE_ERR_BAD_STRING;
+    }
+    let counted = unsafe { &mut *sink.cast::<Counted>() };
+    let first = unsafe { &*cells };
+    if first.kind != sublore_module_api::SUBLORE_VALUE_INT {
+        return SUBLORE_ERR_UNSUPPORTED;
+    }
+    counted.value = first.i;
+    counted.pushed = true;
+    SUBLORE_OK
+}
+
+/// Make this module's own table if it is not there, add one row, and log how many it now holds.
+///
+/// All three inside one transaction, so a run that failed halfway leaves the table as it was and
+/// the count in the log is a count of committed rows.
+///
+/// # Safety
+/// Called only from inside a host call, with the table `load` was given.
+unsafe fn store_a_note() -> i32 {
+    let table = HOST.load(Ordering::Acquire);
+    if table.is_null() {
+        return SUBLORE_ERR_UNSUPPORTED;
+    }
+    let table = unsafe { &*table };
+    // `db_run` is read inside the transaction's body rather than here, because that is where it is
+    // called and a slot read early is a slot that may have been read for nothing.
+    let (Some(transaction), Some(log)) = (table.db_transaction, table.log) else {
+        return SUBLORE_ERR_UNSUPPORTED;
+    };
+
+    let mut counted = Counted {
+        value: 0,
+        pushed: false,
+    };
+    // Safety: the module's own function, and a context that outlives the call it is handed to.
+    let code = unsafe {
+        transaction(
+            table.ctx,
+            (&mut counted as *mut Counted).cast(),
+            Some(write_the_note),
+        )
+    };
+    if code != SUBLORE_OK {
+        return code;
+    }
+    if !counted.pushed {
+        return SUBLORE_ERR_UNSUPPORTED;
+    }
+    // The evidence from outside that the row is in the file: a count that grows across a close and
+    // a reopen is a row that was written and read back.
+    let said = format!("stored a note, and the table now holds {}", counted.value);
+    unsafe { log(table.ctx, SUBLORE_LOG_INFO, SubloreStr::borrowed(&said)) };
+    SUBLORE_OK
+}
+
+/// The body of the transaction above: make, insert, count.
+///
+/// # Safety
+/// Called by the host from inside `db_transaction`, with the context this module gave it.
+unsafe extern "C" fn write_the_note(work_ctx: *mut c_void) -> i32 {
+    if work_ctx.is_null() {
+        return SUBLORE_ERR_BAD_STRING;
+    }
+    let table = HOST.load(Ordering::Acquire);
+    if table.is_null() {
+        return SUBLORE_ERR_UNSUPPORTED;
+    }
+    let table = unsafe { &*table };
+    let Some(run) = table.db_run else {
+        return SUBLORE_ERR_UNSUPPORTED;
+    };
+    for sql in [MAKE_TABLE, ADD_NOTE] {
+        // Safety: one statement, no parameters, and no sink: neither returns a row.
+        let code = unsafe {
+            run(
+                table.ctx,
+                SubloreStr::borrowed(sql),
+                core::ptr::null(),
+                0,
+                core::ptr::null_mut(),
+                None,
+            )
+        };
+        if code != SUBLORE_OK {
+            return code;
+        }
+    }
+    // Safety: the sink is the `Counted` the caller owns for the length of this call.
+    unsafe {
+        run(
+            table.ctx,
+            SubloreStr::borrowed(COUNT_NOTES),
+            core::ptr::null(),
+            0,
+            work_ctx,
+            Some(take_count),
+        )
     }
 }
 

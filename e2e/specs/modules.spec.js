@@ -19,9 +19,15 @@ import { browser, expect } from "@wdio/globals";
 
 import { appLog, dataHome } from "../lib/applog.js";
 import { answerChooser, waitForChooser } from "../lib/chooser.js";
-import { clickAt, focusWindow, pressKey } from "../lib/input.js";
+import { clickAt, focusWindow, pressKey, typeText } from "../lib/input.js";
 import { repoRoot, windowHeight, windowWidth } from "../lib/paths.js";
 import { waitFor } from "../lib/proc.js";
+import {
+  chooseRailItem,
+  closeAnyOpenProject,
+  confirmRailDialog,
+  openProjectMenu,
+} from "../lib/rail.js";
 import { findToplevel } from "../lib/x11.js";
 
 /** What the refused fixture beside the executable is, and what this build speaks. */
@@ -38,6 +44,16 @@ const MODULE_TITLE = "Fixture (en)";
 const MODULE_ITEM = "Rewrite the first line (2 found)";
 /** The item that proposes against a revision the session has moved past (module-abi.md 9.6). */
 const STALE_ITEM = "Rewrite from a stale revision";
+/** The item that writes into the module's own table, which needs a project to write into. */
+const STORE_ITEM = "Store a note";
+/**
+ * What the module says after it stored one, with the number of rows its own table then held.
+ *
+ * The count is the whole evidence. A row that survives the project being closed and opened again is
+ * a row that reached the file, which nothing this check can see from the outside would otherwise
+ * say. See `module-abi.md` §4.7 and criterion 7 of §9.
+ */
+const STORED = /module sublore_module_fixture\.so: stored a note, and the table now holds (\d+)/g;
 /** What the fixture puts in the first cue, in its own words so nothing else could have written it. */
 const WROTE = "The module wrote this line.";
 /** The first cue of the fixture below, before any module touches it. */
@@ -124,6 +140,61 @@ async function runModuleItem(toplevel, label) {
   });
 }
 
+/** Whether the module's storage item is on the menu, and whether it can be run. */
+async function storeItemState(toplevel) {
+  await clickElement(toplevel, ".menubar__title--module-0-1");
+  await waitFor(() => present(".menubar__menu"), {
+    timeout: 15000,
+    message: "the module's own dropdown to open",
+  });
+  const state = await browser.execute((want) => {
+    const item = Array.from(document.querySelectorAll(".menubar__item")).find((each) =>
+      (each.textContent ?? "").includes(want),
+    );
+    return item === undefined
+      ? { drawn: false, enabled: false }
+      : { drawn: true, enabled: !item.disabled };
+  }, STORE_ITEM);
+  pressKey("Escape");
+  await waitFor(async () => ((await present(".menubar__menu")) === false ? true : null), {
+    timeout: 15000,
+    message: "the dropdown to close again",
+  });
+  return state;
+}
+
+/** Create a project in `folder` through the rail, the way a person reaches it. */
+async function makeProjectIn(toplevel, folder) {
+  await openProjectMenu(toplevel);
+  await chooseRailItem(toplevel, "create-project");
+  const chooser = await waitForChooser("Choose a project folder");
+  await answerChooser(chooser, folder, "project folder");
+  focusWindow(toplevel.id);
+  await waitFor(() => present(".rail__project"), {
+    timeout: 20000,
+    message: "the project to reach the rail after it was created",
+  });
+}
+
+/**
+ * Run the module's storage item once and answer the row count it reported.
+ *
+ * Counted from a mark taken before the gesture, so a line left by an earlier run of the same item
+ * cannot stand in for this one.
+ */
+async function storeAndRead(toplevel) {
+  const before = (appLog(dataHome()).match(STORED) ?? []).length;
+  await runModuleItem(toplevel, STORE_ITEM);
+  const said = await waitFor(
+    () => {
+      const all = [...appLog(dataHome()).matchAll(STORED)];
+      return all.length > before ? all[all.length - 1] : null;
+    },
+    { timeout: 20000, message: "the module to say what it stored" },
+  );
+  return Number(said[1]);
+}
+
 describe("modules beside the executable", () => {
   let toplevel = null;
 
@@ -159,10 +230,11 @@ describe("modules beside the executable", () => {
       Array.from(document.querySelectorAll(".menubar__item")).map((item) => item.textContent ?? ""),
     );
     expect(items.some((item) => item.includes(MODULE_ITEM))).toBe(true);
-    // Exactly two. The fixture pushes a third item with a state this build does not know, and
+    expect(items.some((item) => item.includes(STORE_ITEM))).toBe(true);
+    // Exactly three. The fixture pushes a fourth item with a state this build does not know, and
     // section 5.2 says that costs the module its item rather than giving the user a control that
     // is enabled when it should not be.
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
     expect(items.some((item) => item.includes(STALE_ITEM))).toBe(true);
 
     pressKey("Escape");
@@ -267,6 +339,62 @@ describe("modules beside the executable", () => {
     await waitFor(async () => ((await present(".about")) === false ? true : null), {
       timeout: 15000,
       message: "the About panel to close",
+    });
+  });
+
+  it("keeps what the module wrote into its own table across a close and a reopen", async () => {
+    // The item is a project's command, so with nothing open it is drawn and greyed rather than
+    // absent, which is the ruling of 2026-09-03 seen from the module's side.
+    await closeAnyOpenProject(toplevel);
+    expect(await storeItemState(toplevel)).toEqual({ drawn: true, enabled: false });
+
+    const folder = path.join(dataHome(), "module-store");
+    rmSync(folder, { recursive: true, force: true });
+    mkdirSync(folder, { recursive: true });
+    await makeProjectIn(toplevel, folder);
+    expect(await storeItemState(toplevel)).toEqual({ drawn: true, enabled: true });
+
+    // Twice, so the second count says the first row was still there when the second was written.
+    expect(await storeAndRead(toplevel)).toBe(1);
+    expect(await storeAndRead(toplevel)).toBe(2);
+
+    // Closed and opened again, which is what puts the rows through the file rather than through
+    // one connection's memory.
+    await openProjectMenu(toplevel);
+    await chooseRailItem(toplevel, "close-project");
+    await confirmRailDialog(toplevel);
+    await waitFor(() => present(".rail__empty"), {
+      timeout: 20000,
+      message: "the rail to come back empty after the project was closed",
+    });
+    await openProjectMenu(toplevel);
+    await chooseRailItem(toplevel, "open-project");
+    const chooser = await waitForChooser("Choose a project folder");
+    await answerChooser(chooser, folder, "project folder");
+    focusWindow(toplevel.id);
+    await waitFor(() => present(".rail__project"), {
+      timeout: 20000,
+      message: "the project to come back after it was reopened",
+    });
+
+    // Three, not one: the two rows written before the close are in the file.
+    expect(await storeAndRead(toplevel)).toBe(3);
+
+    // And the core still reads its own tables through the same file, which is what the guard is
+    // for: a project a module had written is a project the app still opens.
+    await openProjectMenu(toplevel);
+    await chooseRailItem(toplevel, "add-episode");
+    await browser.execute(() => {
+      const field = document.querySelector(".raildialog__field");
+      if (field !== null) {
+        field.focus();
+      }
+    });
+    typeText("One");
+    await confirmRailDialog(toplevel);
+    await waitFor(() => present(".rail__episode"), {
+      timeout: 20000,
+      message: "the episode to reach the rail of a project a module has written to",
     });
   });
 });
